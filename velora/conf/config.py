@@ -36,8 +36,8 @@ class EnvConfig(BaseSettings):
 
 
 @validate_call(validate_return=True)
-def load_config(filepath: Path | str) -> EnvConfig:
-    """Loads a YAML file as a GymEnvConfig pydantic model."""
+def load_yaml(filepath: Path | str) -> dict:
+    """Loads a YAML file as a dictionary."""
     if not Path(filepath).exists():
         raise FileNotFoundError("File does not exist.")
 
@@ -51,4 +51,11 @@ def load_config(filepath: Path | str) -> EnvConfig:
     with open(filepath, "r") as f:
         yaml_config = yaml.safe_load(f)
 
+    return yaml_config
+
+
+@validate_call(validate_return=True)
+def load_config(filepath: Path | str) -> EnvConfig:
+    """Loads a YAML file as an EnvConfig Pydantic settings model."""
+    yaml_config = load_yaml(filepath)
     return EnvConfig(**yaml_config)
