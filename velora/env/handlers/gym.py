@@ -1,5 +1,7 @@
+from functools import reduce
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
+
 import gymnasium as gym
 from pydantic import PrivateAttr
 
@@ -8,55 +10,57 @@ from velora.enums import RenderMode
 from velora.env.handlers import EnvHandler
 
 
+def wrap_gym_env(env: gym.Env, wrappers: list[gym.Wrapper, Callable]) -> gym.Env:
+    """
+    Wraps one or more [gymnasium.Wrappers](https://gymnasium.farama.org/api/wrappers/table/) around a Gym environment.
+
+    Args:
+        env (gymnasium.Env): The base gymnasium environment to wrap
+        wrappers (list[gym.Wrapper | Callable]): a list of wrapper classes or partially applied wrapper functions (default: None)
+
+    Returns:
+        env (gymnasium.Env): The wrapped environment
+    """
+    if not wrappers:
+        return env
+
+    def apply_wrapper(env: gym.Env, wrapper: list[gym.Wrapper, Callable]) -> gym.Env:
+        return wrapper(env)
+
+    return reduce(apply_wrapper, wrappers, env)
+
+
 class GymEnvHandler(EnvHandler):
-    """A Gym environment handler for working with [Gymnasium](https://gymnasium.farama.org/) environments."""
+    """
+    A Gym environment handler for working with [Gymnasium](https://gymnasium.farama.org/) environments.
+
+    Args:
+        config_filepath (Path | str): the filepath to the YAML config file
+        env (gymnasium.Env | None): a custom gymnasium environment (default: None)
+        wrappers (list[gym.Wrapper | Callable]): a list of wrapper classes or partially applied wrapper functions (default: None)
+    """
 
     config_filepath: Path | str
     env: gym.Env | None = None
-    wrappers: list[gym.Wrapper] = []
+    wrappers: list[gym.Wrapper | Callable] = []
 
     _config = PrivateAttr(None)
-    _wrapper_config = PrivateAttr(None)
 
     @property
     def config(self) -> EnvConfig:
         """The environment config settings."""
         return self._config
 
-    @property
-    def wrapper_config(self) -> GymWrapperSettings:
-        """The environment wrapper config settings."""
-        return self._wrapper_config
-
     def model_post_init(self, __context: Any) -> None:
+        self._config = load_config(self.config_filepath)
         self.env = (
             gym.make(self.config.ENV.NAME, render_mode="rgb_array")
             if self.env is None
             else self.env
         )
-        self.config = load_config(self.config_filepath)
 
         if self.wrappers:
-            self.env = self.__apply_wrappers()
-            self._wrapper_config = load_config(self.config_filepath, as_dict=True)[
-                "wrappers"
-            ]
-
-    def __apply_wrappers(self) -> gym.Env:
-        """Wraps one or more [gymnasium.Wrappers](https://gymnasium.farama.org/api/wrappers/table/) around a Gym environment."""
-        env = self.env
-
-        for wrapper in self.wrappers:
-            name = ""
-            if name in self.wrapper_config.keys():
-                env = wrapper(
-                    env=env,
-                    **self.wrapper_config[name],
-                )
-            else:
-                env = wrapper(env)
-
-        return env
+            self.env = wrap_gym_env(self.env, self.wrappers)
 
     def run_demo(
         self, episodes: int = 10, render_mode: RenderMode | None = RenderMode.HUMAN

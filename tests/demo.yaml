@@ -2,8 +2,3 @@ env:
   name: CartPole-v1
   episodes: 100
   seed: 42
-
-wrappers:
-  clip_reward:
-    min_reward: 1
-    max_reward: 5
