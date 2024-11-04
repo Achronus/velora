@@ -1,5 +1,4 @@
 import pytest
-import os
 from pathlib import Path
 import yaml
 
@@ -8,10 +7,6 @@ from velora.conf.config import EnvConfig, EnvironmentSettings, load_config
 
 
 class TestGymEnvConfig:
-    @pytest.fixture
-    def config_file(self) -> Path:
-        return Path(os.path.dirname(__file__), "demo.yaml")
-
     @pytest.fixture
     def invalid_file(self, tmp_path: Path) -> Path:
         config_file = tmp_path / "config.txt"
