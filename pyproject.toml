@@ -1,0 +1,44 @@
+[tool.poetry]
+name = "velora"
+version = "0.1.0"
+description = "A Reinforcement Learning (RL) framework for experimentation and learning RL concepts."
+authors = ["Ryan Partridge <rpartridge101@gmail.com>"]
+license = "MIT License"
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.12"
+pydantic = "^2.9"
+gymnasium = { extras = ["all"], version = "^1.0.0" }
+wandb = "^0.18.5"
+torch = { version = "^2.5.1", source = "pytorch" }
+torchvision = { version = "^0.20.0", source = "pytorch" }
+pydantic-settings = "^2.6.0"
+pyyaml = "^6.0.2"
+
+
+[tool.poetry.group.docs.dependencies]
+mkdocs = "^1.6.1"
+mkdocs-material = "^9.5.42"
+
+
+[tool.poetry.group.notebook.dependencies]
+notebook = "^7.2.2"
+ipywidgets = "^8.1.5"
+
+
+[tool.poetry.group.testing.dependencies]
+pytest = "^8.3.3"
+pytest-cov = "^6.0.0"
+
+[[tool.poetry.source]]
+name = "pytorch"
+url = "https://download.pytorch.org/whl/cu121"
+priority = "explicit"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.pytest.ini_options]
+addopts = "--cov-report term-missing --cov=velora tests/"

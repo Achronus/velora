@@ -1,0 +1,4 @@
+env:
+  name: CartPole-v1
+  episodes: 100
+  seed: 42
