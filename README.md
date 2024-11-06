@@ -24,7 +24,7 @@ Extra items occassionally used under specific conditions.
 
 ## Framework Analysis
 
-![Framework Design](/assets/imgs/framework_diagram.png)
+![Framework Design](/assets/imgs/framework_diagram.jpeg)
 
 Velora's architecture adopts a robust, modular approach to Reinforcement Learning (RL) experimentation, designed for scalability and flexibility.
 
