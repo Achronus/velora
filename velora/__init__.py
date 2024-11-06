@@ -1,5 +1,5 @@
-from .conf.history import Trajectory, History
-from .conf.config import EnvConfig
+from velora.conf.history import Trajectory, History
+from velora.conf.config import EnvConfig
 
 
 __all__ = [
