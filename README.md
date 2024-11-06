@@ -10,14 +10,30 @@ The frameworks API is designed to be simple and intuitive. It's broken into two 
 
 The primary building blocks you'll use regularly.
 
-- `from velora import [item]`
-- `from velora.env import [item]`
-- `from velora.models import [pytorch_model]`
+- `from velora import [controller]`
+- `from velora.agent import [algorithm], [storage]`
+- `from velora.enums import [enum]`
 
 ### Extras
 
 Extra items occassionally used under specific conditions.
 
-- `from velora.enums import [enum]`
+- `from velora.env import [handler]`
 - `from velora.exc import [error]`
-- `from velora.utils import [util_method]`
+- `from velora.utils import [method]`
+
+## Framework Analysis
+
+![Framework Design](/assets/imgs/framework_diagram.png)
+
+Velora's architecture adopts a robust, modular approach to Reinforcement Learning (RL) experimentation, designed for scalability and flexibility.
+
+At the heart of the framework lies the `Controller` class which serves as the central hub for orchestrating the interactions between components.
+
+The `EnvHandler` serves as an abstraction layer for managing various environment frameworks and handing environment interactions. Currently, it only supports [Gymnasium](https://gymnasium.farama.org/) with other options planned for the future.
+
+The `Agent` class handles the agent's behaviour and learning process, managing the algorithm, policy updates, and experiences. It supports `PyTorch` models, optimizers, and loss functions for different strategies and algorithms.
+
+The `Config` module simplifies hyperparameter tuning and setting implementation by reading from a single `YAML` file. By utilising `Pydantic`, settings are validated and applied automatically.
+
+The `Analytics` module handles experiment tracking and logging, storing key performance metrics throughout the training process. Currently, it only supports [Weights and Biases](https://wandb.ai/) with other options planned for the future.
