@@ -10,9 +10,8 @@ The frameworks API is designed to be simple and intuitive. It's broken into two 
 
 The primary building blocks you'll use regularly.
 
-- `from velora import [controller]`
+- `from velora import [controller], [enum]`
 - `from velora.agent import [algorithm], [storage]`
-- `from velora.enums import [enum]`
 
 ### Extras
 

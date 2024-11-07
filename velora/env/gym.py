@@ -7,7 +7,7 @@ from pydantic import PrivateAttr
 
 from velora.conf.config import EnvConfig, load_config
 from velora.enums import RenderMode
-from velora.env.handlers import EnvHandler
+from velora.env import EnvHandler
 
 
 def wrap_gym_env(env: gym.Env, wrappers: list[gym.Wrapper, Callable]) -> gym.Env:
