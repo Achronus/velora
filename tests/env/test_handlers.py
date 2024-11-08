@@ -5,7 +5,7 @@ import pytest
 import gymnasium as gym
 from gymnasium.wrappers import Autoreset, NormalizeObservation
 
-from velora.conf.config import EnvConfig
+from velora.config import EnvConfig
 from velora.env import GymEnvHandler, wrap_gym_env
 
 

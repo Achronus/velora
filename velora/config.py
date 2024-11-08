@@ -14,6 +14,14 @@ class EnvironmentSettings(BaseModel):
     SEED: int | None = None
 
 
+class AgentSettings(BaseModel):
+    pass
+
+
+class ControllerSettings(BaseModel):
+    pass
+
+
 class EnvConfig(BaseSettings):
     ENV: EnvironmentSettings
 

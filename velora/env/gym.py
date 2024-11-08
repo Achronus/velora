@@ -5,7 +5,7 @@ from typing import Any, Callable
 import gymnasium as gym
 from pydantic import PrivateAttr
 
-from velora.conf.config import EnvConfig, load_config
+from velora.config import EnvConfig, load_config
 from velora.enums import RenderMode
 from velora.env import EnvHandler
 

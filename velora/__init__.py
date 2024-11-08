@@ -1,6 +1,7 @@
-from velora.conf.history import Trajectory, History
-from velora.conf.config import EnvConfig
+from velora.history import Trajectory, History
+from velora.config import EnvConfig
 from velora.enums import RenderMode
+from velora.controller import Controller
 
 
 __all__ = [
@@ -8,4 +9,5 @@ __all__ = [
     "History",
     "EnvConfig",
     "RenderMode",
+    "Controller",
 ]

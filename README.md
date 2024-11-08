@@ -12,12 +12,12 @@ The primary building blocks you'll use regularly.
 
 - `from velora import [controller], [enum]`
 - `from velora.agent import [algorithm], [storage]`
+- `from velora.env import [handler]`
 
 ### Extras
 
 Extra items occassionally used under specific conditions.
 
-- `from velora.env import [handler]`
 - `from velora.exc import [error]`
 - `from velora.utils import [method]`
 

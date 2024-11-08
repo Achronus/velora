@@ -3,7 +3,7 @@ from pathlib import Path
 import yaml
 
 from velora.exc import IncorrectFileTypeError
-from velora.conf.config import EnvConfig, EnvironmentSettings, load_config
+from velora.config import EnvConfig, EnvironmentSettings, load_config
 
 
 class TestGymEnvConfig:

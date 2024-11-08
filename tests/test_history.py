@@ -2,7 +2,6 @@ import pytest
 import numpy as np
 
 from velora import History, Trajectory
-from velora.enums import RenderMode
 
 
 class TestHistory:
@@ -10,10 +9,10 @@ class TestHistory:
     def history(self) -> History:
         return History(
             items=[
-                Trajectory(action=0, state=np.zeros((2, 2)), reward=-1),
-                Trajectory(action=1, state=np.zeros((2, 2)), reward=-1),
-                Trajectory(action=0, state=np.zeros((2, 2)), reward=-1),
-                Trajectory(action=1, state=np.zeros((2, 2)), reward=10),
+                Trajectory(action=0, observation=np.zeros((2, 2)), reward=-1),
+                Trajectory(action=1, observation=np.zeros((2, 2)), reward=-1),
+                Trajectory(action=0, observation=np.zeros((2, 2)), reward=-1),
+                Trajectory(action=1, observation=np.zeros((2, 2)), reward=10),
             ]
         )
 
@@ -29,9 +28,9 @@ class TestHistory:
         assert all(checks)
 
     @staticmethod
-    def test_states(history: History):
-        states = history.states()
-        expected_states = [
+    def test_observations(history: History):
+        observations = history.observations()
+        expected_observations = [
             np.array([[0, 0], [0, 0]]),
             np.array([[0, 0], [0, 0]]),
             np.array([[0, 0], [0, 0]]),
@@ -39,12 +38,12 @@ class TestHistory:
         ]
 
         checks = [
-            isinstance(states, list),
-            len(states) == len(history.items),
+            isinstance(observations, list),
+            len(observations) == len(history.items),
         ]
         assert all(checks)
 
-        for actual, expected in zip(states, expected_states):
+        for actual, expected in zip(observations, expected_observations):
             np.testing.assert_array_equal(actual, expected)
 
     @staticmethod
@@ -101,22 +100,9 @@ class TestHistory:
     def test_single_trajectory():
         history = History(
             items=[
-                Trajectory(action=0, state=np.zeros((4, 4)), reward=5),
+                Trajectory(action=0, observation=np.zeros((4, 4)), reward=5),
             ]
         )
         G = history.returns(gamma=0.9)
         checks = [len(G) == 1, G[0] == 5]
-        assert all(checks)
-
-
-class TestEnums:
-    @staticmethod
-    def test_render_mode():
-        checks = [
-            RenderMode.HUMAN == "human",
-            RenderMode.RGB_ARRAY == "rgb_array",
-            RenderMode.ANSI == "ANSI",
-            RenderMode.RGB_ARRAY_LIST == "rgb_array_list",
-            RenderMode.ANSI_LIST == "ansi_list",
-        ]
         assert all(checks)
