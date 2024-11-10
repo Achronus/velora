@@ -5,7 +5,7 @@ import pytest
 import gymnasium as gym
 from gymnasium.wrappers import Autoreset, NormalizeObservation
 
-from velora.config import EnvConfig
+from velora.config import Config
 from velora.env import GymEnvHandler, wrap_gym_env
 
 
@@ -49,7 +49,7 @@ class TestGymEnvHandler:
         handler = GymEnvHandler(config_filepath=config_file)
 
         checks = [
-            isinstance(handler.config, EnvConfig),
+            isinstance(handler.config, Config),
             isinstance(handler.env, gym.Env),
             handler.env.spec.name == "CartPole",
             handler.wrappers == [],
@@ -64,7 +64,7 @@ class TestGymEnvHandler:
         )
 
         checks = [
-            isinstance(handler.config, EnvConfig),
+            isinstance(handler.config, Config),
             isinstance(handler.env, gym.Env),
             handler.env.spec.name == "MountainCar",
             handler.wrappers == [],
@@ -84,7 +84,7 @@ class TestGymEnvHandler:
         )
 
         checks = [
-            isinstance(handler.config, EnvConfig),
+            isinstance(handler.config, Config),
             isinstance(handler.env, (gym.Env, Autoreset, NormalizeObservation)),
             handler.env.spec.name == "CartPole",
             handler.wrappers == wrappers,

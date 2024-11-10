@@ -1,0 +1,15 @@
+env:
+  name: CartPole-v1
+  episodes: 1000
+  seed: 23
+
+model:
+  hidden_size: 128
+  batch_size: 16
+
+optimizer:
+  lr: 0.01
+
+other:
+  percentile: 70
+  solve_threshold: 195

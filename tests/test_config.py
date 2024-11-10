@@ -3,7 +3,7 @@ from pathlib import Path
 import yaml
 
 from velora.exc import IncorrectFileTypeError
-from velora.config import EnvConfig, EnvironmentSettings, load_config
+from velora.config import Config, EnvironmentSettings, load_config
 
 
 class TestGymEnvConfig:
@@ -19,7 +19,7 @@ class TestGymEnvConfig:
         config = load_config(config_file)
 
         checks = [
-            isinstance(config, EnvConfig),
+            isinstance(config, Config),
             isinstance(config.ENV, EnvironmentSettings),
             config.ENV.NAME == "CartPole-v1",
             config.ENV.EPISODES == 100,

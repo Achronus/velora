@@ -5,7 +5,7 @@ from typing import Any, Callable
 import gymnasium as gym
 from pydantic import PrivateAttr
 
-from velora.config import EnvConfig, load_config
+from velora.config import Config, load_config
 from velora.enums import RenderMode
 from velora.env import EnvHandler
 
@@ -47,7 +47,7 @@ class GymEnvHandler(EnvHandler):
     _config = PrivateAttr(None)
 
     @property
-    def config(self) -> EnvConfig:
+    def config(self) -> Config:
         """The environment config settings."""
         return self._config
 
