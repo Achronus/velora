@@ -1,4 +1,4 @@
-from typing import Iterator
+from typing import Iterator, Self
 import torch
 
 from pydantic import BaseModel, ConfigDict, PrivateAttr
@@ -50,7 +50,7 @@ class History(BaseModel):
         """Returns the rewards for each trajectory."""
         return torch.tensor([t.reward for t in self._items], dtype=torch.long)
 
-    def returns(self, gamma: float = 1) -> torch.FloatTensor:
+    def returns(self, gamma: float = 0.9) -> torch.FloatTensor:
         """
         Computes the discounted return for each trajectory. Starts at last trajectory and iterates backwards through time `t`.
 
@@ -67,7 +67,7 @@ class History(BaseModel):
         G_t = R_{t} + γG_{t+1}
 
         Args:
-            gamma: Discount factor (default: 1.0)
+            gamma: Discount factor (default: 0.9)
 
         Returns:
             G: A list of discounted returns for each trajectory
@@ -113,7 +113,7 @@ class Episodes(BaseModel):
         return torch.tensor([ep.score() for ep in self._eps], dtype=torch.long)
 
     def observations(self) -> torch.Tensor:
-        """Returns a flattened tensor for all observations in the batch."""
+        """Returns a simplifed tensor for all observations in the batch in the shape `(n_steps, obs_size)`."""
         return torch.cat([ep.observations() for ep in self._eps])
 
     def actions(self) -> torch.Tensor:
@@ -126,5 +126,20 @@ class Episodes(BaseModel):
     def __iter__(self) -> Iterator[History]:
         return iter(self._eps)
 
-    def __getitem__(self, index: int) -> History:
-        return self._eps[index]
+    def __getitem__(self, index: int | slice) -> Self:
+        new_eps = Episodes()
+        if isinstance(index, slice):
+            new_eps._eps = self._eps[index]
+        else:
+            new_eps._eps = [self._eps[index]]
+        return new_eps
+
+    def __add__(self, other: Self) -> Self:
+        """Combines two Episodes objects using the + operator."""
+        if not isinstance(other, Episodes):
+            return NotImplemented
+
+        combined = Episodes()
+
+        combined._eps = self._eps + other._eps
+        return combined
