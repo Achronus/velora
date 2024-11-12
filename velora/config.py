@@ -17,6 +17,7 @@ class EnvironmentSettings(BaseModel):
 class NetworkSettings(BaseModel):
     hidden_size: int = 256
     batch_size: int = 128
+    gamma: float = 0.9
 
 
 class OtherSettings(BaseModel):
