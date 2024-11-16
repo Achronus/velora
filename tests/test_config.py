@@ -20,10 +20,10 @@ class TestGymEnvConfig:
 
         checks = [
             isinstance(config, Config),
-            isinstance(config.ENV, EnvironmentSettings),
-            config.ENV.NAME == "CartPole-v1",
-            config.ENV.EPISODES == 100,
-            config.ENV.SEED == 42,
+            isinstance(config.env, EnvironmentSettings),
+            config.env.name == "CartPole-v1",
+            config.env.episodes == 100,
+            config.env.seed == 42,
         ]
         assert all(checks)
 
@@ -31,10 +31,10 @@ class TestGymEnvConfig:
     def test_case_insensitive_loading(tmp_path: Path):
         """Test that keys are converted to uppercase regardless of input case."""
         config_dict = {
-            "ENV": {
+            "env": {
                 "name": "CartPole-v1",
-                "EPISODES": 100,
-                "Seed": 42,
+                "episodes": 100,
+                "seed": 42,
             }
         }
 
@@ -45,9 +45,9 @@ class TestGymEnvConfig:
         config = load_config(config_file)
 
         checks = [
-            config.ENV.NAME == "CartPole-v1",
-            config.ENV.EPISODES == 100,
-            config.ENV.SEED == 42,
+            config.env.name == "CartPole-v1",
+            config.env.episodes == 100,
+            config.env.seed == 42,
         ]
         assert all(checks)
 
@@ -87,7 +87,7 @@ class TestGymEnvConfig:
             yaml.dump(config_dict, f)
 
         config = load_config(config_file)
-        assert config.ENV.SEED is None
+        assert config.env.seed is None
 
     @staticmethod
     def test_extra_fields_ignored(tmp_path: Path):
@@ -108,7 +108,7 @@ class TestGymEnvConfig:
         config = load_config(config_file)
 
         checks = [
-            not hasattr(config.ENV, "extra_field"),
+            not hasattr(config.env, "extra_field"),
             not hasattr(config, "extra_section"),
         ]
         assert all(checks)

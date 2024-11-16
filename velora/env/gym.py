@@ -54,7 +54,7 @@ class GymEnvHandler(EnvHandler):
     def model_post_init(self, __context: Any) -> None:
         self._config = load_config(self.config_filepath)
         self.env = (
-            gym.make(self.config.ENV.NAME, render_mode="rgb_array")
+            gym.make(self.config.env.name, render_mode="rgb_array")
             if self.env is None
             else self.env
         )
@@ -65,7 +65,7 @@ class GymEnvHandler(EnvHandler):
     def run_demo(
         self, episodes: int = 10, render_mode: RenderMode | None = RenderMode.HUMAN
     ) -> None:
-        env = gym.make(self.config.ENV.NAME, render_mode=render_mode)
+        env = gym.make(self.config.env.name, render_mode=render_mode)
         self.__training_loop(env, episodes)
 
     def __training_loop(
