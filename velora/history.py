@@ -34,10 +34,6 @@ class History(BaseModel):
         """Adds multiple steps after the latest one."""
         self._items.extend(steps)
 
-    def empty(self) -> None:
-        """Empties the trajectories from the history."""
-        self._items.clear()
-
     def actions(self) -> torch.LongTensor:
         """Returns the actions for each trajectory."""
         return torch.tensor([t.action for t in self._items], dtype=torch.long)
@@ -137,7 +133,7 @@ class Episodes(BaseModel):
     def __add__(self, other: Self) -> Self:
         """Combines two Episodes objects using the + operator."""
         if not isinstance(other, Episodes):
-            return NotImplemented
+            raise NotImplementedError(f"Cannot add '{type(other)}' with 'Episodes()'!")
 
         combined = Episodes()
 

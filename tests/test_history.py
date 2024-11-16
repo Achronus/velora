@@ -1,7 +1,7 @@
 import pytest
 import torch
 
-from velora import History, Trajectory
+from velora import History, Trajectory, Episodes
 
 
 class TestHistory:
@@ -17,6 +17,35 @@ class TestHistory:
             ]
         )
         return h
+
+    @staticmethod
+    def test_add(history: History):
+        history.add(
+            Trajectory(
+                action=0,
+                observation=torch.tensor((2, 2)),
+                reward=-1,
+            )
+        )
+        assert len(history) == 5
+
+    @staticmethod
+    def test_extend(history: History):
+        history.extend(
+            [
+                Trajectory(
+                    action=0,
+                    observation=torch.tensor((2, 2)),
+                    reward=-1,
+                ),
+                Trajectory(
+                    action=0,
+                    observation=torch.tensor((2, 2)),
+                    reward=-1,
+                ),
+            ]
+        )
+        assert len(history) == 6
 
     @staticmethod
     def test_actions(history: History):
@@ -87,6 +116,23 @@ class TestHistory:
         torch.testing.assert_close(G, expected)
 
     @staticmethod
+    def test_score(history: History):
+        assert history.score() == 7
+
+    @staticmethod
+    def test_length(history: History):
+        assert len(history) == 4
+
+    @staticmethod
+    def test_iter(history: History):
+        items = list(history)
+        assert len(items) == 4
+
+    @staticmethod
+    def test_indexing(history: History):
+        assert history[1] == history._items[1]
+
+    @staticmethod
     def test_empty_history():
         history = History(_items=[])
         G = history.returns(gamma=0.9)
@@ -106,3 +152,89 @@ class TestHistory:
         G = history.returns(gamma=0.9)
         checks = [len(G) == 1, G[0] == 5]
         assert all(checks)
+
+
+class TestEpisodes:
+    @pytest.fixture
+    def episodes(self) -> Episodes:
+        h1 = History()
+        h1.extend(
+            [
+                Trajectory(action=0, observation=torch.tensor((2, 2)), reward=-1),
+                Trajectory(action=1, observation=torch.tensor((2, 2)), reward=-1),
+                Trajectory(action=0, observation=torch.tensor((2, 2)), reward=-1),
+                Trajectory(action=1, observation=torch.tensor((2, 2)), reward=10),
+            ]
+        )
+
+        h2 = History()
+        h2.extend(
+            [
+                Trajectory(action=0, observation=torch.tensor((2, 2)), reward=-1),
+                Trajectory(action=1, observation=torch.tensor((2, 2)), reward=10),
+            ]
+        )
+
+        e = Episodes()
+        e.add(h1)
+        e.add(h2)
+        return e
+
+    @staticmethod
+    def test_add(episodes: Episodes):
+        episodes.add(
+            [
+                Trajectory(action=0, observation=torch.tensor((2, 2)), reward=-1),
+                Trajectory(action=1, observation=torch.tensor((2, 2)), reward=10),
+            ]
+        )
+        assert len(episodes) == 3
+
+    @staticmethod
+    def test_scores(episodes: Episodes):
+        result = episodes.scores()
+        assert result.eq(torch.LongTensor([7, 9])).all()
+
+    @staticmethod
+    def test_observations(episodes: Episodes):
+        observations = episodes.observations()
+        expected_shape = (6, 2)
+        assert observations.shape == expected_shape
+
+    @staticmethod
+    def test_actions(episodes: Episodes):
+        actions = episodes.actions()
+        expected = torch.tensor([0, 1, 0, 1, 0, 1])
+        assert torch.equal(actions, expected)
+
+    @staticmethod
+    def test_length(episodes: Episodes):
+        assert len(episodes) == 2
+
+    @staticmethod
+    def test_iter(episodes: Episodes):
+        items = list(episodes)
+        assert len(items) == 2
+
+    @staticmethod
+    def test_indexing(episodes: Episodes):
+        expected = Episodes()
+        expected.add(episodes._eps[-1])
+        assert episodes[-1] == expected
+
+    @staticmethod
+    def test_slicing(episodes: Episodes):
+        expected = Episodes()
+        expected.add(episodes._eps[0])
+        expected.add(episodes._eps[1])
+        assert episodes[:2] == expected
+
+    @staticmethod
+    def test_add_objects_success(episodes: Episodes):
+        result = episodes + episodes
+        assert len(result) == 4
+
+    @staticmethod
+    def test_add_objects_fail(episodes: Episodes):
+        with pytest.raises(NotImplementedError):
+            episodes + History()
