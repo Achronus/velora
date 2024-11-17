@@ -59,7 +59,7 @@ class TestV:
         state = 2
         value = 0.5
         v_function.update(state, value)
-        assert v_function.get_value(state) == value
+        assert v_function[state] == value
 
     @staticmethod
     def test_multiple_updates(v_function: V):
@@ -68,7 +68,12 @@ class TestV:
         for state, value in updates.items():
             v_function.update(state, value)
 
-        assert round(v_function.get_value(state), 3) == -0.3
+        assert round(v_function[state], 3) == -0.3
+
+    @staticmethod
+    def test_get_multiple_values(v_function: V):
+        state_values = v_function[:2]
+        assert state_values.equal(torch.tensor((0.0, 0.0)))
 
     @staticmethod
     def test_repr(v_function: V):
@@ -80,7 +85,7 @@ class TestV:
             v_function.update(state=10, value=0.5)
 
         with pytest.raises(IndexError):
-            v_function.get_value(state=10)
+            v_function[10]
 
 
 class TestQ:
@@ -105,7 +110,7 @@ class TestQ:
         state, action = 2, 1
         value = 0.5
         q_function.update(state, action, value)
-        assert q_function.get_value(state, action) == value
+        assert q_function[(state, action)] == value
 
     @staticmethod
     def test_multiple_updates(q_function: Q):
@@ -113,7 +118,7 @@ class TestQ:
         for (state, action), value in updates.items():
             q_function.update(state, action, value)
 
-        assert round(q_function.get_value(state, action), 3) == -0.3
+        assert round(q_function[(state, action)], 3) == -0.3
 
     @staticmethod
     def test_get_state_actions(q_function: Q):
@@ -122,7 +127,7 @@ class TestQ:
         for action, value in enumerate(values):
             q_function.update(state, action, value)
 
-        state_actions = q_function.get_state_actions(state)
+        state_actions = q_function[state]
         assert torch.allclose(state_actions, torch.tensor(values))
 
     @staticmethod
@@ -138,7 +143,7 @@ class TestQ:
             q_function.update(state=0, action=10, value=0.5)
 
         with pytest.raises(IndexError):
-            q_function.get_value(state=10, action=0)
+            q_function[(10, 0)]
 
         with pytest.raises(IndexError):
-            q_function.get_value(state=0, action=10)
+            q_function[(0, 10)]

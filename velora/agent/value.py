@@ -25,8 +25,7 @@ class ValueFunction(ABC, BaseModel):
         pass  # pragma: no cover
 
     @abstractmethod
-    def get_value(self) -> float:
-        """Retrieve a value."""
+    def __getitem__(self) -> float | torch.Tensor:
         pass  # pragma: no cover
 
     @abstractmethod
@@ -60,9 +59,11 @@ class V(ValueFunction):
         """Update the state-value for a state."""
         self._values[state] = value
 
-    def get_value(self, state: int) -> float:
-        """Retrieve the state-value for a state."""
-        return self._values[state].item()
+    def __getitem__(self, index: int | slice) -> float | torch.Tensor:
+        if isinstance(index, slice):
+            return self._values[index]
+
+        return self._values[index].item()
 
     def __repr__(self) -> str:
         return f"V(s={self.num_states}, values={self._values})"
@@ -92,13 +93,11 @@ class Q(ValueFunction):
         """Update the action-value for a state-action pair."""
         self._values[state, action] = value
 
-    def get_value(self, state: int, action: int) -> float:
-        """Retrieve the action-value for a state-action pair."""
-        return self._values[state, action].item()
+    def __getitem__(self, index: tuple[int, int] | int | slice) -> float | torch.Tensor:
+        if isinstance(index, (slice, int)):
+            return self._values[index]
 
-    def get_state_actions(self, state: int) -> torch.Tensor:
-        """Retrieve all action-values for a state."""
-        return self._values[state]
+        return self._values[index].item()
 
     def __repr__(self) -> str:
         return f"Q(s={self.num_states}, a={self.num_actions}, values={self._values})"
