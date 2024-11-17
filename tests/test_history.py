@@ -100,7 +100,7 @@ class TestHistory:
             ]
         )
 
-        assert len(G) == len(history._items)
+        assert len(G) == len(history._steps)
         torch.testing.assert_close(G, expected)
 
     @staticmethod
@@ -130,11 +130,11 @@ class TestHistory:
 
     @staticmethod
     def test_indexing(history: History):
-        assert history[1] == history._items[1]
+        assert history[1] == history._steps[1]
 
     @staticmethod
     def test_empty_history():
-        history = History(_items=[])
+        history = History(_steps=[])
         G = history.returns(gamma=0.9)
         assert len(G) == 0
 
@@ -152,6 +152,10 @@ class TestHistory:
         G = history.returns(gamma=0.9)
         checks = [len(G) == 1, G[0] == 5]
         assert all(checks)
+
+    @staticmethod
+    def test_repr(history: History):
+        assert repr(history).startswith("History(steps=[")
 
 
 class TestEpisodes:
@@ -238,3 +242,7 @@ class TestEpisodes:
     def test_add_objects_fail(episodes: Episodes):
         with pytest.raises(NotImplementedError):
             episodes + History()
+
+    @staticmethod
+    def test_repr(episodes: Episodes):
+        assert repr(episodes).startswith("Episodes(eps=[")

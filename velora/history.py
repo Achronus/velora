@@ -24,27 +24,27 @@ class Trajectory(BaseModel):
 class History(BaseModel):
     """A finite sequence of agent trajectories (steps) through the environment."""
 
-    _items: list[Trajectory] = PrivateAttr([])
+    _steps: list[Trajectory] = PrivateAttr([])
 
     def add(self, step: Trajectory) -> None:
         """Adds an environment step to the history."""
-        self._items.append(step)
+        self._steps.append(step)
 
     def extend(self, steps: list[Trajectory]) -> None:
         """Adds multiple steps after the latest one."""
-        self._items.extend(steps)
+        self._steps.extend(steps)
 
     def actions(self) -> torch.LongTensor:
         """Returns the actions for each trajectory."""
-        return torch.tensor([t.action for t in self._items], dtype=torch.long)
+        return torch.tensor([t.action for t in self._steps], dtype=torch.long)
 
     def observations(self) -> torch.Tensor:
         """Returns the observations for each trajectory."""
-        return torch.stack([t.observation for t in self._items])
+        return torch.stack([t.observation for t in self._steps])
 
     def rewards(self) -> torch.LongTensor:
         """Returns the rewards for each trajectory."""
-        return torch.tensor([t.reward for t in self._items], dtype=torch.long)
+        return torch.tensor([t.reward for t in self._steps], dtype=torch.long)
 
     def returns(self, gamma: float = 0.9) -> torch.FloatTensor:
         """
@@ -68,16 +68,16 @@ class History(BaseModel):
         Returns:
             G: A list of discounted returns for each trajectory
         """
-        if len(self._items) == 0:
+        if len(self._steps) == 0:
             return []
 
-        n = len(self._items)
+        n = len(self._steps)
         G = [0.0] * n
 
-        G[n - 1] = self._items[n - 1].reward
+        G[n - 1] = self._steps[n - 1].reward
 
         for t in range(n - 2, -1, -1):
-            G[t] = self._items[t].reward + gamma * G[t + 1]
+            G[t] = self._steps[t].reward + gamma * G[t + 1]
 
         return torch.tensor(G)
 
@@ -86,13 +86,16 @@ class History(BaseModel):
         return self.rewards().sum().item()
 
     def __len__(self) -> int:
-        return len(self._items)
+        return len(self._steps)
 
     def __iter__(self) -> Iterator[Trajectory]:
-        return iter(self._items)
+        return iter(self._steps)
 
     def __getitem__(self, index: int) -> Trajectory:
-        return self._items[index]
+        return self._steps[index]
+
+    def __repr__(self) -> str:
+        return f"History(steps={self._steps})"
 
 
 class Episodes(BaseModel):
@@ -139,3 +142,6 @@ class Episodes(BaseModel):
 
         combined._eps = self._eps + other._eps
         return combined
+
+    def __repr__(self) -> str:
+        return f"Episodes(eps={self._eps})"
