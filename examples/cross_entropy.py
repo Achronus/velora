@@ -4,7 +4,7 @@ import gymnasium as gym
 import numpy as np
 from pydantic import BaseModel
 
-from velora import History, Trajectory, Episodes
+from velora import Rollouts, EnvStep, Episodes
 
 import torch
 import torch.nn as nn
@@ -47,7 +47,7 @@ def iterate_batches(
     env: gym.Env, net: nn.Module, batch_size: int
 ) -> Generator[Episodes, None, None]:
     batch = Episodes()
-    episode = History()
+    episode = Rollouts()
     obs, _ = env.reset()
 
     while True:
@@ -58,7 +58,7 @@ def iterate_batches(
         next_obs, reward, terminated, truncated, _ = env.step(action)
 
         episode.add(
-            Trajectory(
+            EnvStep(
                 action=action,
                 observation=obs,
                 reward=float(reward),
@@ -67,7 +67,7 @@ def iterate_batches(
 
         if terminated or truncated:
             batch.add(episode)
-            episode = History()
+            episode = Rollouts()
             next_obs, _ = env.reset()
 
             if len(batch) == batch_size:

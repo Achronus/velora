@@ -1,27 +1,27 @@
 import pytest
 import torch
 
-from velora import History, Trajectory, Episodes
+from velora.agent.storage import Rollouts, EnvStep, Episodes
 
 
-class TestHistory:
+class TestRollouts:
     @pytest.fixture
-    def history(self) -> History:
-        h = History()
+    def history(self) -> Rollouts:
+        h = Rollouts()
         h.extend(
             [
-                Trajectory(action=0, observation=torch.tensor((2, 2)), reward=-1),
-                Trajectory(action=1, observation=torch.tensor((2, 2)), reward=-1),
-                Trajectory(action=0, observation=torch.tensor((2, 2)), reward=-1),
-                Trajectory(action=1, observation=torch.tensor((2, 2)), reward=10),
+                EnvStep(action=0, observation=torch.tensor((2, 2)), reward=-1),
+                EnvStep(action=1, observation=torch.tensor((2, 2)), reward=-1),
+                EnvStep(action=0, observation=torch.tensor((2, 2)), reward=-1),
+                EnvStep(action=1, observation=torch.tensor((2, 2)), reward=10),
             ]
         )
         return h
 
     @staticmethod
-    def test_add(history: History):
+    def test_add(history: Rollouts):
         history.add(
-            Trajectory(
+            EnvStep(
                 action=0,
                 observation=torch.tensor((2, 2)),
                 reward=-1,
@@ -30,15 +30,15 @@ class TestHistory:
         assert len(history) == 5
 
     @staticmethod
-    def test_extend(history: History):
+    def test_extend(history: Rollouts):
         history.extend(
             [
-                Trajectory(
+                EnvStep(
                     action=0,
                     observation=torch.tensor((2, 2)),
                     reward=-1,
                 ),
-                Trajectory(
+                EnvStep(
                     action=0,
                     observation=torch.tensor((2, 2)),
                     reward=-1,
@@ -48,7 +48,7 @@ class TestHistory:
         assert len(history) == 6
 
     @staticmethod
-    def test_actions(history: History):
+    def test_actions(history: Rollouts):
         actions = history.actions()
         expected = torch.LongTensor([0, 1, 0, 1])
 
@@ -59,7 +59,7 @@ class TestHistory:
         assert all(checks), (actions, expected)
 
     @staticmethod
-    def test_observations(history: History):
+    def test_observations(history: Rollouts):
         observations = history.observations()
         expected_observations = torch.tensor([[0, 0], [0, 0], [0, 0], [0, 0]])
 
@@ -70,7 +70,7 @@ class TestHistory:
         assert all(checks), (observations.shape, expected_observations.shape)
 
     @staticmethod
-    def test_rewards(history: History):
+    def test_rewards(history: Rollouts):
         rewards = history.rewards()
         expected = torch.LongTensor([-1, -1, -1, 10])
 
@@ -81,7 +81,7 @@ class TestHistory:
         assert all(checks)
 
     @staticmethod
-    def test_returns(history: History):
+    def test_returns(history: Rollouts):
         """
         Test the returns calculation with γ=0.9.
         For rewards [-1, -1, -1, 10]:
@@ -104,46 +104,46 @@ class TestHistory:
         torch.testing.assert_close(G, expected)
 
     @staticmethod
-    def test_returns_no_discount(history: History):
+    def test_returns_no_discount(history: Rollouts):
         G = history.returns(gamma=1.0)
         expected = torch.FloatTensor([7, 8, 9, 10])  # Sum of all future rewards
         torch.testing.assert_close(G, expected)
 
     @staticmethod
-    def test_returns_zero_discount(history: History):
+    def test_returns_zero_discount(history: Rollouts):
         G = history.returns(gamma=0.0)
         expected = torch.FloatTensor([-1, -1, -1, 10])  # Just immediate rewards
         torch.testing.assert_close(G, expected)
 
     @staticmethod
-    def test_score(history: History):
+    def test_score(history: Rollouts):
         assert history.score() == 7
 
     @staticmethod
-    def test_length(history: History):
+    def test_length(history: Rollouts):
         assert len(history) == 4
 
     @staticmethod
-    def test_iter(history: History):
+    def test_iter(history: Rollouts):
         items = list(history)
         assert len(items) == 4
 
     @staticmethod
-    def test_indexing(history: History):
+    def test_indexing(history: Rollouts):
         assert history[1] == history._steps[1]
 
     @staticmethod
     def test_empty_history():
-        history = History(_steps=[])
+        history = Rollouts(_steps=[])
         G = history.returns(gamma=0.9)
         assert len(G) == 0
 
     @staticmethod
     def test_single_trajectory():
-        history = History()
+        history = Rollouts()
 
         history.add(
-            Trajectory(
+            EnvStep(
                 action=0,
                 observation=torch.tensor((4, 4)),
                 reward=5,
@@ -154,28 +154,28 @@ class TestHistory:
         assert all(checks)
 
     @staticmethod
-    def test_repr(history: History):
-        assert repr(history).startswith("History(steps=[")
+    def test_repr(history: Rollouts):
+        assert repr(history).startswith("Rollouts(steps=[")
 
 
 class TestEpisodes:
     @pytest.fixture
     def episodes(self) -> Episodes:
-        h1 = History()
+        h1 = Rollouts()
         h1.extend(
             [
-                Trajectory(action=0, observation=torch.tensor((2, 2)), reward=-1),
-                Trajectory(action=1, observation=torch.tensor((2, 2)), reward=-1),
-                Trajectory(action=0, observation=torch.tensor((2, 2)), reward=-1),
-                Trajectory(action=1, observation=torch.tensor((2, 2)), reward=10),
+                EnvStep(action=0, observation=torch.tensor((2, 2)), reward=-1),
+                EnvStep(action=1, observation=torch.tensor((2, 2)), reward=-1),
+                EnvStep(action=0, observation=torch.tensor((2, 2)), reward=-1),
+                EnvStep(action=1, observation=torch.tensor((2, 2)), reward=10),
             ]
         )
 
-        h2 = History()
+        h2 = Rollouts()
         h2.extend(
             [
-                Trajectory(action=0, observation=torch.tensor((2, 2)), reward=-1),
-                Trajectory(action=1, observation=torch.tensor((2, 2)), reward=10),
+                EnvStep(action=0, observation=torch.tensor((2, 2)), reward=-1),
+                EnvStep(action=1, observation=torch.tensor((2, 2)), reward=10),
             ]
         )
 
@@ -188,8 +188,8 @@ class TestEpisodes:
     def test_add(episodes: Episodes):
         episodes.add(
             [
-                Trajectory(action=0, observation=torch.tensor((2, 2)), reward=-1),
-                Trajectory(action=1, observation=torch.tensor((2, 2)), reward=10),
+                EnvStep(action=0, observation=torch.tensor((2, 2)), reward=-1),
+                EnvStep(action=1, observation=torch.tensor((2, 2)), reward=10),
             ]
         )
         assert len(episodes) == 3
@@ -241,7 +241,7 @@ class TestEpisodes:
     @staticmethod
     def test_add_objects_fail(episodes: Episodes):
         with pytest.raises(NotImplementedError):
-            episodes + History()
+            episodes + Rollouts()
 
     @staticmethod
     def test_repr(episodes: Episodes):

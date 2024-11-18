@@ -1,7 +1,7 @@
 import torch.nn as nn
 from torch.optim import Optimizer
 
-from velora.agent.storage import Storage, ReplayBuffer, Rollouts
+from velora.agent.storage import Storage, ReplayBuffer, EnvStep, Rollouts, Episodes
 from velora.agent.value import V, Q
 
 from pydantic import BaseModel, ConfigDict
@@ -11,6 +11,8 @@ __all__ = [
     "Storage",
     "ReplayBuffer",
     "Rollouts",
+    "EnvStep",
+    "Episodes",
     "V",
     "Q",
 ]
