@@ -31,12 +31,12 @@ class EnvStep(BaseModel):
 
     Args:
         action (int): the action index
-        observation (torch.Tensor): the current state of the environment
+        obs (torch.Tensor): the current state of the environment
         reward (float): the reward obtained
     """
 
     action: int
-    observation: torch.Tensor
+    obs: torch.Tensor
     reward: float
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -61,7 +61,7 @@ class Rollouts(Storage):
 
     def observations(self) -> torch.Tensor:
         """Returns the observations for each trajectory."""
-        return torch.stack([t.observation for t in self._steps])
+        return torch.stack([t.obs for t in self._steps])
 
     def rewards(self) -> torch.LongTensor:
         """Returns the rewards for each trajectory."""

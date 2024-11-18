@@ -10,10 +10,10 @@ class TestRollouts:
         h = Rollouts()
         h.extend(
             [
-                EnvStep(action=0, observation=torch.tensor((2, 2)), reward=-1),
-                EnvStep(action=1, observation=torch.tensor((2, 2)), reward=-1),
-                EnvStep(action=0, observation=torch.tensor((2, 2)), reward=-1),
-                EnvStep(action=1, observation=torch.tensor((2, 2)), reward=10),
+                EnvStep(action=0, obs=torch.tensor((2, 2)), reward=-1),
+                EnvStep(action=1, obs=torch.tensor((2, 2)), reward=-1),
+                EnvStep(action=0, obs=torch.tensor((2, 2)), reward=-1),
+                EnvStep(action=1, obs=torch.tensor((2, 2)), reward=10),
             ]
         )
         return h
@@ -23,7 +23,7 @@ class TestRollouts:
         history.add(
             EnvStep(
                 action=0,
-                observation=torch.tensor((2, 2)),
+                obs=torch.tensor((2, 2)),
                 reward=-1,
             )
         )
@@ -35,12 +35,12 @@ class TestRollouts:
             [
                 EnvStep(
                     action=0,
-                    observation=torch.tensor((2, 2)),
+                    obs=torch.tensor((2, 2)),
                     reward=-1,
                 ),
                 EnvStep(
                     action=0,
-                    observation=torch.tensor((2, 2)),
+                    obs=torch.tensor((2, 2)),
                     reward=-1,
                 ),
             ]
@@ -145,7 +145,7 @@ class TestRollouts:
         history.add(
             EnvStep(
                 action=0,
-                observation=torch.tensor((4, 4)),
+                obs=torch.tensor((4, 4)),
                 reward=5,
             ),
         )
@@ -164,18 +164,18 @@ class TestEpisodes:
         h1 = Rollouts()
         h1.extend(
             [
-                EnvStep(action=0, observation=torch.tensor((2, 2)), reward=-1),
-                EnvStep(action=1, observation=torch.tensor((2, 2)), reward=-1),
-                EnvStep(action=0, observation=torch.tensor((2, 2)), reward=-1),
-                EnvStep(action=1, observation=torch.tensor((2, 2)), reward=10),
+                EnvStep(action=0, obs=torch.tensor((2, 2)), reward=-1),
+                EnvStep(action=1, obs=torch.tensor((2, 2)), reward=-1),
+                EnvStep(action=0, obs=torch.tensor((2, 2)), reward=-1),
+                EnvStep(action=1, obs=torch.tensor((2, 2)), reward=10),
             ]
         )
 
         h2 = Rollouts()
         h2.extend(
             [
-                EnvStep(action=0, observation=torch.tensor((2, 2)), reward=-1),
-                EnvStep(action=1, observation=torch.tensor((2, 2)), reward=10),
+                EnvStep(action=0, obs=torch.tensor((2, 2)), reward=-1),
+                EnvStep(action=1, obs=torch.tensor((2, 2)), reward=10),
             ]
         )
 
@@ -188,8 +188,8 @@ class TestEpisodes:
     def test_add(episodes: Episodes):
         episodes.add(
             [
-                EnvStep(action=0, observation=torch.tensor((2, 2)), reward=-1),
-                EnvStep(action=1, observation=torch.tensor((2, 2)), reward=10),
+                EnvStep(action=0, obs=torch.tensor((2, 2)), reward=-1),
+                EnvStep(action=1, obs=torch.tensor((2, 2)), reward=10),
             ]
         )
         assert len(episodes) == 3
