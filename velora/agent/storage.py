@@ -41,6 +41,12 @@ class EnvStep(BaseModel):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
+    def __repr__(self) -> str:
+        return f"EnvStep(action={self.action}, obs={self.obs}, reward={self.reward})"
+
+    def __str__(self) -> str:
+        return f"({self.action}, {self.obs}, {self.reward})"
+
 
 class Rollouts(Storage):
     """A finite sequence of agent trajectories (steps) through the environment."""
@@ -118,6 +124,9 @@ class Rollouts(Storage):
     def __repr__(self) -> str:
         return f"Rollouts(steps={self._steps})"
 
+    def __str__(self) -> str:
+        return f"[{", ".join([str(step) for step in self._steps])}]"
+
 
 class Episodes(Storage):
     """A batch of episodes performed by the agent."""
@@ -166,6 +175,9 @@ class Episodes(Storage):
 
     def __repr__(self) -> str:
         return f"Episodes(eps={self._eps})"
+
+    def __str__(self) -> str:
+        return f"[{",\n ".join([str(step) for step in self._eps])}]"
 
 
 class ReplayBuffer(Storage):
