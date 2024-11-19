@@ -3,6 +3,7 @@ from torch.optim import Optimizer
 
 from velora.agent.storage import Storage, ReplayBuffer, EnvStep, Rollouts, Episodes
 from velora.agent.value import V, Q
+from velora.agent.policy import Policy, EpsilonPolicy
 
 from pydantic import BaseModel, ConfigDict
 
@@ -15,6 +16,8 @@ __all__ = [
     "Episodes",
     "V",
     "Q",
+    "Policy",
+    "EpsilonPolicy",
 ]
 
 
