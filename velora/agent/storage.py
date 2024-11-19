@@ -149,19 +149,23 @@ class Episodes(Storage):
         """Returns a flattened tensor for all actions in the batch."""
         return torch.cat([ep.actions() for ep in self._eps])
 
+    def to_list(self) -> list[Rollouts]:
+        """Returns the Episodes as a list of Rollouts."""
+        return self._eps
+
     def __len__(self) -> int:
         return len(self._eps)
 
     def __iter__(self) -> Iterator[Rollouts]:
         return iter(self._eps)
 
-    def __getitem__(self, index: int | slice) -> Self:
-        new_eps = Episodes()
+    def __getitem__(self, index: int | slice) -> Self | Rollouts:
         if isinstance(index, slice):
+            new_eps = Episodes()
             new_eps._eps = self._eps[index]
-        else:
-            new_eps._eps = [self._eps[index]]
-        return new_eps
+            return new_eps
+
+        return self._eps[index]
 
     def __add__(self, other: Self) -> Self:
         """Combines two Episodes objects using the + operator."""

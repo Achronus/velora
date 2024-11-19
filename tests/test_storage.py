@@ -4,6 +4,24 @@ import torch
 from velora.agent.storage import Rollouts, EnvStep, Episodes
 
 
+class TestEnvStep:
+    @pytest.fixture
+    def step(self) -> EnvStep:
+        return EnvStep(
+            action=0,
+            obs=torch.tensor((1, 1)),
+            reward=-1,
+        )
+
+    @staticmethod
+    def test_str(step: EnvStep):
+        assert str(step) == "(0, tensor([1, 1]), -1.0)"
+
+    @staticmethod
+    def test_repr(step: EnvStep):
+        assert repr(step) == "EnvStep(action=0, obs=tensor([1, 1]), reward=-1.0)"
+
+
 class TestRollouts:
     @pytest.fixture
     def history(self) -> Rollouts:
@@ -157,6 +175,10 @@ class TestRollouts:
     def test_repr(history: Rollouts):
         assert repr(history).startswith("Rollouts(steps=[")
 
+    @staticmethod
+    def test_str(history: Rollouts):
+        assert str(history).startswith("[(0, tensor([2, 2]), -1.0), ")
+
 
 class TestEpisodes:
     @pytest.fixture
@@ -222,9 +244,7 @@ class TestEpisodes:
 
     @staticmethod
     def test_indexing(episodes: Episodes):
-        expected = Episodes()
-        expected.add(episodes._eps[-1])
-        assert episodes[-1] == expected
+        assert episodes[-1] == episodes._eps[-1]
 
     @staticmethod
     def test_slicing(episodes: Episodes):
@@ -246,3 +266,16 @@ class TestEpisodes:
     @staticmethod
     def test_repr(episodes: Episodes):
         assert repr(episodes).startswith("Episodes(eps=[")
+
+    @staticmethod
+    def test_str(episodes: Episodes):
+        assert str(episodes).startswith("[[(0, tensor([2, 2]), -1.0), ")
+
+    @staticmethod
+    def test_to_list(episodes: Episodes):
+        result = episodes.to_list()
+        checks = [
+            isinstance(result, list),
+            all([isinstance(item, Rollouts) for item in result]),
+        ]
+        assert all(checks)
