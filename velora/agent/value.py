@@ -39,7 +39,7 @@ class ValueFunction(ABC, BaseModel):
 
 class V(ValueFunction):
     """
-    A state-value function `V(s)`.
+    A state-value function `V(s)`. Stores all values as a torch.Tensor, acting like a lookup table.
 
     Args:
         num_states (int): The number of possible states
@@ -71,7 +71,7 @@ class V(ValueFunction):
 
 class Q(ValueFunction):
     """
-    An action-value function `Q(s, a)`.
+    An action-value function `Q(s, a)`. Stores all values as a torch.Tensor, acting like a lookup table.
 
     Args:
         num_states (int): The number of possible states
