@@ -85,7 +85,7 @@ class Rollouts(Storage):
 
     def returns(self, gamma: float = 0.9) -> torch.FloatTensor:
         """
-        Computes the discounted return for each trajectory. Starts at last trajectory and iterates backwards through time `t`.
+        Computes the discounted return for each trajectory.
 
         The return G_t at each timestep is calculated as:
         G_t = R_{t+1} + γR_{t+2} + γ²R_{t+3} + ... = Σ_{k=0}^∞ γᵏR_{t+k+1}
@@ -103,20 +103,29 @@ class Rollouts(Storage):
             gamma: Discount factor (default: 0.9)
 
         Returns:
-            G: A list of discounted returns for each trajectory
+            G (torch.FloatTensor): A tensor of discounted returns for each trajectory
         """
         if len(self._steps) == 0:
-            return []
+            return torch.tensor([])
 
-        n = len(self._steps)
-        G = torch.zeros(n)
+        if gamma == 0:
+            return self.rewards()
 
-        G[n - 1] = self._steps[n - 1].reward
+        rewards = self.rewards()
+        n_rewards = len(rewards)
+        m_shape = (n_rewards, n_rewards)
 
-        for t in range(n - 2, -1, -1):
-            G[t] = self._steps[t].reward + gamma * G[t + 1]
+        mask = torch.triu(torch.ones(m_shape, device=self.device))
+        r_matrix = rewards.expand(m_shape)
+        idx_row = torch.arange(n_rewards, device=self.device)
 
-        return G
+        # Create diagonal discount matrix
+        d_matrix = idx_row.expand(m_shape)
+        d_matrix = d_matrix - idx_row.unsqueeze(1)
+        d_matrix = gamma ** torch.clamp(d_matrix, min=0)
+
+        # Sum each row
+        return (mask * r_matrix * d_matrix).sum(dim=1).to(self.device)
 
     def score(self) -> int:
         """Calculates the total score of the rollouts."""
