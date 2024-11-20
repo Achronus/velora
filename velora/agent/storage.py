@@ -47,9 +47,19 @@ class EnvStep(BaseModel):
     def __str__(self) -> str:
         return f"({self.action}, {self.obs}, {self.reward})"
 
+    def action_tensor(self) -> torch.LongTensor:
+        """Returns the action as a torch tensor."""
+        return torch.tensor(self.action, dtype=torch.long)
+
+    def reward_tensor(self) -> torch.FloatTensor:
+        """Returns the reward as a torch tensor."""
+        return torch.tensor(self.reward, dtype=torch.float)
+
 
 class Rollouts(Storage):
     """A finite sequence of agent trajectories (steps) through the environment."""
+
+    device: str = "cpu"
 
     _steps: list[EnvStep] = PrivateAttr([])
 
@@ -63,15 +73,15 @@ class Rollouts(Storage):
 
     def actions(self) -> torch.LongTensor:
         """Returns the actions for each trajectory."""
-        return torch.tensor([t.action for t in self._steps], dtype=torch.long)
+        return torch.stack([t.action_tensor() for t in self._steps]).to(self.device)
 
     def observations(self) -> torch.Tensor:
         """Returns the observations for each trajectory."""
-        return torch.stack([t.obs for t in self._steps])
+        return torch.stack([t.obs for t in self._steps]).to(self.device)
 
-    def rewards(self) -> torch.LongTensor:
+    def rewards(self) -> torch.FloatTensor:
         """Returns the rewards for each trajectory."""
-        return torch.tensor([t.reward for t in self._steps], dtype=torch.long)
+        return torch.stack([t.reward_tensor() for t in self._steps]).to(self.device)
 
     def returns(self, gamma: float = 0.9) -> torch.FloatTensor:
         """
