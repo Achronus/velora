@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from typing import Iterator, Self
 import torch
 
-from pydantic import BaseModel, ConfigDict, PrivateAttr
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator
 
 
 class Storage(ABC, BaseModel):
@@ -59,9 +59,18 @@ class EnvStep(BaseModel):
 class Rollouts(Storage):
     """A finite sequence of agent trajectories (steps) through the environment."""
 
-    device: str = "cpu"
+    device: str | torch.device = Field("cpu", validate_default=True)
 
     _steps: list[EnvStep] = PrivateAttr([])
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    @field_validator("device")
+    def validate_device(cls, device: str | torch.device) -> torch.device:
+        if isinstance(device, str):
+            device = torch.device(device)
+
+        return device
 
     def add(self, step: EnvStep) -> None:
         """Adds an environment step."""
