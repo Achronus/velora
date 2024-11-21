@@ -1,34 +1,34 @@
 import pytest
 import torch
 
-from velora.agent.value import V, Q, ValueFunction
+from velora.agent.value import VTable, QTable, ValueFunction
 
 
 @pytest.fixture
-def v_function() -> V:
-    return V(num_states=5)
+def v_function() -> VTable:
+    return VTable(num_states=5)
 
 
 @pytest.fixture
-def q_function() -> Q:
-    return Q(num_states=5, num_actions=3)
+def q_function() -> QTable:
+    return QTable(num_states=5, num_actions=3)
 
 
 class TestValueFunction:
     @staticmethod
-    def test_len_v(v_function: V):
+    def test_len_v(v_function: VTable):
         assert len(v_function) == 5
 
     @staticmethod
-    def test_len_q(q_function: Q):
+    def test_len_q(q_function: QTable):
         assert len(q_function) == 15  # 5 states * 3 actions
 
     @staticmethod
-    def test_shape_v(v_function: V):
+    def test_shape_v(v_function: VTable):
         assert v_function.shape == (5,)
 
     @staticmethod
-    def test_shape_q(q_function: Q):
+    def test_shape_q(q_function: QTable):
         assert q_function.shape == (5, 3)
 
     @staticmethod
@@ -40,7 +40,7 @@ class TestValueFunction:
 class TestV:
     @staticmethod
     def test_init():
-        v = V(num_states=5)
+        v = VTable(num_states=5)
 
         checks = [
             isinstance(v._values, torch.Tensor),
@@ -51,18 +51,18 @@ class TestV:
 
     @staticmethod
     def test_device():
-        v = V(num_states=5, device="cpu")
+        v = VTable(num_states=5, device="cpu")
         assert str(v._values.device) == "cpu"
 
     @staticmethod
-    def test_update_and_get_value(v_function: V):
+    def test_update_and_get_value(v_function: VTable):
         state = 2
         value = 0.5
         v_function.update(state, value)
         assert v_function[state] == value
 
     @staticmethod
-    def test_multiple_updates(v_function: V):
+    def test_multiple_updates(v_function: VTable):
         updates = {0: 0.1, 2: 0.5, 4: -0.3}
 
         for state, value in updates.items():
@@ -71,16 +71,16 @@ class TestV:
         assert round(v_function[state], 3) == -0.3
 
     @staticmethod
-    def test_get_multiple_values(v_function: V):
+    def test_get_multiple_values(v_function: VTable):
         state_values = v_function[:2]
         assert state_values.equal(torch.tensor((0.0, 0.0)))
 
     @staticmethod
-    def test_repr(v_function: V):
+    def test_repr(v_function: VTable):
         assert repr(v_function).startswith("V(s=5, values=")
 
     @staticmethod
-    def test_out_of_bounds_state(v_function: V):
+    def test_out_of_bounds_state(v_function: VTable):
         with pytest.raises(IndexError):
             v_function.update(state=10, value=0.5)
 
@@ -91,7 +91,7 @@ class TestV:
 class TestQ:
     @staticmethod
     def test_init():
-        q = Q(num_states=5, num_actions=3)
+        q = QTable(num_states=5, num_actions=3)
 
         checks = [
             isinstance(q._values, torch.Tensor),
@@ -102,18 +102,18 @@ class TestQ:
 
     @staticmethod
     def test_device_specification():
-        q = Q(num_states=5, num_actions=3, device="cpu")
+        q = QTable(num_states=5, num_actions=3, device="cpu")
         assert str(q._values.device) == "cpu"
 
     @staticmethod
-    def test_update_and_get_value(q_function: Q):
+    def test_update_and_get_value(q_function: QTable):
         state, action = 2, 1
         value = 0.5
         q_function.update(state, action, value)
         assert q_function[(state, action)] == value
 
     @staticmethod
-    def test_multiple_updates(q_function: Q):
+    def test_multiple_updates(q_function: QTable):
         updates = {(0, 0): 0.1, (2, 1): 0.5, (4, 2): -0.3}
         for (state, action), value in updates.items():
             q_function.update(state, action, value)
@@ -121,7 +121,7 @@ class TestQ:
         assert round(q_function[(state, action)], 3) == -0.3
 
     @staticmethod
-    def test_get_state_actions(q_function: Q):
+    def test_get_state_actions(q_function: QTable):
         state = 2
         values = [0.1, 0.2, 0.3]
         for action, value in enumerate(values):
@@ -131,11 +131,11 @@ class TestQ:
         assert torch.allclose(state_actions, torch.tensor(values))
 
     @staticmethod
-    def test_repr(q_function: Q):
+    def test_repr(q_function: QTable):
         assert repr(q_function).startswith("Q(s=5, a=3, values=")
 
     @staticmethod
-    def test_out_of_bounds(q_function: Q):
+    def test_out_of_bounds(q_function: QTable):
         with pytest.raises(IndexError):
             q_function.update(state=10, action=0, value=0.5)
 

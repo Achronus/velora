@@ -4,9 +4,13 @@ import torch
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator
 
+from velora.utils.validation import device_validation
+
 
 class Storage(ABC, BaseModel):
     """A base class for agent storage containers."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     @abstractmethod
     def add(self) -> None:
@@ -63,14 +67,9 @@ class Rollouts(Storage):
 
     _steps: list[EnvStep] = PrivateAttr([])
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
     @field_validator("device")
     def validate_device(cls, device: str | torch.device) -> torch.device:
-        if isinstance(device, str):
-            device = torch.device(device)
-
-        return device
+        return device_validation(device)
 
     def add(self, step: EnvStep) -> None:
         """Adds an environment step."""
