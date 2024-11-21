@@ -15,6 +15,7 @@ torch = { version = "^2.5.1", source = "pytorch" }
 torchvision = { version = "^0.20.0", source = "pytorch" }
 pydantic-settings = "^2.6.0"
 pyyaml = "^6.0.2"
+seaborn = "^0.13.2"
 
 
 [tool.poetry.group.docs.dependencies]
