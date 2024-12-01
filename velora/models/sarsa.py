@@ -8,6 +8,7 @@ from wandb.sdk.wandb_run import Run
 from velora.agent.policy import EpsilonPolicy
 from velora.agent.value import QTable
 
+from velora.analytics.base import NullAnalytics
 from velora.analytics.wandb import WeightsAndBiases
 
 from velora.config import Config
@@ -24,17 +25,19 @@ class SarsaBase(AgentModel):
         config (velora.Config): a Config model loaded from a YAML file
         env (gym.Env): the Gymnasium environment
         seed (int, optional): an random seed value for consistent experiments (default is 23)
-        device (torch.device, optional): Device to run computations on, such as `cpu`, `cuda` (Default is cpu)
+        device (torch.device, optional): device to run computations on, such as `cpu`, `cuda` (Default is cpu)
+        disable_logging (bool, optional): a flag to disable analytic logging (Default is False)
     """
 
     config: Config
     env: gym.Env
     seed: int = 23
     device: torch.device = torch.device("cpu")
+    disable_logging: bool = False
 
     _Q: QTable = PrivateAttr(...)
     _policy: EpsilonPolicy = PrivateAttr(...)
-    _analytics: WeightsAndBiases = PrivateAttr(...)
+    _analytics: WeightsAndBiases | None = PrivateAttr(None)
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -56,7 +59,7 @@ class SarsaBase(AgentModel):
             device=self.device,
             **self.config.policy.model_dump(),
         )
-        self._analytics = WeightsAndBiases()
+        self._analytics = None if self.disable_logging else WeightsAndBiases()
         torch.manual_seed(self.seed)
 
     def q_update(self, Qsa: float, Qsa_next: float, reward: float) -> float:
@@ -67,6 +70,9 @@ class SarsaBase(AgentModel):
 
     def init_run(self, run_name: str) -> Run:
         """Creates a run instance for W&B."""
+        if self.disable_logging:
+            return NullAnalytics()
+
         class_name = self.__class__.__name__
         return self._analytics.init(
             project_name=f"{class_name}-{self.config.env.name}",
@@ -81,7 +87,7 @@ class SarsaBase(AgentModel):
     @abstractmethod
     def train(self, run_name: str) -> QTable:
         """Trains the agents."""
-        pass
+        pass  # pragma: no cover
 
 
 class Sarsa(SarsaBase):
@@ -92,7 +98,8 @@ class Sarsa(SarsaBase):
         config (velora.Config): a Config model loaded from a YAML file
         env (gym.Env): the Gymnasium environment
         seed (int, optional): an random seed value for consistent experiments (default is 23)
-        device (torch.device, optional): Device to run computations on, such as `cpu`, `cuda` (Default is cpu)
+        device (torch.device, optional): device to run computations on, such as `cpu`, `cuda` (Default is cpu)
+        disable_logging (bool, optional): a flag to disable analytic logging (Default is False)
     """
 
     def train(self, run_name: str) -> QTable:
@@ -137,7 +144,8 @@ class QLearning(SarsaBase):
         config (velora.Config): a Config model loaded from a YAML file
         env (gym.Env): the Gymnasium environment
         seed (int, optional): an random seed value for consistent experiments (default is 23)
-        device (torch.device, optional): Device to run computations on, such as `cpu`, `cuda` (Default is cpu)
+        device (torch.device, optional): device to run computations on, such as `cpu`, `cuda` (Default is cpu)
+        disable_logging (bool, optional): a flag to disable analytic logging (Default is False)
     """
 
     def train(self, run_name: str) -> QTable:
@@ -181,7 +189,8 @@ class ExpectedSarsa(SarsaBase):
         config (velora.Config): a Config model loaded from a YAML file
         env (gym.Env): the Gymnasium environment
         seed (int, optional): an random seed value for consistent experiments (default is 23)
-        device (torch.device, optional): Device to run computations on, such as `cpu`, `cuda` (Default is cpu)
+        device (torch.device, optional): device to run computations on, such as `cpu`, `cuda` (Default is cpu)
+        disable_logging (bool, optional): a flag to disable analytic logging (Default is False)
     """
 
     def train(self, run_name: str) -> QTable:

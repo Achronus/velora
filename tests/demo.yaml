@@ -2,8 +2,8 @@ env:
   name: CliffWalking-v0
 
 training:
-  episodes: 1000
-  timesteps: 300
+  episodes: 1
+  timesteps: 100
   seed: 23
 
 agent:
