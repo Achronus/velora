@@ -40,7 +40,7 @@ class EpsilonPolicy(Policy):
 
     def decay_exp(self) -> None:
         """Exponentially decays epsilon by the decay rate."""
-        self.epsilon = max(self.min_epsilon, self.epsilon * self.decay_rate)
+        self.epsilon = max(self.min_epsilon, self.epsilon * (1 - self.decay_rate))
 
     def greedy_action(self, actions: torch.Tensor) -> int:
         """
