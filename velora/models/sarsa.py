@@ -197,7 +197,7 @@ class ExpectedSarsa(SarsaBase):
             for t_step in range(1, self.config.training.timesteps + 1):
                 action = self.policy.greedy_action(self._Q[state])
                 next_state, reward, terminated, truncated, _ = self.env.step(action)
-                action_probs = self.policy.soft_probs(self._Q[state]).probs
+                action_probs = self.policy.as_dist(self._Q[state]).probs
 
                 self._Q[state][action] += self.q_update(
                     self._Q[state][action],

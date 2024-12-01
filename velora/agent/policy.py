@@ -57,7 +57,21 @@ class EpsilonPolicy(Policy):
         # Exploitation: best action
         return torch.argmax(action_probs).item()
 
-    def soft_probs(self, q_state: torch.Tensor) -> Categorical:
+    def as_dist(self, q_state: torch.Tensor) -> Categorical:
+        """
+        Converts Q-values to a probability distribution.
+
+        Args:
+            q_state (torch.Tensor): Action-values/Q-values to convert to probabilities
+
+        Returns:
+            probs (torch.distributions.Categorical): A probability distribution over actions
+        """
+        action_probs = q_state.to(self.device)
+        probs = torch.softmax(action_probs, dim=0)
+        return Categorical(probs)
+
+    def soft_dist(self, q_state: torch.Tensor) -> Categorical:
         """
         Returns a Categorical distribution over actions using the ε-Soft exploration strategy.
 
@@ -69,7 +83,7 @@ class EpsilonPolicy(Policy):
             q_state (torch.Tensor): Action values/Q-values used to determine the best action
 
         Returns:
-            probs (Categorical): A probability distribution over actions
+            probs (torch.distributions.Categorical): A probability distribution over actions
         """
         action_probs = q_state.to(self.device)
         # Base probability for all actions (epsilon/n)
@@ -93,5 +107,5 @@ class EpsilonPolicy(Policy):
         Returns:
             action (int): an action following the ε-Soft approach
         """
-        dist = self.soft_probs(q_state)
+        dist = self.soft_dist(q_state)
         return dist.sample().item()
