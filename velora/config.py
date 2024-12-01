@@ -2,7 +2,7 @@ from pathlib import Path
 from typing import Any
 import yaml
 
-from pydantic import BaseModel, ConfigDict, validate_call
+from pydantic import BaseModel, ConfigDict, Field, validate_call
 from pydantic_settings import BaseSettings
 
 from velora.exc import IncorrectFileTypeError
@@ -10,8 +10,6 @@ from velora.exc import IncorrectFileTypeError
 
 class EnvironmentSettings(BaseModel):
     name: str
-    episodes: int
-    seed: int | None = None
 
 
 class NetworkSettings(BaseModel):
@@ -20,13 +18,26 @@ class NetworkSettings(BaseModel):
     gamma: float = 0.9
 
 
-class OtherSettings(BaseModel):
-    percentile: int | float | None = None
-    solve_threshold: int | float | None = None
+class TrainingSettings(BaseModel):
+    episodes: int = 100
+    timesteps: int = 1000
+    seed: int | None = None
 
 
 class AgentSettings(BaseModel):
-    pass
+    alpha: float = 0.01
+    gamma: float = 0.9
+
+
+class PolicySettings(BaseModel):
+    epsilon: float = Field(1, ge=0, le=1)
+    min_epsilon: float = Field(0.1, ge=0, le=1)
+    decay_rate: float = 0.01
+
+
+class OtherSettings(BaseModel):
+    percentile: int | float | None = None
+    solve_threshold: int | float | None = None
 
 
 class ControllerSettings(BaseModel):
@@ -37,6 +48,9 @@ class Config(BaseSettings):
     env: EnvironmentSettings
     optimizer: dict[str, Any] | None = None
     model: NetworkSettings = NetworkSettings()
+    training: TrainingSettings = TrainingSettings()
+    agent: AgentSettings = AgentSettings()
+    policy: PolicySettings = PolicySettings()
     other: OtherSettings = OtherSettings()
 
     model_config = ConfigDict(extra="ignore")
