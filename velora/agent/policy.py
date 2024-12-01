@@ -36,28 +36,28 @@ class EpsilonPolicy(Policy):
         """Exponentially decays epsilon by the decay rate."""
         self.epsilon = max(self.min_epsilon, self.epsilon * (1 - self.decay_rate))
 
-    def greedy_action(self, actions: torch.Tensor) -> int:
+    def greedy_action(self, q_state: torch.Tensor) -> int:
         """
         Returns an action using an ε-Greedy approach.
 
         Performs purely random exploration when below ε. Otherwise, selects the action with the highest value (acts greedily).
 
         Args:
-            actions (torch.Tensor): Action values/Q-values used to determine the best action
+            q_state (torch.Tensor): Action values/Q-values used to determine the best action
 
         Returns:
             action (int): an action following the ε-Greedy approach
         """
-        actions = actions.to(self.device)
+        action_probs = q_state.to(self.device)
 
         # Exploration: random action
         if torch.rand(1).item() < self.epsilon:
-            return torch.randint(len(actions), (1,)).item()
+            return torch.randint(len(action_probs), (1,)).item()
 
         # Exploitation: best action
-        return torch.argmax(actions).item()
+        return torch.argmax(action_probs).item()
 
-    def soft_probs(self, actions: torch.Tensor) -> Categorical:
+    def soft_probs(self, q_state: torch.Tensor) -> Categorical:
         """
         Returns a Categorical distribution over actions using the ε-Soft exploration strategy.
 
@@ -66,32 +66,32 @@ class EpsilonPolicy(Policy):
         - The best action receives an additional (1 - ε) probability
 
         Args:
-            actions (torch.Tensor): Action values/Q-values used to determine the best action
+            q_state (torch.Tensor): Action values/Q-values used to determine the best action
 
         Returns:
             probs (Categorical): A probability distribution over actions
         """
-        actions = actions.to(self.device)
+        action_probs = q_state.to(self.device)
         # Base probability for all actions (epsilon/n)
-        probs = torch.full_like(actions, self.epsilon / len(actions))
+        probs = torch.full_like(action_probs, self.epsilon / len(action_probs))
 
         # Find best action and add remaining probability to it
-        best_action = torch.argmax(actions)
+        best_action = torch.argmax(action_probs)
         probs[best_action] += 1 - self.epsilon
 
         return Categorical(probs)
 
-    def soft_action(self, actions: torch.Tensor) -> int:
+    def soft_action(self, q_state: torch.Tensor) -> int:
         """
         Returns an action using an ε-Soft approach.
 
         Performs a weighted exploration, giving a higher probability towards the best action.
 
         Args:
-            actions (torch.Tensor): Action values/Q-values used to determine the best action
+            q_state (torch.Tensor): Action values/Q-values used to determine the best action
 
         Returns:
             action (int): an action following the ε-Soft approach
         """
-        dist = self.soft_probs(actions)
+        dist = self.soft_probs(q_state)
         return dist.sample().item()
