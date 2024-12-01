@@ -13,6 +13,9 @@ class WeightsAndBiases(Analytics):
 
     _run: Run = PrivateAttr(None)
 
+    def model_post_init(self, __context):
+        wandb.login()
+
     @property
     def run(self) -> Run:
         """Returns the active W&B run."""
@@ -39,7 +42,7 @@ class WeightsAndBiases(Analytics):
 
     def log(self, metrics: dict[str, Any], **kwargs) -> None:
         """
-        Logs metrics to the initalised Weights and Biases run.
+        Logs metrics to the Weights and Biases run.
 
         Args:
             metrics (dict[str, Any]): a dictionary of metrics to log with names and values
