@@ -24,13 +24,13 @@ class SarsaBase(AgentModel):
         config (velora.Config): a Config model loaded from a YAML file
         env (gym.Env): the Gymnasium environment
         seed (int, optional): an random seed value for consistent experiments (default is 23)
-        device (torch.device): Device to run computations on, such as `cpu`, `cuda`
+        device (torch.device, optional): Device to run computations on, such as `cpu`, `cuda` (Default is cpu)
     """
 
     config: Config
     env: gym.Env
     seed: int = 23
-    device: torch.device
+    device: torch.device = torch.device("cpu")
 
     _Q: QTable = PrivateAttr(...)
     _policy: EpsilonPolicy = PrivateAttr(...)
@@ -92,7 +92,7 @@ class Sarsa(SarsaBase):
         config (velora.Config): a Config model loaded from a YAML file
         env (gym.Env): the Gymnasium environment
         seed (int, optional): an random seed value for consistent experiments (default is 23)
-        device (torch.device): Device to run computations on, such as `cpu`, `cuda`
+        device (torch.device, optional): Device to run computations on, such as `cpu`, `cuda` (Default is cpu)
     """
 
     def train(self, run_name: str) -> QTable:
@@ -137,7 +137,7 @@ class QLearning(SarsaBase):
         config (velora.Config): a Config model loaded from a YAML file
         env (gym.Env): the Gymnasium environment
         seed (int, optional): an random seed value for consistent experiments (default is 23)
-        device (torch.device): Device to run computations on, such as `cpu`, `cuda`
+        device (torch.device, optional): Device to run computations on, such as `cpu`, `cuda` (Default is cpu)
     """
 
     def train(self, run_name: str) -> QTable:
@@ -181,7 +181,7 @@ class ExpectedSarsa(SarsaBase):
         config (velora.Config): a Config model loaded from a YAML file
         env (gym.Env): the Gymnasium environment
         seed (int, optional): an random seed value for consistent experiments (default is 23)
-        device (torch.device): Device to run computations on, such as `cpu`, `cuda`
+        device (torch.device, optional): Device to run computations on, such as `cpu`, `cuda` (Default is cpu)
     """
 
     def train(self, run_name: str) -> QTable:

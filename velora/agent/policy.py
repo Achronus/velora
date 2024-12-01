@@ -3,9 +3,7 @@ from abc import ABC
 import torch
 from torch.distributions import Categorical
 
-from pydantic import BaseModel, Field, ConfigDict, field_validator
-
-from velora.utils.validation import device_validation
+from pydantic import BaseModel, Field, ConfigDict
 
 
 class Policy(ABC, BaseModel):
@@ -19,20 +17,16 @@ class EpsilonPolicy(Policy):
     An Epsilon (ε) policy with ε-Soft and ε-Greedy approaches.
 
     Args:
-        epsilon (float, optional): Exploration probability threshold `[0, 1]` (default: 1)
-        min_epsilon (float, optional): Minimum epsilon value possible when decaying (default: 0.1)
-        decay_rate (float, optional): A fixed decay rate for epsilon. Used when calling one of the `decay` methods (default: 0.01)
-        device (str | torch.device, optional): Device to run computations on, such as `cpu`, `cuda` (default: cpu)
+        epsilon (float, optional): Exploration probability threshold `[0, 1]` (default is 1)
+        min_epsilon (float, optional): Minimum epsilon value possible when decaying. Bound between `[0, 1]` (default is 0.1)
+        decay_rate (float, optional): A fixed decay rate for epsilon. Used when calling one of the `decay` methods. Bound between `[0, 1]` (default is 0.01)
+        device (torch.device, optional): Device to run computations on, such as `cpu`, `cuda` (default is cpu)
     """
 
     epsilon: float = Field(1, ge=0, le=1)
     min_epsilon: float = Field(0.1, ge=0, le=1)
-    decay_rate: float = 0.01
-    device: str | torch.device = Field("cpu", validate_default=True)
-
-    @field_validator("device")
-    def validate_device(cls, device: str | torch.device) -> torch.device:
-        return device_validation(device)
+    decay_rate: float = Field(0.01, ge=0, le=1)
+    device: torch.device = torch.device("cpu")
 
     def decay_linear(self) -> None:
         """Linearly decays epsilon by the decay rate."""

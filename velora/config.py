@@ -35,11 +35,6 @@ class PolicySettings(BaseModel):
     decay_rate: float = 0.01
 
 
-class OtherSettings(BaseModel):
-    percentile: int | float | None = None
-    solve_threshold: int | float | None = None
-
-
 class ControllerSettings(BaseModel):
     pass
 
@@ -51,7 +46,6 @@ class Config(BaseSettings):
     training: TrainingSettings = TrainingSettings()
     agent: AgentSettings = AgentSettings()
     policy: PolicySettings = PolicySettings()
-    other: OtherSettings = OtherSettings()
 
     model_config = ConfigDict(extra="ignore")
 
