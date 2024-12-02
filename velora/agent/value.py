@@ -29,12 +29,12 @@ class ValueFunction(ABC, BaseModel):
         pass  # pragma: no cover
 
     @abstractmethod
-    def update(self) -> None:
+    def update(self, *args: Any, **kwargs: Any) -> None:
         """Update a value."""
         pass  # pragma: no cover
 
     @abstractmethod
-    def __getitem__(self) -> float | torch.Tensor:
+    def __getitem__(self, index: Any) -> float | torch.Tensor:
         pass  # pragma: no cover
 
     @abstractmethod

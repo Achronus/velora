@@ -37,7 +37,7 @@ class TestValueFunction:
             ValueFunction()
 
 
-class TestV:
+class TestVTable:
     @staticmethod
     def test_init():
         v = VTable(num_states=5)
@@ -88,7 +88,7 @@ class TestV:
             v_function[10]
 
 
-class TestQ:
+class TestQTable:
     @staticmethod
     def test_init():
         q = QTable(num_states=5, num_actions=3)
@@ -147,3 +147,9 @@ class TestQ:
 
         with pytest.raises(IndexError):
             q_function[(0, 10)]
+
+    @staticmethod
+    def test_as_state_values(q_function: QTable):
+        result = q_function.as_state_values()
+        expected = [0.0, 0.0, 0.0, 0.0, 0.0]
+        assert result == expected
