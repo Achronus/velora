@@ -7,7 +7,7 @@ from velora.config import (
     AgentSettings,
     Config,
     EnvironmentSettings,
-    NetworkSettings,
+    ModelSettings,
     PolicySettings,
     TrainingSettings,
     load_config,
@@ -29,7 +29,7 @@ class TestLoadConfig:
         checks = [
             isinstance(config, Config),
             isinstance(config.env, EnvironmentSettings),
-            isinstance(config.model, NetworkSettings),
+            isinstance(config.model, ModelSettings),
             isinstance(config.training, TrainingSettings),
             isinstance(config.agent, AgentSettings),
             isinstance(config.policy, PolicySettings),

@@ -23,9 +23,9 @@ class EpsilonPolicy(Policy):
         device (torch.device, optional): Device to run computations on, such as `cpu`, `cuda` (default is cpu)
     """
 
-    epsilon: float = Field(1, ge=0, le=1)
-    min_epsilon: float = Field(0.1, ge=0, le=1)
-    decay_rate: float = Field(0.01, ge=0, le=1)
+    epsilon: float = Field(default=1, ge=0, le=1)
+    min_epsilon: float = Field(default=0.1, ge=0, le=1)
+    decay_rate: float = Field(default=0.01, ge=0, le=1)
     device: torch.device = torch.device("cpu")
 
     def decay_linear(self) -> None:
