@@ -1,7 +1,7 @@
 import torch.nn as nn
 from torch.optim import Optimizer
 
-from velora.agent.storage import Storage, ReplayBuffer, EnvStep, Rollouts, Episodes
+from velora.agent.storage import Storage, ReplayBuffer, Rollouts
 from velora.agent.value import VTable, QTable
 from velora.agent.policy import Policy, EpsilonPolicy
 
@@ -12,8 +12,6 @@ __all__ = [
     "Storage",
     "ReplayBuffer",
     "Rollouts",
-    "EnvStep",
-    "Episodes",
     "VTable",
     "QTable",
     "Policy",

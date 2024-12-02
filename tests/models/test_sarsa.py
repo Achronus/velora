@@ -2,11 +2,10 @@ import pytest
 
 import gymnasium as gym
 import torch
-from wandb.sdk.wandb_run import Run
 
 from velora.agent.policy import EpsilonPolicy
 from velora.agent.value import QTable
-from velora.analytics.base import NullAnalytics
+from velora.analytics.base import Analytics, NullAnalytics
 from velora.config import Config
 from velora.models.sarsa import SarsaBase, Sarsa, QLearning, ExpectedSarsa
 
@@ -48,7 +47,7 @@ class TestSarsa:
     def test_init_run_with_tracking(config: Config, env: gym.Env, device: torch.device):
         agent = Sarsa(config=config, env=env, device=device)
         run = agent.init_run("test1")
-        assert isinstance(run, Run)
+        assert isinstance(run, Analytics)
 
     @staticmethod
     def test_init_run_without_tracking(agent: Sarsa):

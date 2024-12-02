@@ -51,6 +51,7 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.pytest.ini_options]
 addopts = "--cov-report term-missing --cov=velora tests/"
+filterwarnings = ["ignore::UserWarning"]
 
 [tool.mypy]
 python_version = "3.12"

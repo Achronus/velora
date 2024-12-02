@@ -2,8 +2,8 @@ from abc import abstractmethod
 
 import torch
 from pydantic import ConfigDict, PrivateAttr
+
 import gymnasium as gym
-from wandb.sdk.wandb_run import Run
 
 from velora.agent.policy import EpsilonPolicy
 from velora.agent.value import QTable
