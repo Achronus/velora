@@ -11,9 +11,9 @@ from velora.exc import RunNotFoundError
 class WeightsAndBiases(Analytics):
     """A class dedicated to working with [Weights and Biases](https://wandb.ai/)."""
 
-    _run: Run = PrivateAttr(None)
+    _run: Run | None = PrivateAttr(None)
 
-    def model_post_init(self, __context):
+    def model_post_init(self, __context: Any) -> None:
         wandb.login()
 
     @property
@@ -22,10 +22,10 @@ class WeightsAndBiases(Analytics):
         return self._run
 
     def init(
-        self, project_name: str, run_name: str, config: dict[str, Any], **kwargs
-    ) -> Run:
+        self, project_name: str, run_name: str, config: dict[str, Any], **kwargs: Any
+    ) -> None:
         """
-        Starts a new run to track and log W&B and returns it.
+        Starts a new run to track and log W&B.
 
         Args:
             project_name (str): The name of the project the run belongs to
@@ -38,9 +38,8 @@ class WeightsAndBiases(Analytics):
             config=config,
             **kwargs,
         )
-        return self._run
 
-    def log(self, metrics: dict[str, Any], **kwargs) -> None:
+    def log(self, metrics: dict[str, Any], **kwargs: Any) -> None:
         """
         Logs metrics to the Weights and Biases run.
 
@@ -54,7 +53,7 @@ class WeightsAndBiases(Analytics):
 
         self._run.log(data=metrics, **kwargs)
 
-    def finish(self, **kwargs) -> None:
+    def finish(self, **kwargs: Any) -> None:
         """Marks the run as finished, uploads final data, and resets run instance to None."""
         if not isinstance(self._run, Run):
             raise RunNotFoundError(

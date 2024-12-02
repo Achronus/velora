@@ -8,12 +8,12 @@ class Analytics(ABC, BaseModel):
     """An analytics base class."""
 
     @abstractmethod
-    def init(self) -> None:
+    def init(self, *args: Any, **kwargs: Any) -> Any:
         """Starts a new run for the analytics tracker."""
         pass  # pragma: no cover
 
     @abstractmethod
-    def log(self, metrics: dict[str, Any]) -> None:
+    def log(self, metrics: dict[str, Any], **kwargs: Any) -> None:
         """Logs metrics to the run."""
         pass  # pragma: no cover
 
@@ -26,10 +26,10 @@ class Analytics(ABC, BaseModel):
 class NullAnalytics(Analytics):
     """An empty analytics tracker for disabling analytics tracking."""
 
-    def init(self, _) -> Self:
+    def init(self, _: Any) -> Self:
         return self
 
-    def log(self, _) -> None:
+    def log(self, metrics: dict[str, Any], **kwargs: Any) -> None:
         pass
 
     def finish(self) -> None:

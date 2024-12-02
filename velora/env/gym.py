@@ -63,7 +63,9 @@ class GymEnvHandler(EnvHandler):
             self.env = wrap_gym_env(self.env, self.wrappers)
 
     def run_demo(
-        self, episodes: int = 10, render_mode: RenderMode | None = RenderMode.HUMAN
+        self,
+        episodes: int = 10,
+        render_mode: RenderMode | None = RenderMode.HUMAN,
     ) -> None:
         env = gym.make(self.config.env.name, render_mode=render_mode)
         self.__training_loop(env, episodes)

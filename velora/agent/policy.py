@@ -52,10 +52,10 @@ class EpsilonPolicy(Policy):
 
         # Exploration: random action
         if torch.rand(1).item() < self.epsilon:
-            return torch.randint(len(action_probs), (1,)).item()
+            return int(torch.randint(len(action_probs), (1,)).item())
 
         # Exploitation: best action
-        return torch.argmax(action_probs).item()
+        return int(torch.argmax(action_probs).item())
 
     def as_dist(self, q_state: torch.Tensor) -> Categorical:
         """
@@ -108,4 +108,4 @@ class EpsilonPolicy(Policy):
             action (int): an action following the ε-Soft approach
         """
         dist = self.soft_dist(q_state)
-        return dist.sample().item()
+        return int(dist.sample().item())
