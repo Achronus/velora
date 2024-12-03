@@ -30,8 +30,8 @@ class TestSarsa:
     @staticmethod
     def test_init(agent: Sarsa, env: gym.Env):
         checks = [
-            isinstance(agent.Q, QTable),
-            agent.Q.shape == (env.observation_space.n, env.action_space.n),
+            isinstance(agent.vf, QTable),
+            agent.vf.shape == (env.observation_space.n, env.action_space.n),
             isinstance(agent.policy, EpsilonPolicy),
         ]
         assert all(checks)

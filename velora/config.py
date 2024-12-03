@@ -2,7 +2,7 @@ from pathlib import Path
 from typing import Any
 import yaml
 
-from pydantic import BaseModel, Field, validate_call
+from pydantic import BaseModel, ConfigDict, Field, validate_call
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from velora.exc import IncorrectFileTypeError
@@ -10,6 +10,8 @@ from velora.exc import IncorrectFileTypeError
 
 class EnvironmentSettings(BaseModel):
     name: str
+
+    model_config = ConfigDict(extra="allow")
 
 
 class ModelSettings(BaseModel):

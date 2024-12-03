@@ -1,10 +1,10 @@
 from velora.config import Config
 from velora.enums import RenderMode
-from velora.controller import Controller
+from velora.controller import RLController
 
 
 __all__ = [
     "Config",
     "RenderMode",
-    "Controller",
+    "RLController",
 ]
