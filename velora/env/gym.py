@@ -1,11 +1,9 @@
 from functools import reduce
-from pathlib import Path
 from typing import Any, Callable
 
 import gymnasium as gym
-from pydantic import PrivateAttr
 
-from velora.config import Config, load_config
+from velora.config import EnvironmentSettings
 from velora.enums import RenderMode
 from velora.env import EnvHandler
 
@@ -32,42 +30,31 @@ def wrap_gym_env(env: gym.Env, wrappers: list[gym.Wrapper, Callable]) -> gym.Env
 
 class GymEnvHandler(EnvHandler):
     """
-    A Gym environment handler for working with [Gymnasium](https://gymnasium.farama.org/) environments.
+    An environment handler for working with [Gymnasium](https://gymnasium.farama.org/) environments.
 
     Args:
-        config_filepath (Path | str): the filepath to the YAML config file
-        env (gymnasium.Env | None): a custom gymnasium environment (default: None)
+        config (velora.config.EnvironmentSettings): the filepath to the YAML config file
         wrappers (list[gym.Wrapper | Callable]): a list of wrapper classes or partially applied wrapper functions (default: None)
     """
 
-    config_filepath: Path | str
-    env: gym.Env | None = None
+    config: EnvironmentSettings
     wrappers: list[gym.Wrapper | Callable] = []
 
-    _config = PrivateAttr(None)
-
-    @property
-    def config(self) -> Config:
-        """The environment config settings."""
-        return self._config
-
     def model_post_init(self, __context: Any) -> None:
-        self._config = load_config(self.config_filepath)
-        self.env = (
-            gym.make(self.config.env.name, render_mode="rgb_array")
-            if self.env is None
-            else self.env
+        self._env = gym.make(
+            self.config.name,
+            **self.config.model_dump(exclude="name"),
         )
 
         if self.wrappers:
-            self.env = wrap_gym_env(self.env, self.wrappers)
+            self._env = wrap_gym_env(self._env, self.wrappers)
 
     def run_demo(
         self,
         episodes: int = 10,
         render_mode: RenderMode | None = RenderMode.HUMAN,
     ) -> None:
-        env = gym.make(self.config.env.name, render_mode=render_mode)
+        env = gym.make(self.config.name, render_mode=render_mode)
         self.__training_loop(env, episodes)
 
     def __training_loop(
