@@ -43,25 +43,9 @@ class TestSarsa:
     @staticmethod
     def test_q_update(agent: Sarsa):
         q_value, q_next, reward = 0.5, 1.0, 0.1
-        updated_q = agent.q_update(q_value, q_next, reward)
+        td_error = agent.td_error(q_value, q_next, reward)
 
-        assert updated_q == 0.005
-
-    @staticmethod
-    @pytest.mark.parametrize(
-        "ep_idx, log_count, expected",
-        [
-            (1, 1, "Episode 1/1"),
-            (7, 5, ""),  # No print when not divisible by log_count
-        ],
-    )
-    def test_log_progress(
-        capfd, ep_idx: int, log_count: int, expected: str, agent: Sarsa
-    ):
-        agent.log_progress(ep_idx, log_count)
-
-        result = capfd.readouterr()
-        assert result.out.strip() == expected
+        assert agent.q_update(td_error) == 0.005
 
 
 class TestQLearning:

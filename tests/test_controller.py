@@ -102,3 +102,23 @@ class TestRLController:
         )
 
         assert agent.device == torch.device("cpu")
+
+    @staticmethod
+    @pytest.mark.parametrize(
+        "ep_idx, log_count, expected",
+        [
+            (
+                3,
+                3,
+                "Episode 3/3 | Score: 0.0 | Loss: 0.0 | Episode Iterations - Avg Score: 0.0, Success Rate: 0.0%",
+            ),
+            (7, 5, ""),  # No print when not divisible by log_count
+        ],
+    )
+    def test_log_progress(
+        capfd, ep_idx: int, log_count: int, expected: str, sarsa_gym: RLController
+    ):
+        sarsa_gym.log_progress(ep_idx, log_count)
+
+        result = capfd.readouterr()
+        assert result.out.strip() == expected

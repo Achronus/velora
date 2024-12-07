@@ -5,11 +5,10 @@ import gymnasium as gym
 from pydantic import BaseModel, ConfigDict, PrivateAttr, field_validator
 import torch
 
-from velora.agent.policy import Policy
-from velora.agent.value import ValueFunction
-from velora.analytics.base import Analytics, NullAnalytics
+from velora.agent import Policy, ValueFunction
+from velora.analytics import Analytics, NullAnalytics, WeightsAndBiases
+from velora.metrics import Metrics
 from velora.models import AgentModel, TorchAgentModel
-from velora.analytics.wandb import WeightsAndBiases
 
 from velora.config import Config, load_config
 from velora.env import EnvHandler
@@ -41,6 +40,7 @@ class RLController(BaseModel):
     _agent: AgentModel = PrivateAttr(None)
     _env_handler: EnvHandler = PrivateAttr(None)
     _analytics: Analytics = PrivateAttr(None)
+    _metrics: Metrics = PrivateAttr(default=Metrics())
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -92,6 +92,17 @@ class RLController(BaseModel):
             device=self.device,
         )
 
+    def log_progress(self, ep_idx: int, log_count: int) -> None:
+        """Displays helpful episode logs to the console during training."""
+        if ep_idx % log_count == 0:
+            self._metrics.update_percent(log_count)
+
+            print(
+                f"Episode {ep_idx}/{self.config.training.episodes} | ",
+                end="",
+            )
+            print(self._metrics)
+
     def init_run(self, run_name: str) -> Analytics:
         """Creates a logging instance for analytics."""
         class_name = self.__class__.__name__
@@ -120,26 +131,26 @@ class RLController(BaseModel):
         run = self.init_run(run_name)
 
         for i_ep in range(1, self._config.training.episodes + 1):
-            self.agent.log_progress(i_ep, log_count)
-
-            score = 0
             state, _ = self.env.reset()
 
             for _ in range(1, self._config.training.timesteps + 1):
                 action = self.agent.act(state)
                 next_state, reward, terminated, truncated, _ = self.env.step(action)
-                self.agent.step(state, next_state, action, reward)
+                loss = self.agent.step(state, next_state, action, reward)
 
-                score += reward
+                self._metrics.update_scores(reward, loss)
+
                 state = next_state
                 action = self.agent._next_action if self.agent._next_action else action
 
                 if terminated or truncated:
                     self.agent.termination()
+                    self._metrics.update_ep_counts(terminated)
                     break
 
-            run.log({"score": score})
             self.agent.finalize_episode()
+            run.log(self._metrics.model_dump())
+            self.log_progress(i_ep, log_count)
 
         run.finish()
 

@@ -37,13 +37,6 @@ class AgentModel(ABC, BaseModel):
         return self._policy
 
     @abstractmethod
-    def log_progress(
-        self, ep_idx: int, log_count: int, *args: Any, **kwargs: Any
-    ) -> None:
-        """Displays helpful episode logs to the console during training."""
-        pass  # pragma: no cover
-
-    @abstractmethod
     def act(self, state: Any) -> int:
         """Gets an agents action based on its policy."""
         pass  # pragma: no cover
