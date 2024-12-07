@@ -49,7 +49,7 @@ class AgentModel(ABC, BaseModel):
         pass  # pragma: no cover
 
     @abstractmethod
-    def step(self, state: Any, next_state: Any, action: int, reward: float) -> None:
+    def step(self, state: Any, next_state: Any, action: int, reward: float) -> float:
         """Performs an agent step through the environment, such as performing policy updates and setting the next action (if applicable)."""
         pass  # pragma: no cover
 

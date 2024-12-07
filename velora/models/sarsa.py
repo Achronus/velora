@@ -29,7 +29,6 @@ class SarsaBase(AgentModel):
     _vf: QTable = PrivateAttr(...)
     _policy: EpsilonPolicy = PrivateAttr(...)
     _config_exclusions: list[str] = PrivateAttr(default=["model"])
-    _next_action: int | None = PrivateAttr(default=None)
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -52,11 +51,22 @@ class SarsaBase(AgentModel):
             **self.config.policy.model_dump(),
         )
 
-    def q_update(self, Qsa: float, Qsa_next: float, reward: float) -> float:
+    def td_error(self, Qsa: float, Qsa_next: float, reward: float) -> float:
+        """Computes the TD error for Q-updates."""
+        return reward + self.config.agent.gamma * Qsa_next - Qsa
+
+    def q_update(self, td_error: float) -> float:
         """Performs a Q-update."""
-        return self.config.agent.alpha * (
-            reward + self.config.agent.gamma * Qsa_next - Qsa
-        )
+        return self.config.agent.alpha * td_error
+
+    def act(self, state: Any) -> int:
+        return self.policy.greedy_action(self._vf[state])
+
+    def termination(self) -> None:
+        pass  # pragma: no cover
+
+    def finalize_episode(self) -> None:
+        self.policy.decay_linear()
 
 
 class Sarsa(SarsaBase):
@@ -70,28 +80,17 @@ class Sarsa(SarsaBase):
         device (torch.device): device to run computations on, such as `cpu`, `cuda`
     """
 
-    def log_progress(self, ep_idx: int, log_count: int) -> None:
-        if ep_idx % log_count == 0:
-            print(f"Episode {ep_idx}/{self.config.training.episodes}")
-
-    def act(self, state: Any) -> int:
-        return self.policy.greedy_action(self._vf[state])
-
-    def step(self, state: Any, next_state: Any, action: int, reward: float) -> None:
+    def step(self, state: Any, next_state: Any, action: int, reward: float) -> float:
         next_action = self.policy.greedy_action(self._vf[next_state])
         self._next_action = next_action
 
-        self._vf[state][action] += self.q_update(
+        td_error = self.td_error(
             self._vf[state][action],
             self._vf[next_state][next_action],
             reward,
         )
-
-    def termination(self) -> None:
-        pass  # pragma: no cover
-
-    def finalize_episode(self) -> None:
-        self.policy.decay_linear()
+        self._vf[state][action] += self.q_update(td_error)
+        return td_error
 
 
 class QLearning(SarsaBase):
@@ -105,25 +104,14 @@ class QLearning(SarsaBase):
         device (torch.device): device to run computations on, such as `cpu`, `cuda`
     """
 
-    def log_progress(self, ep_idx: int, log_count: int) -> None:
-        if ep_idx % log_count == 0:
-            print(f"Episode {ep_idx}/{self.config.training.episodes}")
-
-    def act(self, state: Any) -> int:
-        return self.policy.greedy_action(self._vf[state])
-
-    def step(self, state: Any, next_state: Any, action: int, reward: float) -> None:
-        self._vf[state][action] += self.q_update(
+    def step(self, state: Any, next_state: Any, action: int, reward: float) -> float:
+        td_error = self.td_error(
             self._vf[state][action],
             torch.max(self._vf[next_state]).item(),
             reward,
         )
-
-    def termination(self) -> None:
-        pass  # pragma: no cover
-
-    def finalize_episode(self) -> None:
-        self.policy.decay_linear()
+        self._vf[state][action] += self.q_update(td_error)
+        return td_error
 
 
 class ExpectedSarsa(SarsaBase):
@@ -137,24 +125,13 @@ class ExpectedSarsa(SarsaBase):
         device (torch.device): device to run computations on, such as `cpu`, `cuda`
     """
 
-    def log_progress(self, ep_idx: int, log_count: int) -> None:
-        if ep_idx % log_count == 0:
-            print(f"Episode {ep_idx}/{self.config.training.episodes}")
-
-    def act(self, state: Any) -> int:
-        return self.policy.greedy_action(self._vf[state])
-
-    def step(self, state: Any, next_state: Any, action: int, reward: float) -> None:
+    def step(self, state: Any, next_state: Any, action: int, reward: float) -> float:
         action_probs = self.policy.as_dist(self._vf[state]).probs
 
-        self._vf[state][action] += self.q_update(
+        td_error = self.td_error(
             self._vf[state][action],
             torch.dot(self._vf[next_state], action_probs).item(),
             reward,
         )
-
-    def termination(self) -> None:
-        pass  # pragma: no cover
-
-    def finalize_episode(self) -> None:
-        self.policy.decay_linear()
+        self._vf[state][action] += self.q_update(td_error)
+        return td_error
