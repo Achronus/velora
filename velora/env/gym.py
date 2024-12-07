@@ -34,11 +34,15 @@ class GymEnvHandler(EnvHandler):
 
     Args:
         config (velora.config.EnvironmentSettings): the filepath to the YAML config file
-        wrappers (list[gym.Wrapper | Callable]): a list of wrapper classes or partially applied wrapper functions (default: None)
+        wrappers (list[gym.Wrapper | Callable], optional): a list of wrapper classes or partially applied wrapper functions (default is None)
     """
 
     config: EnvironmentSettings
     wrappers: list[gym.Wrapper | Callable] = []
+
+    @property
+    def env(self) -> gym.Env:
+        return self._env
 
     def model_post_init(self, __context: Any) -> None:
         self._env = gym.make(

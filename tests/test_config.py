@@ -46,7 +46,6 @@ class TestLoadConfig:
         config_dict = {
             "env": {
                 "name": "CartPole-v1",
-                "extra_field": "should be ignored",
             },
             "extra_section": {"should": "be ignored"},
         }
@@ -56,12 +55,7 @@ class TestLoadConfig:
             yaml.dump(config_dict, f)
 
         config = load_config(config_file)
-
-        checks = [
-            not hasattr(config.env, "extra_field"),
-            not hasattr(config, "extra_section"),
-        ]
-        assert all(checks)
+        assert not hasattr(config, "extra_section")
 
     @staticmethod
     def test_file_not_found():

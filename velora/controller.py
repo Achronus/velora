@@ -40,7 +40,7 @@ class RLController(BaseModel):
     _config: Config = PrivateAttr(None)
     _agent: AgentModel = PrivateAttr(None)
     _env_handler: EnvHandler = PrivateAttr(None)
-    _analytics: WeightsAndBiases | None = PrivateAttr(None)
+    _analytics: Analytics = PrivateAttr(None)
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -80,7 +80,9 @@ class RLController(BaseModel):
         torch.manual_seed(self.seed)
 
         self._config = load_config(self.config_filepath)
-        self._analytics = None if self.disable_logging else WeightsAndBiases()
+        self._analytics = (
+            NullAnalytics() if self.disable_logging else WeightsAndBiases()
+        )
 
         self._env_handler = self.env_type(config=self._config.env)
         self._agent = self.agent_type(
@@ -92,11 +94,8 @@ class RLController(BaseModel):
 
     def init_run(self, run_name: str) -> Analytics:
         """Creates a logging instance for analytics."""
-        if self.disable_logging:
-            return NullAnalytics()
-
         class_name = self.__class__.__name__
-        _ = self._analytics.init(
+        self._analytics.init(
             project_name=f"{class_name}-{self._config.env.name}",
             run_name=run_name,
             config=ignore_empty_dicts(

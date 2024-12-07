@@ -1,11 +1,10 @@
 from functools import partial
-from pathlib import Path
 import pytest
 
 import gymnasium as gym
 from gymnasium.wrappers import Autoreset, NormalizeObservation
 
-from velora.config import Config
+from velora.config import Config, EnvironmentSettings
 from velora.env import GymEnvHandler, wrap_gym_env
 
 
@@ -45,48 +44,33 @@ class TestWrapGymEnv:
 
 class TestGymEnvHandler:
     @staticmethod
-    def test_init(config_file: Path):
-        handler = GymEnvHandler(config_filepath=config_file)
+    def test_init(config: Config):
+        handler = GymEnvHandler(config=config.env)
 
         checks = [
-            isinstance(handler.config, Config),
+            isinstance(handler.config, EnvironmentSettings),
             isinstance(handler.env, gym.Env),
-            handler.env.spec.name == "CartPole",
+            handler.env.spec.name == "CliffWalking",
             handler.wrappers == [],
         ]
         assert all(checks)
 
     @staticmethod
-    def test_init_custom_env(config_file: Path):
-        handler = GymEnvHandler(
-            config_filepath=config_file,
-            env=gym.make("MountainCar-v0"),
-        )
-
-        checks = [
-            isinstance(handler.config, Config),
-            isinstance(handler.env, gym.Env),
-            handler.env.spec.name == "MountainCar",
-            handler.wrappers == [],
-        ]
-        assert all(checks)
-
-    @staticmethod
-    def test_init_wrappers(config_file: Path):
+    def test_init_wrappers(config: Config):
         wrappers = [
             Autoreset,
             partial(NormalizeObservation, epsilon=1e-4),
         ]
 
         handler = GymEnvHandler(
-            config_filepath=config_file,
+            config=config.env,
             wrappers=wrappers,
         )
 
         checks = [
-            isinstance(handler.config, Config),
+            isinstance(handler.config, EnvironmentSettings),
             isinstance(handler.env, (gym.Env, Autoreset, NormalizeObservation)),
-            handler.env.spec.name == "CartPole",
+            handler.env.spec.name == "CliffWalking",
             handler.wrappers == wrappers,
         ]
-        assert all(checks), handler.wrappers
+        assert all(checks)

@@ -26,10 +26,10 @@ class Analytics(ABC, BaseModel):
 class NullAnalytics(Analytics):
     """An empty analytics tracker for disabling analytics tracking."""
 
-    def init(self, _: Any) -> Self:
+    def init(self, *args: Any, **kwargs: Any) -> Self:
         return self
 
-    def log(self, metrics: dict[str, Any], **kwargs: Any) -> None:
+    def log(self, metrics: dict[str, Any], *args: Any, **kwargs: Any) -> None:
         pass
 
     def finish(self) -> None:
