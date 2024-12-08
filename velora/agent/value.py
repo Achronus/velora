@@ -41,6 +41,10 @@ class ValueFunction(ABC, BaseModel):
     def __repr__(self) -> str:
         pass  # pragma: no cover
 
+    def as_state_values(self) -> list[float]:
+        """Returns the state-action pairs as a 1D list of state-values. Suitable for reshaping to visualize."""
+        return [torch.max(value).item() for value in self._values]
+
     def __len__(self) -> int:
         """Returns the total number of values."""
         return self._values.shape.numel()
@@ -111,7 +115,7 @@ class QTable(ValueFunction):
         self._values[state, action] = value
 
     def as_state_values(self) -> list[float]:
-        """Returns the state-action pairs as a 1D list of state-values. Suitable for reshaping to visualise."""
+        """Returns the state-action pairs as a 1D list of state-values. Suitable for reshaping to visualize."""
         return [torch.max(value).item() for value in self._values]
 
     def __getitem__(self, index: tuple[int, int] | int | slice) -> float | torch.Tensor:

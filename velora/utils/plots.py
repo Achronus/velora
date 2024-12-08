@@ -9,6 +9,13 @@ def plot_state_values(
     V: np.ndarray[np.float32, np.float32],
     shape: tuple[int, int],
 ) -> None:
+    """
+    Plots the State-Value function as a matrix.
+
+    Args:
+        V (np.ndarray[np.float32, np.float32]): state-values
+        shape (tuple[int, int]): the shape of the plot in the form `(n_actions, n_states)`
+    """
     V = np.reshape(V, shape)
 
     fig = plt.figure(figsize=(15, 5))

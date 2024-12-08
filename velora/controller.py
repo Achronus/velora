@@ -14,6 +14,7 @@ from velora.config import Config, load_config
 from velora.env import EnvHandler
 
 from velora.utils import ignore_empty_dicts
+from velora.utils.plots import plot_state_values
 
 
 class RLController(BaseModel):
@@ -167,4 +168,10 @@ class RLController(BaseModel):
 
     def plot_vf(self) -> None:
         """Plots the value function."""
-        pass
+        plot_state_values(
+            self.vf.as_state_values(),
+            (
+                self.env.action_space.n,
+                self.env.observation_space.n // self.env.action_space.n,
+            ),
+        )
