@@ -85,8 +85,8 @@ class Sarsa(SarsaBase):
         self._next_action = next_action
 
         td_error = self.td_error(
-            self._vf[state][action],
-            self._vf[next_state][next_action],
+            self._vf[state][action].item(),
+            self._vf[next_state][next_action].item(),
             reward,
         )
         self._vf[state][action] += self.q_update(td_error)
@@ -106,7 +106,7 @@ class QLearning(SarsaBase):
 
     def step(self, state: Any, next_state: Any, action: int, reward: float) -> float:
         td_error = self.td_error(
-            self._vf[state][action],
+            self._vf[state][action].item(),
             torch.max(self._vf[next_state]).item(),
             reward,
         )
@@ -129,7 +129,7 @@ class ExpectedSarsa(SarsaBase):
         action_probs = self.policy.as_dist(self._vf[state]).probs
 
         td_error = self.td_error(
-            self._vf[state][action],
+            self._vf[state][action].item(),
             torch.dot(self._vf[next_state], action_probs).item(),
             reward,
         )

@@ -95,13 +95,14 @@ class RLController(BaseModel):
     def log_progress(self, ep_idx: int, log_count: int) -> None:
         """Displays helpful episode logs to the console during training."""
         if ep_idx % log_count == 0:
-            self._metrics.update_percent(log_count)
+            self._metrics.log_update(log_count)
 
             print(
                 f"Episode {ep_idx}/{self.config.training.episodes} | ",
                 end="",
             )
             print(self._metrics)
+            self._metrics = Metrics()
 
     def init_run(self, run_name: str) -> Analytics:
         """Creates a logging instance for analytics."""
@@ -132,25 +133,31 @@ class RLController(BaseModel):
 
         for i_ep in range(1, self._config.training.episodes + 1):
             state, _ = self.env.reset()
+            terminated = False
+            timesteps = 0
 
-            for _ in range(1, self._config.training.timesteps + 1):
+            for t_step in range(1, self._config.training.timesteps + 1):
                 action = self.agent.act(state)
                 next_state, reward, terminated, truncated, _ = self.env.step(action)
                 loss = self.agent.step(state, next_state, action, reward)
 
-                self._metrics.update_scores(reward, loss)
+                self._metrics.ep_update(reward, loss)
 
                 state = next_state
                 action = self.agent._next_action if self.agent._next_action else action
 
+                timesteps = t_step
                 if terminated or truncated:
                     self.agent.termination()
-                    self._metrics.update_ep_counts(terminated)
                     break
 
-            self.agent.finalize_episode()
-            run.log(self._metrics.model_dump())
+            self._metrics.norm_ep(timesteps)
+
+            run.log(self._metrics.ep_dict())
             self.log_progress(i_ep, log_count)
+
+            self._metrics.batch_update(terminated)
+            self.agent.finalize_episode()
 
         run.finish()
 
