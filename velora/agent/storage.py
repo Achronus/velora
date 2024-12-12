@@ -9,7 +9,7 @@ from velora.exc import RolloutsFullError
 SingleRolloutType = tuple[torch.Tensor, torch.LongTensor, torch.FloatTensor]
 
 
-class Storage(ABC, BaseModel):
+class Storage(BaseModel, ABC):
     """A base class for agent storage containers."""
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -163,9 +163,3 @@ class Rollouts(Storage):
 
     def __str__(self) -> str:
         return f"[{",\n ".join([f"({obs}, {act}, {rew})" for obs, act, rew in zip(self._obs, self._actions, self._rewards)])}]"
-
-
-class ReplayBuffer(Storage):
-    """"""
-
-    pass

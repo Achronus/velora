@@ -21,12 +21,18 @@ class ModelSettings(BaseModel):
     batch_size: int = 128
 
 
-class TrainingSettings(BaseModel):
+class RunSettings(BaseModel):
     """Training loop settings."""
 
     episodes: int = 100
     timesteps: int = 1000
-    seed: int | None = None
+    seed: int = 23
+
+
+class OptimizerSettings(BaseModel):
+    lr: float = 0.001
+
+    model_config = ConfigDict(extra="allow")
 
 
 class AgentSettings(BaseModel):
@@ -40,15 +46,11 @@ class PolicySettings(BaseModel):
     decay_rate: float = Field(default=0.01, ge=0, le=1)
 
 
-class ControllerSettings(BaseModel):
-    pass
-
-
 class Config(BaseSettings):
     env: EnvironmentSettings
-    optimizer: dict[str, Any] | None = None
+    optimizer: OptimizerSettings = OptimizerSettings()
     model: ModelSettings = ModelSettings()
-    training: TrainingSettings = TrainingSettings()
+    run: RunSettings = RunSettings()
     agent: AgentSettings = AgentSettings()
     policy: PolicySettings = PolicySettings()
 

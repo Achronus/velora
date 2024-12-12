@@ -9,7 +9,7 @@ from velora.config import (
     EnvironmentSettings,
     ModelSettings,
     PolicySettings,
-    TrainingSettings,
+    RunSettings,
     load_config,
 )
 
@@ -30,7 +30,7 @@ class TestLoadConfig:
             isinstance(config, Config),
             isinstance(config.env, EnvironmentSettings),
             isinstance(config.model, ModelSettings),
-            isinstance(config.training, TrainingSettings),
+            isinstance(config.training, RunSettings),
             isinstance(config.agent, AgentSettings),
             isinstance(config.policy, PolicySettings),
         ]
