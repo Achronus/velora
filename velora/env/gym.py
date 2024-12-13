@@ -65,6 +65,11 @@ class GymEnvHandler(BaseModel):
         """The number of actions."""
         return get_action_size(self.env.single_action_space)
 
+    @property
+    def continuous(self) -> bool:
+        """Defines if the environment has a continuous action space."""
+        return self._continuous
+
     def model_post_init(self, __context: Any) -> None:
         self._env = self.make_vec_env()
         self._continuous = is_continuous(self.env.action_space)

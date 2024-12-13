@@ -1,44 +1,37 @@
 from abc import ABC, abstractmethod
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, PrivateAttr
-
 import torch
 import torch.nn as nn
-from torch.optim import Optimizer
-
-from velora.agent.policy import Policy
-from velora.agent.storage import Storage
-from velora.agent.value import ValueFunction
-from velora.config import Config
 
 
-class AgentModel(ABC, BaseModel):
-    """A base class for Agent models."""
+class AgentModel(nn.Module, ABC):
+    """
+    A base class for Velora Agent models.
 
-    config: Config
-    device: torch.device
-
-    _vf: ValueFunction = PrivateAttr(...)
-    _policy: Policy = PrivateAttr(...)
-    _config_exclusions: list[str] | None = PrivateAttr(default=None)
-    _next_action: int | None = PrivateAttr(default=None)
-
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
-    @property
-    def vf(self) -> ValueFunction:
-        """Returns the agents value function."""
-        return self._vf
-
-    @property
-    def policy(self) -> Policy:
-        """Returns the agents policy."""
-        return self._policy
+    Args:
+        continuous (bool): whether the action space is continuous (True) or discrete (False)
+    """
 
     @abstractmethod
-    def act(self, state: Any) -> int:
-        """Gets an agents action based on its policy."""
+    def __init__(self, continuous: bool, *args: Any, **kwargs: Any) -> None:
+        super().__init__()
+
+        self.continuous = continuous
+
+    @abstractmethod
+    def forward(self, x: torch.Tensor) -> Any:
+        """Perform a forward pass through the network."""
+        pass  # pragma: no cover
+
+    @abstractmethod
+    def act(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> Any:
+        """Gets an action from its policy."""
+        pass  # pragma: no cover
+
+    @abstractmethod
+    def get_vf(self, x: torch.Tensor) -> torch.Tensor:
+        """Returns the value function prediction."""
         pass  # pragma: no cover
 
     @abstractmethod
@@ -55,21 +48,3 @@ class AgentModel(ABC, BaseModel):
     def finalize_episode(self) -> None:
         """Handles agent behaviour when completing an episode, such as decaying an Epsilon policy or updating gradients."""
         pass  # pragma: no cover
-
-
-class TorchAgentModel(BaseModel):
-    """A base class for PyTorch Agent models.
-
-    Args:
-        model (torch.nn.Module | velora.models.AgentModel):
-        optimizer (torch.optim.Optimizer):
-        loss (torch.nn.Loss):
-        storage (velora.agent.Storage):
-    """
-
-    model: nn.Module
-    optimizer: Optimizer
-    loss: nn.Module
-    storage: Storage
-
-    model_config = ConfigDict(arbitrary_types_allowed=True)

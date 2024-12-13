@@ -49,9 +49,16 @@ class OptimizerSettings(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
+class LossSettings(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+
 class AgentSettings(BaseModel):
     alpha: float = Field(default=0.01, gt=0)
     gamma: float = Field(default=0.9, ge=0, le=1)
+    input_dim: tuple[int, int] = (84, 84)
+    n_rollouts: int = 100
+    anneal_lr: bool = True
 
 
 class PolicySettings(BaseModel):
@@ -63,7 +70,7 @@ class PolicySettings(BaseModel):
 class Config(BaseSettings):
     env: EnvironmentSettings
     optimizer: OptimizerSettings = OptimizerSettings()
-    model: ModelSettings = ModelSettings()
+    loss: LossSettings = LossSettings()
     run: RunSettings = RunSettings()
     agent: AgentSettings = AgentSettings()
     policy: PolicySettings = PolicySettings()
