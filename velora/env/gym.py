@@ -2,10 +2,18 @@ from functools import reduce
 from typing import Any, Callable
 
 import gymnasium as gym
+from gymnasium.wrappers.vector import (
+    NormalizeObservation,
+    NormalizeReward,
+    RecordEpisodeStatistics,
+    RescaleObservation,
+    ClipAction,
+    ClipReward,
+)
+from pydantic import BaseModel, PrivateAttr
 
 from velora.config import EnvironmentSettings
-from velora.enums import RenderMode
-from velora.env import EnvHandler
+from velora.env.utils import get_action_size, get_obs_shape, is_continuous
 
 
 def wrap_gym_env(env: gym.Env, wrappers: list[gym.Wrapper, Callable]) -> gym.Env:
@@ -28,56 +36,56 @@ def wrap_gym_env(env: gym.Env, wrappers: list[gym.Wrapper, Callable]) -> gym.Env
     return reduce(apply_wrapper, wrappers, env)
 
 
-class GymEnvHandler(EnvHandler):
+class GymEnvHandler(BaseModel):
     """
     An environment handler for working with [Gymnasium](https://gymnasium.farama.org/) environments.
 
     Args:
-        config (velora.config.EnvironmentSettings): the filepath to the YAML config file
-        wrappers (list[gym.Wrapper | Callable], optional): a list of wrapper classes or partially applied wrapper functions (default is None)
+        config (velora.config.EnvironmentSettings): a EnvironmentSettings model containing environment settings from a YAML file
+        wrappers (list[gym.vector.VectorWrapper | Callable], optional): a list of wrapper classes or partially applied wrapper functions (default is None)
     """
 
     config: EnvironmentSettings
-    wrappers: list[gym.Wrapper | Callable] = []
+    wrappers: list[gym.vector.VectorWrapper | Callable] = []
+
+    _env: gym.vector.SyncVectorEnv = PrivateAttr(...)
+    _continuous: bool = PrivateAttr(default=False)
 
     @property
-    def env(self) -> gym.Env:
+    def env(self) -> gym.vector.SyncVectorEnv:
         return self._env
 
+    @property
+    def obs_shape(self) -> tuple[int, ...]:
+        """The shape of the observation space."""
+        return get_obs_shape(self.env.single_observation_space)
+
+    @property
+    def n_actions(self) -> int:
+        """The number of actions."""
+        return get_action_size(self.env.single_action_space)
+
     def model_post_init(self, __context: Any) -> None:
-        self._env = gym.make(
+        self._env = self.make_vec_env()
+        self._continuous = is_continuous(self.env.action_space)
+
+    def make_vec_env(self) -> gym.vector.SyncVectorEnv:
+        """Creates a vectorized environment."""
+        envs = gym.make_vec(
             self.config.name,
-            **self.config.model_dump(exclude="name"),
+            num_envs=self.config.n_envs,
+            vectorization_mode="sync",
+            wrappers=(
+                RecordEpisodeStatistics,
+                ClipAction,
+            ),
         )
-
-        if self.wrappers:
-            self._env = wrap_gym_env(self._env, self.wrappers)
-
-    def run_demo(
-        self,
-        episodes: int = 10,
-        render_mode: RenderMode | None = RenderMode.HUMAN,
-    ) -> None:
-        env = gym.make(self.config.name, render_mode=render_mode)
-        self.__training_loop(env, episodes)
-
-    def __training_loop(
-        self, env: gym.Env, episodes: int, seed: int | None = None
-    ) -> None:
-        """A helper method for creating the training loop."""
-        try:
-            for i_episode in range(1, episodes + 1):
-                state, info = env.reset(seed=seed)
-                episode_over = False
-                score = 0
-
-                while not episode_over:
-                    action = env.action_space.sample()
-                    next_state, reward, terminated, truncated, info = env.step(action)
-                    score += reward
-
-                    episode_over = terminated or truncated
-
-                print(f"Episode {i_episode}/{episodes}: {score} score")
-        finally:
-            env.close()
+        envs = ClipReward(envs, max_reward=self.config.max_reward)
+        envs = RescaleObservation(envs, max_obs=self.config.max_obs)
+        envs = NormalizeObservation(envs, epsilon=self.config.epsilon)
+        envs = NormalizeReward(
+            envs,
+            gamma=self.config.gamma,
+            epsilon=self.config.epsilon,
+        )
+        return envs

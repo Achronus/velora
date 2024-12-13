@@ -9,23 +9,37 @@ from velora.exc import IncorrectFileTypeError
 
 
 class EnvironmentSettings(BaseModel):
+    """
+    [Gymnasium](https://gymnasium.farama.org/) environment settings.
+
+    Args:
+        name (str): the name of environment
+        n_envs (int, optional): the number of parallel environments (Default is `3`)
+        gamma (float, optional): the discount factor used in the exponential moving average in the [NormalizeReward](https://gymnasium.farama.org/api/vector/wrappers/#gymnasium.wrappers.vector.NormalizeReward) wrapper (Default is `0.99`)
+        epsilon (float, optional): stability parameter for normalization scaling. Used in the [NormalizeObservation](https://gymnasium.farama.org/api/vector/wrappers/#gymnasium.wrappers.vector.NormalizeObservation) and [NormalizeReward](https://gymnasium.farama.org/api/vector/wrappers/#gymnasium.wrappers.vector.NormalizeReward) wrappers (Default is `1e-8`)
+        max_obs (float, optional): the max absolute value for observations. Used in the [RescaleObservation](https://gymnasium.farama.org/api/vector/wrappers/#gymnasium.wrappers.vector.RescaleObservation) wrapper (Default is `10.0`)
+        max_reward (float, optional): the max absolute value for discounted return. Used in the [ClipReward](https://gymnasium.farama.org/api/vector/wrappers/#gymnasium.wrappers.vector.ClipReward) wrapper (Default is `10.0`)
+    """
+
     name: str
-
-    model_config = ConfigDict(extra="allow")
-
-
-class ModelSettings(BaseModel):
-    """PyTorch model settings."""
-
-    hidden_size: int = 256
-    batch_size: int = 128
+    n_envs: int = 3
+    gamma: float = 0.99
+    epsilon: float = 1e-8
+    max_obs: float = 10.0
+    max_reward: float = 10.0
 
 
 class RunSettings(BaseModel):
-    """Training loop settings."""
+    """
+    Training loop settings.
 
-    episodes: int = 100
-    timesteps: int = 1000
+    Args:
+        timesteps (int, optional): total number of timesteps the agent can iterate through in the environment (Default is `10_000`)
+        log_count (int, optional): the number of iterations to
+    """
+
+    timesteps: int = 10000
+    log_count: int = 100
     seed: int = 23
 
 
