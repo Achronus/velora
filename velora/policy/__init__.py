@@ -13,11 +13,11 @@ import numpy as np
 
 from velora.agent.storage import Rollouts
 from velora.analytics import Analytics, NullAnalytics, WeightsAndBiases
-from velora.env.gym import GymEnvHandler
+from velora.env.gym import GymEnv
 
 from velora.metrics import Metrics
-from velora.models.base import AgentModel
-from velora.models.ppo import PPO, PPOInputs
+from velora.policy.base import AgentModel, FeatureExtractor
+from velora.policy.ppo import PPO, PPOInputs
 
 from velora.config import Config, load_config
 from velora.utils import ignore_empty_dicts
@@ -25,6 +25,7 @@ from velora.utils import ignore_empty_dicts
 
 __all__ = [
     "AgentModel",
+    "FeatureExtractor",
 ]
 
 
@@ -49,7 +50,7 @@ class RLAgent(BaseModel):
     disable_logging: bool = False
 
     _config: Config = PrivateAttr(None)
-    _env_handler: GymEnvHandler = PrivateAttr(None)
+    _env_handler: GymEnv = PrivateAttr(None)
     _storage: Rollouts = PrivateAttr(None)
 
     _model: AgentModel = PrivateAttr(None)
@@ -92,7 +93,7 @@ class RLAgent(BaseModel):
         self._analytics = (
             NullAnalytics() if self.disable_logging else WeightsAndBiases()
         )
-        self._env_handler = GymEnvHandler(config=self._config)
+        self._env_handler = GymEnv(config=self._config)
 
         self._model = self.agent(
             continuous=self._env_handler._continuous_actions,
@@ -104,7 +105,7 @@ class RLAgent(BaseModel):
         self._loss = self.loss_type(**self.config.loss)
 
         self._storage = Rollouts(
-            size=self.config.agent.n_rollouts,
+            size=self.config.agent.buffer_size,
             n_envs=self.config.env.n_envs,
             n_actions=self._env_handler.n_actions,
             obs_shape=self.env.single_observation_space.shape,

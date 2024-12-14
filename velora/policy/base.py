@@ -4,25 +4,13 @@ from typing import Any
 import torch
 import torch.nn as nn
 
+from velora.policy.inputs import ExtractorInputs
 
-class AgentModel(nn.Module, ABC):
+
+class AgentModel(ABC):
     """
     A base class for Velora Agent models.
-
-    Args:
-        continuous (bool): whether the action space is continuous (True) or discrete (False)
     """
-
-    @abstractmethod
-    def __init__(self, continuous: bool, *args: Any, **kwargs: Any) -> None:
-        super().__init__()
-
-        self.continuous = continuous
-
-    @abstractmethod
-    def forward(self, x: torch.Tensor) -> Any:
-        """Perform a forward pass through the network."""
-        pass  # pragma: no cover
 
     @abstractmethod
     def act(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> Any:
@@ -47,4 +35,20 @@ class AgentModel(nn.Module, ABC):
     @abstractmethod
     def finalize_episode(self) -> None:
         """Handles agent behaviour when completing an episode, such as decaying an Epsilon policy or updating gradients."""
+        pass  # pragma: no cover
+
+
+class FeatureExtractor(nn.Module, ABC):
+    """A base class for all feature extractors."""
+
+    @abstractmethod
+    def __init__(self, inputs: ExtractorInputs) -> None:
+        super().__init__()
+
+        self.inputs = inputs
+        self.out_features: int = None
+
+    @abstractmethod
+    def forward(x: torch.Tensor) -> Any:
+        """Perform a forward pass through the network."""
         pass  # pragma: no cover

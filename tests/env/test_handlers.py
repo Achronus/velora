@@ -5,7 +5,7 @@ import gymnasium as gym
 from gymnasium.wrappers import Autoreset, NormalizeObservation
 
 from velora.config import Config, EnvironmentSettings
-from velora.env import GymEnvHandler, wrap_gym_env
+from velora.env import GymEnv, wrap_gym_env
 
 
 class TestWrapGymEnv:
@@ -45,7 +45,7 @@ class TestWrapGymEnv:
 class TestGymEnvHandler:
     @staticmethod
     def test_init(config: Config):
-        handler = GymEnvHandler(config=config.env)
+        handler = GymEnv(config=config.env)
 
         checks = [
             isinstance(handler.config, EnvironmentSettings),
@@ -62,7 +62,7 @@ class TestGymEnvHandler:
             partial(NormalizeObservation, epsilon=1e-4),
         ]
 
-        handler = GymEnvHandler(
+        handler = GymEnv(
             config=config.env,
             wrappers=wrappers,
         )

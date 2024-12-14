@@ -7,9 +7,7 @@ from velora.agent.policy import EpsilonPolicy
 from velora.analytics.base import NullAnalytics
 from velora.analytics.wandb import WeightsAndBiases
 from velora.config import Config
-from velora.controller import RLController
-from velora.env.gym import GymEnvHandler
-from velora.models import Sarsa, QLearning, ExpectedSarsa
+from velora.env.gym import GymEnv
 
 import torch
 
@@ -22,7 +20,7 @@ class TestRLController:
     def sarsa_gym(self, config_file: Path) -> RLController:
         return RLController(
             config_filepath=config_file,
-            env_type=GymEnvHandler,
+            env_type=GymEnv,
             agent_type=Sarsa,
             disable_logging=True,
         )
@@ -32,7 +30,7 @@ class TestRLController:
         return partial(
             RLController,
             config_filepath=config_file,
-            env_type=GymEnvHandler,
+            env_type=GymEnv,
             disable_logging=True,
         )
 
@@ -40,7 +38,7 @@ class TestRLController:
     def test_init_run_with_tracking(config_file: Path):
         controller = RLController(
             config_filepath=config_file,
-            env_type=GymEnvHandler,
+            env_type=GymEnv,
             agent_type=Sarsa,
         )
         controller.init_run("test1")
@@ -50,7 +48,7 @@ class TestRLController:
     def test_init_run_without_tracking(config_file: Path):
         controller = RLController(
             config_filepath=config_file,
-            env_type=GymEnvHandler,
+            env_type=GymEnv,
             agent_type=Sarsa,
             disable_logging=True,
         )
@@ -95,7 +93,7 @@ class TestRLController:
     def test_device_validation_str(config_file: Path):
         agent = RLController(
             config_filepath=config_file,
-            env_type=GymEnvHandler,
+            env_type=GymEnv,
             agent_type=Sarsa,
             disable_logging=True,
             device="cpu",

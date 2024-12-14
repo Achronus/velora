@@ -1,8 +1,6 @@
-from velora.env.handler import EnvHandler
-from velora.env.gym import GymEnvHandler, wrap_gym_env
+from velora.env.gym import GymEnv, wrap_gym_env
 
 __all__ = [
-    "EnvHandler",
-    "GymEnvHandler",
+    "GymEnv",
     "wrap_gym_env",
 ]
