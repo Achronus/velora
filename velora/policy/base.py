@@ -1,13 +1,18 @@
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, Type
+
+from pydantic import ConfigDict
+from pydantic.dataclasses import dataclass
 
 import torch
 import torch.nn as nn
+import torch.optim as optim
+from torch.nn.modules.loss import _Loss
 
 from velora.policy.inputs import ExtractorInputs
 
 
-class AgentModel(ABC):
+class AgentModel(nn.Module, ABC):
     """
     A base class for Velora Agent models.
     """
@@ -52,3 +57,13 @@ class FeatureExtractor(nn.Module, ABC):
     def forward(x: torch.Tensor) -> Any:
         """Perform a forward pass through the network."""
         pass  # pragma: no cover
+
+
+@dataclass(config=ConfigDict(arbitrary_types_allowed=True))
+class PyTorchModel:
+    """Storage for PyTorch model details."""
+
+    optimizer: Type[optim.Optimizer]
+    loss: Type[_Loss]
+    policy: Type[FeatureExtractor]
+    inputs: Type[ExtractorInputs]
