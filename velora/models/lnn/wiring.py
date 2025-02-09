@@ -67,7 +67,6 @@ class Wiring:
             raise ValueError(f"'{sparsity_level=}' must be between '[0.1, 0.9]'.")
 
         self.density_level = 1.0 - sparsity_level
-        self.units = n_neurons + out_features  # inter + command + motor
 
         self.n_command = max(int(0.4 * n_neurons), 1)
         self.n_inter = n_neurons - self.n_command

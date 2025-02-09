@@ -81,7 +81,7 @@ class NCPLiquidCell(nn.Module):
         x: torch.Tensor,
         g_out: torch.Tensor,
         h_out: torch.Tensor,
-        ts: torch.Tensor | float,
+        ts: float,
     ) -> torch.Tensor:
         """
         Computes the new hidden state.
@@ -90,7 +90,7 @@ class NCPLiquidCell(nn.Module):
             x (torch.Tensor): input values
             g_out (torch.Tensor): g_head output
             h_out (torch.Tensor): h_head output
-            ts (torch.Tensor | float): current timespan between events
+            ts (float): current timespan between events
 
         Returns:
             hidden (torch.Tensor): a new hidden state
@@ -106,16 +106,14 @@ class NCPLiquidCell(nn.Module):
 
         return g_head * f_head + gate_out * h_head
 
-    def forward(
-        self, x: torch.Tensor, hidden: torch.Tensor, ts: torch.Tensor | float
-    ) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, hidden: torch.Tensor, ts: float) -> torch.Tensor:
         """
         Performs a forward pass through the cell.
 
         Parameters:
             x (torch.Tensor): input values
             hidden (torch.Tensor): current hidden state
-            ts (torch.Tensor | float): current timespan between events
+            ts (float): current timespan between events
 
         Returns:
             hidden (torch.Tensor): a new hidden state
