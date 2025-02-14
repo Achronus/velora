@@ -11,6 +11,7 @@ def set_seed(value: int) -> None:
 def set_device(device: str = "auto") -> torch.device:
     """Sets the `PyTorch` device dynamically."""
     if device == "auto":
-        return "cuda" if torch.cuda.is_available() else "cpu"
+        device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
-    return device
+    print(f"Device set to '{device}'.")
+    return torch.device(device)
