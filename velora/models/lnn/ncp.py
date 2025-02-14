@@ -6,7 +6,6 @@ import torch.nn as nn
 
 from velora.models.lnn.cell import NCPLiquidCell
 from velora.models.lnn.wiring import Wiring
-from velora.models.utils import set_seed
 
 
 class LiquidNCPNetwork(nn.Module):
@@ -17,7 +16,7 @@ class LiquidNCPNetwork(nn.Module):
         out_features: int,
         *,
         sparsity_level: float = 0.5,
-        seed: int = 64,
+        device: torch.device | None = None,
     ) -> None:
         """
         A Liquid Neural Circuit Policy network with three layers:
@@ -37,14 +36,15 @@ class LiquidNCPNetwork(nn.Module):
             sparsity_level (float, optional): controls the connection sparsity
                 between neurons. Must be a value between `[0.1, 0.9]`. When `0.1` neurons are very dense, when `0.9` they are very sparse. Default
                 is '0.5'
-            seed (int, optional): random seed for reproducibility. Default is '64'
+            device (torch.device, optional): the device to load tensors on.
+                Default is 'None'
         """
         super().__init__()
-        set_seed(seed)
 
         self.in_features = in_features
         self.n_neurons = n_neurons
         self.out_features = out_features
+        self.device = device
 
         self.n_units = n_neurons + out_features  # inter + command + motor
 
@@ -62,17 +62,17 @@ class LiquidNCPNetwork(nn.Module):
                 in_features,
                 self._counts.inter,
                 self._masks.inter,
-            ),
+            ).to(device),
             NCPLiquidCell(
                 self._counts.inter,
                 self._counts.command,
                 self._masks.command,
-            ),
+            ).to(device),
             NCPLiquidCell(
                 self._counts.command,
                 self._counts.motor,
                 self._masks.motor,
-            ),
+            ).to(device),
         ]
         self.layers = OrderedDict([(name, layer) for name, layer in zip(names, layers)])
 
@@ -162,6 +162,8 @@ class LiquidNCPNetwork(nn.Module):
                 f"Unsupported dimensionality: '{x.shape=}'. Should be 2 or 3 dimensional."
             )
 
+        x = x.to(torch.float32).to(self.device)
+
         if x.dim() == 2:
             x = x.unsqueeze(-1)
 
@@ -178,7 +180,7 @@ class LiquidNCPNetwork(nn.Module):
             inputs = x[:, t]  # (batch_size, features)
             ts = 1.0 if timespans is None else timespans[t]
 
-            h_out, h_state = self._ncp_forward(inputs, h_state, ts)
+            h_out, h_state = self._ncp_forward(inputs, h_state.to(self.device), ts)
             output_sequence.append(h_out)
 
         # (batch_size, seq_len, out_features)

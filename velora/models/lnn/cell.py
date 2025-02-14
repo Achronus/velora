@@ -9,6 +9,8 @@ class NCPLiquidCell(nn.Module):
         in_features: int,
         n_hidden: int,
         mask: torch.Tensor,
+        *,
+        device: torch.device | None = None,
     ) -> None:
         """
         A Neural Circuit Policy (NCP) Liquid Time-Constant (LTC) cell.
@@ -33,6 +35,8 @@ class NCPLiquidCell(nn.Module):
             n_hidden (int): number of hidden nodes
             mask (torch.Tensor): a matrix of sparse connections
                 usually containing a combination of `[-1, 1, 0]`
+            device (torch.device, optional): the device to load tensors on.
+                Default is 'None'
         """
 
         super().__init__()
@@ -40,22 +44,23 @@ class NCPLiquidCell(nn.Module):
         self.in_features = in_features
         self.n_hidden = n_hidden
         self.head_size = n_hidden + in_features
+        self.device = device
 
         # Absolute to maintain masking (-1 -> 1)
         self.sparsity_mask = nn.Parameter(
-            self._prep_mask(mask),
+            self._prep_mask(mask.to(device)),
             requires_grad=False,
         )
 
         self.tanh = nn.Tanh()  # Bounded: [-1, 1]
         self.sigmoid = nn.Sigmoid()  # Bounded: [0, 1]
 
-        self.g_head = nn.Linear(self.head_size, n_hidden)
-        self.h_head = nn.Linear(self.head_size, n_hidden)
+        self.g_head = nn.Linear(self.head_size, n_hidden, device=device)
+        self.h_head = nn.Linear(self.head_size, n_hidden, device=device)
 
         # LTC heads (f)
-        self.f_head_to_g = nn.Linear(self.head_size, n_hidden)
-        self.f_head_to_h = nn.Linear(self.head_size, n_hidden)
+        self.f_head_to_g = nn.Linear(self.head_size, n_hidden, device=device)
+        self.f_head_to_h = nn.Linear(self.head_size, n_hidden, device=device)
 
     def _prep_mask(self, mask: torch.Tensor) -> torch.Tensor:
         """
@@ -74,7 +79,11 @@ class NCPLiquidCell(nn.Module):
 
     def _sparse_head(self, x: torch.Tensor, head: nn.Linear) -> torch.Tensor:
         """Computes the output for a sparsity mask head."""
-        return F.linear(x, head.weight * self.sparsity_mask, head.bias)
+        return F.linear(
+            x.to(torch.float32),
+            head.weight * self.sparsity_mask,
+            head.bias,
+        )
 
     def _new_hidden(
         self,
@@ -118,6 +127,7 @@ class NCPLiquidCell(nn.Module):
         Returns:
             hidden (torch.Tensor): a new hidden state
         """
+        x, hidden = x.to(self.device), hidden.to(self.device)
         x = torch.cat([x, hidden], 1)
 
         g_out = self._sparse_head(x, self.g_head)
