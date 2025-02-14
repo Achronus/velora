@@ -1,12 +1,12 @@
 from collections import OrderedDict
 from typing import Optional, Tuple
-import numpy as np
 
 import torch
 import torch.nn as nn
 
 from velora.models.lnn.cell import NCPLiquidCell
 from velora.models.lnn.wiring import Wiring
+from velora.models.utils import set_seed
 
 
 class LiquidNCPNetwork(nn.Module):
@@ -40,9 +40,7 @@ class LiquidNCPNetwork(nn.Module):
             seed (int, optional): random seed for reproducibility. Default is '64'
         """
         super().__init__()
-
-        torch.manual_seed(seed)
-        np.random.seed(seed)
+        set_seed(seed)
 
         self.in_features = in_features
         self.n_neurons = n_neurons
