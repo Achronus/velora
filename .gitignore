@@ -164,3 +164,4 @@ cython_debug/
 /examples/*saved/
 /examples/*wandb/
 /examples/*videos/
+velora/examples/*logs/
