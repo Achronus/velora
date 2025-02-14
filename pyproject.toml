@@ -1,22 +1,25 @@
-[tool.poetry]
+[project]
 name = "velora"
-version = "0.1.0"
-description = "A Reinforcement Learning (RL) framework for experimentation and learning RL concepts."
-authors = ["Ryan Partridge <rpartridge101@gmail.com>"]
+version = "0.0.2"
+description = "A Liquid Reinforcement Learning (RL) framework."
+authors = [{ name = "Ryan Partridge", email = "rpartridge101@gmail.com>" }]
 license = "MIT License"
 readme = "README.md"
+requires-python = ">=3.12,<4.0"
+dependencies = [
+    "pydantic (>=2.10.5,<3.0.0)",
+    "pydantic-settings (>=2.7.1,<3.0.0)",
+    "gymnasium[all] (>=1.0,<1.1)",
+    "pyyaml (>=6.0.2,<7.0)",
+    "types-pyyaml (>=6.0,<7.0)",
+    "wandb (>=0.19.4,<0.20.0)",
+    "torch (>=2.6.0,<3.0.0)",
+    "torchvision (>=0.21.0,<0.22.0)",
+]
 
 [tool.poetry.dependencies]
-python = "^3.12"
-pydantic = "^2.9"
-gymnasium = { extras = ["all"], version = "^1.0.0" }
-wandb = "^0.18.5"
-torch = { version = "^2.5.1", source = "pytorch" }
-torchvision = { version = "^0.20.0", source = "pytorch" }
-pydantic-settings = "^2.6.0"
-pyyaml = "^6.0.2"
-seaborn = "^0.13.2"
-types-pyyaml = "^6.0.12.20240917"
+torch = { source = "pytorch" }
+torchvision = { source = "pytorch" }
 
 
 [tool.poetry.group.docs.dependencies]
@@ -40,13 +43,17 @@ flake8-bugbear = "^24.10.31"
 flake8-docstrings = "^1.7.0"
 
 
+[tool.poetry.group.dev.dependencies]
+stable-baselines3 = { extras = ["extra"], version = "^2.5.0" }
+tensorboard = "^2.19.0"
+
 [[tool.poetry.source]]
 name = "pytorch"
-url = "https://download.pytorch.org/whl/cu121"
+url = "https://download.pytorch.org/whl/cu124"
 priority = "explicit"
 
 [build-system]
-requires = ["poetry-core"]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
 
 [tool.pytest.ini_options]
