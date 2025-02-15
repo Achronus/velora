@@ -128,7 +128,7 @@ class NCPLiquidCell(nn.Module):
             hidden (torch.Tensor): a new hidden state
         """
         x, hidden = x.to(self.device), hidden.to(self.device)
-        x = torch.cat([x, hidden], 1)
+        x = torch.cat([x, hidden], dim=1)
 
         g_out = self._sparse_head(x, self.g_head)
         h_out = self._sparse_head(x, self.h_head)

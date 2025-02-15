@@ -1,6 +1,8 @@
 from typing import Any, List
 
 import torch
+import torch.nn as nn
+
 import numpy as np
 
 
@@ -51,3 +53,15 @@ def to_tensor(
         new_tensor = new_tensor.unsqueeze(unsqueeze)
 
     return new_tensor.to(dtype).to(device)
+
+
+def soft_update(source: nn.Module, target: nn.Module, tau: float = 0.005) -> None:
+    """Performs a soft parameter update between two PyTorch Networks."""
+    for target_param, param in zip(target.parameters(), source.parameters()):
+        target_param.data.copy_(tau * param.data + (1.0 - tau) * target_param.data)
+
+
+def hard_update(source: nn.Module, target: nn.Module) -> None:
+    """Performs a hard parameter update between two PyTorch Networks."""
+    for target_param, param in zip(target.parameters(), source.parameters()):
+        target_param.data.copy_(param.data)
