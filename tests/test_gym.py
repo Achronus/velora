@@ -5,7 +5,12 @@ from functools import partial
 import gymnasium as gym
 from gymnasium import spaces
 
-from velora.gym import wrap_gym_env, get_obs_shape, get_action_size
+from velora.gym import (
+    get_latest_env_names,
+    wrap_gym_env,
+    get_obs_shape,
+    get_action_size,
+)
 
 
 class TestWrapGymEnv:
@@ -91,3 +96,9 @@ class TestGetActionSize:
         space = spaces.MultiDiscrete([3, 3, 3])
         with pytest.raises(NotImplementedError):
             get_action_size(space)
+
+
+class TestGetLatestEnvNames:
+    def test_valid_names(self):
+        names = get_latest_env_names()
+        assert ["Ant-v2", "Ant-v3", "Hopper-v3", "Hopper-v2"] not in names

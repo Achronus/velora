@@ -1,9 +1,11 @@
 from collections import deque
 from dataclasses import dataclass, astuple
 import random
-from typing import Any, List, Tuple
+from typing import List, Tuple
 
 import torch
+
+from velora.models.utils import to_tensor
 
 
 @dataclass
@@ -38,42 +40,20 @@ class ReplayBuffer:
 
     Parameters:
         capacity (int): the total capacity of the buffer
+        device (torch.device, optional): the PyTorch device to load tensors onto.
+            Default is `None`
     """
 
-    def __init__(self, capacity: int) -> None:
+    def __init__(self, capacity: int, *, device: torch.device | None = None) -> None:
         self.capacity = capacity
         self.buffer = deque(maxlen=capacity)
-
-    @staticmethod
-    def _to_tensor(
-        item: List[Any],
-        stack: bool = False,
-        *,
-        dtype: torch.dtype = torch.float32,
-    ) -> torch.Tensor:
-        """
-        A helper method to convert an item to a tensor.
-
-        Parameters:
-            item (List[Any]): a list of items of any type
-            stack (bool, optional): whether to stack the values into a single
-                tensor. Default is 'False'
-            dtype (torch.dtype, optional): the data type for the tensor.
-                Default is 'torch.float32'
-        """
-        if isinstance(item, torch.Tensor):
-            return item
-
-        if stack:
-            return torch.stack(item).to(dtype)
-
-        return torch.tensor(item, dtype=dtype)
+        self.device = device
 
     def push(self, exp: Experience) -> None:
         """Stores an experience in the buffer."""
         self.buffer.append(exp)
 
-    def sample(self, batch_size: int) -> Tuple:
+    def sample(self, batch_size: int) -> BatchExperience:
         """Returns a random batch of experiences."""
         if len(self.buffer) < batch_size:
             raise ValueError(
@@ -85,11 +65,16 @@ class ReplayBuffer:
         states, actions, rewards, next_states, dones = zip(*batch)
 
         return BatchExperience(
-            states=self._to_tensor(states, stack=True),
-            actions=self._to_tensor(actions),
-            rewards=self._to_tensor(rewards),
-            next_states=self._to_tensor(next_states, stack=True),
-            dones=self._to_tensor(dones),
+            states=to_tensor(states, stack=True, device=self.device, unsqueeze=1),
+            actions=to_tensor(actions, device=self.device),
+            rewards=to_tensor(rewards, device=self.device, unsqueeze=1),
+            next_states=to_tensor(
+                next_states,
+                stack=True,
+                device=self.device,
+                unsqueeze=1,
+            ),
+            dones=to_tensor(dones, device=self.device, unsqueeze=1),
         )
 
     def __len__(self) -> int:
@@ -103,36 +88,14 @@ class RolloutBuffer:
 
     Parameters:
         capacity (int): Maximum rollout length
+        device (torch.device, optional): the PyTorch device to load tensors onto.
+            Default is `None`
     """
 
-    def __init__(self, capacity: int) -> None:
+    def __init__(self, capacity: int, *, device: torch.device | None = None) -> None:
         self.capacity = capacity
         self.buffer = deque(maxlen=capacity)
-
-    @staticmethod
-    def _to_tensor(
-        item: List[Any],
-        stack: bool = False,
-        *,
-        dtype: torch.dtype = torch.float32,
-    ) -> torch.Tensor:
-        """
-        A helper method to convert an item to a tensor.
-
-        Parameters:
-            item (List[Any]): a list of items of any type
-            stack (bool, optional): whether to stack the values into a single
-                tensor. Default is 'False'
-            dtype (torch.dtype, optional): the data type for the tensor.
-                Default is 'torch.float32'
-        """
-        if isinstance(item, torch.Tensor):
-            return item
-
-        if stack:
-            return torch.stack(item).to(dtype)
-
-        return torch.tensor(item, dtype=dtype)
+        self.device = device
 
     def push(self, exp: Experience) -> None:
         """Stores an experience in the buffer."""
@@ -149,11 +112,16 @@ class RolloutBuffer:
         states, actions, rewards, next_states, dones = zip(*self.buffer)
 
         return BatchExperience(
-            states=self._to_tensor(states, stack=True),
-            actions=self._to_tensor(actions),
-            rewards=self._to_tensor(rewards),
-            next_states=self._to_tensor(next_states, stack=True),
-            dones=self._to_tensor(dones),
+            states=to_tensor(states, stack=True, device=self.device, unsqueeze=1),
+            actions=to_tensor(actions, device=self.device),
+            rewards=to_tensor(rewards, device=self.device, unsqueeze=1),
+            next_states=to_tensor(
+                next_states,
+                stack=True,
+                device=self.device,
+                unsqueeze=1,
+            ),
+            dones=to_tensor(dones, device=self.device, unsqueeze=1),
         )
 
     def clear(self) -> None:
