@@ -136,9 +136,9 @@ class LiquidNCPNetwork(nn.Module):
 
         Parameters:
             x (torch.Tensor): an input tensor of shape: `(batch_size,
-                seq_len, features)` or `(batch_size, seq_len)`.
+                seq_len, features)` or `(batch_size, features)`.
                 When `x` is 2-dimensional, it is automatically expanded to
-                `(batch_size, seq_len, 1)` within the method.
+                `(batch_size, 1, features)` within the method.
                 - `batch_size` the number of samples per timestep.
                 - `seq_len` the temporal dimension (e.g., timesteps,
                 frames, tokens, audio samples).
@@ -165,7 +165,7 @@ class LiquidNCPNetwork(nn.Module):
         x = x.to(torch.float32).to(self.device)
 
         if x.dim() == 2:
-            x = x.unsqueeze(-1)
+            x = x.unsqueeze(1)
 
         batch_size, seq_len, features = x.size()
 
