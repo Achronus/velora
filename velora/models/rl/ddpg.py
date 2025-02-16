@@ -1,3 +1,4 @@
+from copy import deepcopy
 from typing import Tuple, Type
 
 from velora.buffer import BatchExperience, Experience, ReplayBuffer
@@ -10,6 +11,117 @@ import torch.optim as optim
 
 import gymnasium as gym
 import numpy as np
+
+from velora.noise import OUNoise
+
+
+class DDPGActor(nn.Module):
+    def __init__(
+        self,
+        num_obs: int,
+        n_neurons: int,
+        num_actions: int,
+        *,
+        action_bounds: Tuple[float, float] = (-1.0, 1.0),
+        device: torch.device | None = None,
+    ):
+        """
+        An Actor Network for the DDPG algorithm.
+
+        Parameters:
+            num_obs (int): the number of input observations
+            n_neurons (int): the number of hidden neurons
+            num_actions (int): the number of actions
+            action_bounds (Tuple[float, float], optional): a `(min, max)` pair
+                for the action space. Keeps the actions within these bounds.
+                Default is `(-1.0, 1.0)`
+            device (torch.device, optional): the device to load `torch.Tensors`
+                onto. Default is `None`
+        """
+
+        super().__init__()
+        self.action_bounds = action_bounds
+
+        self.ncp = LiquidNCPNetwork(
+            in_features=num_obs,
+            n_neurons=n_neurons,
+            out_features=num_actions,
+            device=device,
+        )
+
+    def forward(
+        self, obs: torch.Tensor, hidden: torch.Tensor | None = None
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Performs a forward pass through the network.
+
+        Parameters:
+            obs (torch.Tensor): the batch of state observations
+            hidden (torch.Tensor, optional): the hidden state. Default is `None`
+
+        Returns:
+            actions,hidden (Tuple[torch.Tensor, torch.Tensor]): returns the action
+            predictions and new hidden state.
+        """
+        actions, new_hidden = self.ncp.forward(obs, hidden)
+
+        # Scale actions to bounds using tanh
+        low, high = self.action_bounds
+        scaled_actions = torch.tanh(actions) * (high - low) / 2 + (high + low) / 2
+
+        return scaled_actions, new_hidden
+
+
+class DDPGCritic(nn.Module):
+    def __init__(
+        self,
+        num_obs: int,
+        n_neurons: int,
+        num_actions: int,
+        *,
+        device: torch.device | None = None,
+    ):
+        """
+        A Critic Network for the DDPG algorithm.
+
+        Parameters:
+            num_obs (int): the number of input observations
+            n_neurons (int): the number of hidden neurons
+            num_actions (int): the number of actions
+            device (torch.device, optional): the device to load `torch.Tensors`
+                onto. Default is `None`
+        """
+        super().__init__()
+
+        self.ncp = LiquidNCPNetwork(
+            in_features=num_obs + num_actions,
+            n_neurons=n_neurons,
+            out_features=1,  # Q-value output
+            device=device,
+        )
+
+    def forward(
+        self,
+        obs: torch.Tensor,
+        actions: torch.Tensor,
+        hidden: torch.Tensor | None = None,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Performs a forward pass through the network.
+
+        Parameters:
+            obs (torch.Tensor): the batch of state observations
+            actions (torch.Tensor): the batch of actions
+            hidden (torch.Tensor, optional): the hidden state. Default is `None`
+
+        Returns:
+            q_values,hidden (Tuple[torch.Tensor, torch.Tensor]): returns the Q-Value
+            predictions and new hidden state.
+        """
+        inputs = torch.cat([obs, actions], dim=-1)
+
+        q_values, new_hidden = self.ncp.forward(inputs, hidden)
+        return q_values, new_hidden
 
 
 class LiquidDDPG:
@@ -26,6 +138,9 @@ class LiquidDDPG:
             inter_neurons = n_neurons - command_neurons
             ```
         action_dim (int): number of outputs (motor nodes)
+        action_bounds (Tuple[float, float], optional): the clip boundary for the
+            action space in the form of `(low, high)`.
+            Default is `(-1.0, 1.0)`
         optim (Type[torch.optim.Optimizer], optional): the type of `PyTorch`
             optimizer to use. Default is `torch.optim.Adam`
         buffer_size (int, optional): the maximum size of the ReplayBuffer.
@@ -44,6 +159,7 @@ class LiquidDDPG:
         n_neurons: int,
         action_dim: int,
         *,
+        action_bounds: Tuple[float, float] = (-1.0, 1.0),
         optim: Type[optim.Optimizer] = optim.Adam,
         buffer_size: int = 100_000,
         actor_lr: float = 1e-4,
@@ -55,55 +171,38 @@ class LiquidDDPG:
         self.state_dim = state_dim
         self.n_neurons = n_neurons
         self.action_dim = action_dim
+        self.device = device
 
-        self.actor = LiquidNCPNetwork(
-            state_dim,
-            n_neurons,
-            action_dim,
-            device=device,
-        ).to(device)
+        self.actor = DDPGActor(
+            self.state_dim,
+            self.n_neurons,
+            self.action_dim,
+            action_bounds=action_bounds,
+            device=self.device,
+        ).to(self.device)
 
-        self.actor_target = LiquidNCPNetwork(
-            state_dim,
-            n_neurons,
-            action_dim,
-            device=device,
-        ).to(device)
-        self.actor_target.load_state_dict(self.actor.state_dict())
+        self.critic = DDPGCritic(
+            self.state_dim,
+            self.n_neurons,
+            self.action_dim,
+            device=self.device,
+        ).to(self.device)
 
-        self.critic = LiquidNCPNetwork(
-            state_dim + action_dim,
-            n_neurons,
-            1,  # Q-value
-            device=device,
-        ).to(device)
+        self.actor_target = deepcopy(self.actor)
+        self.critic_target = deepcopy(self.critic)
 
-        self.critic_target = LiquidNCPNetwork(
-            state_dim + action_dim,
-            n_neurons,
-            1,
-            device=device,
-        ).to(device)
-        self.critic_target.load_state_dict(self.critic.state_dict())
+        # Freeze target networks
+        for p in self.actor_target.parameters():
+            p.requires_grad = False
+        for p in self.critic_target.parameters():
+            p.requires_grad = False
 
         self.actor_optim = optim(self.actor.parameters(), lr=actor_lr)
         self.critic_optim = optim(self.critic.parameters(), lr=critic_lr)
 
         self.loss = nn.MSELoss()
         self.buffer = ReplayBuffer(capacity=buffer_size, device=device)
-
-    def _select_action(
-        self, state: torch.Tensor, *, min: float, max: float, noise_scale: float
-    ) -> torch.Tensor:
-        """Selects an action using the Actor network with exploration noise."""
-        with torch.no_grad():
-            action, _ = self.actor.forward(state.unsqueeze(0))
-
-            # Exploration noise
-            noise = torch.normal(0, noise_scale, size=action.shape)
-            action = torch.clamp(action.cpu() + noise, min=min, max=max)
-
-        return action.flatten()
+        self.noise = OUNoise(action_dim, device=device)
 
     def _update_target_networks(self, tau: float) -> None:
         """Performs a soft update on the target networks."""
@@ -115,22 +214,15 @@ class LiquidDDPG:
         Performs a Critic Network update.
 
         Returns:
-            critic_h_state,critic_loss (Tuple[torch.Tensor, float]): the Critic's
-            hidden state and loss value.
+            critic_loss (float): the Critic's loss value.
         """
         with torch.no_grad():
             next_states = batch.next_states
             next_actions, _ = self.actor_target.forward(next_states)
+            target_q, _ = self.critic_target.forward(next_states, next_actions)
+            target_q = batch.rewards + (1 - batch.dones) * gamma * target_q
 
-            target_x = torch.cat([next_states, next_actions], dim=-1)
-            target_q, _ = self.critic_target.forward(target_x)
-            target_q = (
-                batch.rewards.unsqueeze(1)
-                + (1 - batch.dones.unsqueeze(1)) * gamma * target_q
-            )
-
-        x = torch.cat([batch.states.squeeze(1), batch.actions.unsqueeze(1)], dim=-1)
-        current_q, _ = self.critic.forward(x)
+        current_q, _ = self.critic.forward(batch.states, batch.actions.unsqueeze(1))
         critic_loss = self.loss.forward(current_q, target_q)
 
         self.critic_optim.zero_grad()
@@ -144,13 +236,10 @@ class LiquidDDPG:
         Performs an Actor Network update.
 
         Returns:
-            actor_h_state,actor_loss (Tuple[torch.Tensor, float]): the Actor's
-            hidden state and loss value.
+            actor_loss (float): the Actor's loss value.
         """
         next_actions, _ = self.actor.forward(states)
-        x = torch.cat([states, next_actions], dim=-1)
-
-        actor_q, _ = self.critic.forward(x)
+        actor_q, _ = self.critic.forward(states, next_actions)
         actor_loss = -actor_q.mean()
 
         self.actor_optim.zero_grad()
@@ -201,7 +290,6 @@ class LiquidDDPG:
             output_count (int, optional): the episodic rate for displaying
                 information to the console. Default is `100`
         """
-
         if not isinstance(env.action_space, gym.spaces.Box):
             raise EnvironmentError(
                 f"Invalid '{env.action_space=}'. Must be 'gym.spaces.Box'."
@@ -216,12 +304,12 @@ class LiquidDDPG:
 
             episode_reward = 0
             critic_losses, actor_losses = [], []
+            actor_hidden = None
 
             for i_step in range(max_steps):
-                action = self._select_action(
+                action, actor_hidden = self.predict(
                     state,
-                    min=env.action_space.low.item(),
-                    max=env.action_space.high.item(),
+                    actor_hidden,
                     noise_scale=noise_scale,
                 )
                 next_state, reward, terminated, truncated, _ = env.step(action)
@@ -263,3 +351,36 @@ class LiquidDDPG:
                 )
 
         return episode_rewards
+
+    def predict(
+        self,
+        state: torch.Tensor,
+        hidden: torch.Tensor = None,
+        *,
+        noise_scale: float = 0.1,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Makes an action prediction using the Actor network with exploration noise.
+
+        Parameters:
+            state (torch.Tensor): the current state
+            hidden (torch.Tensor, optional): the current hidden state.
+                Default is `None`
+            noise_scale (float, optional): the exploration noise added when
+                selecting an action. Default is `0.1`
+
+        Returns:
+            action,hidden (Tuple[torch.Tensor, torch.Tensor]): the action prediction
+            and hidden state.
+        """
+        self.actor.eval()
+        with torch.no_grad():
+            action, hidden = self.actor.forward(state.unsqueeze(0), hidden)
+
+            if noise_scale > 0:
+                # Exploration noise
+                noise = self.noise.sample() * noise_scale
+                action = torch.clamp(action + noise, *self.actor.action_bounds)
+
+        self.actor.train()
+        return action.flatten(), hidden

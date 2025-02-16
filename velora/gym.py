@@ -1,6 +1,6 @@
 from functools import reduce
 import re
-from typing import Callable, Literal, List
+from typing import Callable, Literal, List, Tuple
 
 import gymnasium as gym
 from gymnasium import spaces
@@ -163,6 +163,11 @@ def get_action_size(action_space: spaces.Space) -> int:
         return np.prod(action_space.shape).item()
 
     return action_space.n
+
+
+def get_action_bounds(action_space: spaces.Box) -> Tuple[float, float]:
+    """Returns the actions bounds from a Box action space."""
+    return action_space.low.item(), action_space.high.item()
 
 
 def get_latest_env_names() -> List[str]:

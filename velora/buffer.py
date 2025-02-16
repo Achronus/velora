@@ -65,15 +65,10 @@ class ReplayBuffer:
         states, actions, rewards, next_states, dones = zip(*batch)
 
         return BatchExperience(
-            states=to_tensor(states, stack=True, device=self.device, unsqueeze=1),
+            states=to_tensor(states, stack=True, device=self.device),
             actions=to_tensor(actions, device=self.device),
             rewards=to_tensor(rewards, device=self.device, unsqueeze=1),
-            next_states=to_tensor(
-                next_states,
-                stack=True,
-                device=self.device,
-                unsqueeze=1,
-            ),
+            next_states=to_tensor(next_states, stack=True, device=self.device),
             dones=to_tensor(dones, device=self.device, unsqueeze=1),
         )
 
