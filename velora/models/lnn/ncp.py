@@ -146,9 +146,10 @@ class LiquidNCPNetwork(nn.Module):
                 image features, joint coordinates, word embeddings, raw amplitude
                 values).
             h_state (torch.Tensor, optional): initial hidden state of the RNN with
-                shape: `(batch_size, hidden_size)`. Default is 'None'.
+                shape: `(batch_size, n_units)`. Default is 'None'.
                 - `batch_size` the number of samples.
-                - `hidden_size` the total number of hidden neurons.
+                - `n_units` the total number of hidden neurons
+                    (`n_neurons + out_features`).
             timespans (torch.Tensor, optional): a 1-dimensional tensor of shape
                 `(seq_len,)`. Represents the time intervals between events.
                 Used for event-based data. When `None` defaults to `1.0` for all
@@ -156,6 +157,10 @@ class LiquidNCPNetwork(nn.Module):
         Returns:
             y_pred,h_state (Tuple[torch.Tensor, torch.Tensor]): the network
             prediction and the final hidden state.
+
+            When `y_pred` has `batch_size=1`. Out shape is: `(out_features)`. Otherwise, `(batch_size, out_features)`.
+
+            `h_state` out shape is: `(batch_size, n_units)`.
         """
         if x.dim() not in (2, 3):
             raise ValueError(
