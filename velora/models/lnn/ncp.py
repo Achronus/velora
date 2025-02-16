@@ -96,22 +96,22 @@ class LiquidNCPNetwork(nn.Module):
             ts (float): the current time interval between events
 
         Returns:
-            h,new_h_state (Tuple[torch.Tensor, torch.Tensor]): current hidden
-            state (network prediction) and merged hidden state from all
-            layers (updated state memory).
+            y_pred,new_h_state (Tuple[torch.Tensor, torch.Tensor]): the network prediction and the merged hidden state from all layers
+            (updated state memory).
         """
         h_state = torch.split(hidden, self._out_sizes, dim=1)
 
         new_h_state = []
+        inputs = x
 
         # Handle layer independence
         for i, layer in enumerate(self.layers.values()):
-            h = layer.forward(x, h_state[i], ts)
-            x = h  # (batch_size, layer_out_features)
+            y_pred, h = layer.forward(inputs, h_state[i], ts)
+            inputs = y_pred  # (batch_size, layer_out_features)
             new_h_state.append(h)
 
         new_h_state = torch.cat(new_h_state, dim=1)  # (batch_size, n_units)
-        return h, new_h_state
+        return y_pred, new_h_state
 
     def _validate_timespans(self, timespans: torch.Tensor, seq_len: int) -> None:
         """A helper method to validate the timespan tensor."""
@@ -173,7 +173,7 @@ class LiquidNCPNetwork(nn.Module):
             self._validate_timespans(timespans, seq_len)
 
         if h_state is None:
-            h_state = torch.zeros((batch_size, self.n_units))
+            h_state = torch.zeros((batch_size, self.n_units), device=self.device)
 
         output_sequence = []
         for t in range(seq_len):
@@ -183,6 +183,12 @@ class LiquidNCPNetwork(nn.Module):
             h_out, h_state = self._ncp_forward(inputs, h_state.to(self.device), ts)
             output_sequence.append(h_out)
 
-        # (batch_size, seq_len, out_features)
-        y_pred = torch.stack(output_sequence, dim=1)
+        # Batch -> (batch_size, out_features)
+        y_pred = torch.stack(output_sequence, dim=1).squeeze(1)
+
+        # Single item -> (out_features)
+        if y_pred.shape[0] == 1:
+            y_pred = y_pred.squeeze(0)
+
+        # h_state -> (batch_size, n_units)
         return y_pred, h_state
