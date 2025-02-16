@@ -80,7 +80,7 @@ class LiquidNCPNetwork(nn.Module):
         self._out_sizes = [layer.n_hidden for layer in self.layers.values()]
 
     def _ncp_forward(
-        self, x: torch.Tensor, hidden: torch.Tensor, ts: float
+        self, x: torch.Tensor, hidden: torch.Tensor
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Performs a single timestep through the network layers.
@@ -93,7 +93,6 @@ class LiquidNCPNetwork(nn.Module):
             x (torch.Tensor): the current batch of data for the timestep with
                 shape: `(batch_size, features)`
             hidden (torch.Tensor): the current hidden state
-            ts (float): the current time interval between events
 
         Returns:
             y_pred,new_h_state (Tuple[torch.Tensor, torch.Tensor]): the network prediction and the merged hidden state from all layers
@@ -106,42 +105,22 @@ class LiquidNCPNetwork(nn.Module):
 
         # Handle layer independence
         for i, layer in enumerate(self.layers.values()):
-            y_pred, h = layer.forward(inputs, h_state[i], ts)
+            y_pred, h = layer.forward(inputs, h_state[i])
             inputs = y_pred  # (batch_size, layer_out_features)
             new_h_state.append(h)
 
         new_h_state = torch.cat(new_h_state, dim=1)  # (batch_size, n_units)
         return y_pred, new_h_state
 
-    def _validate_timespans(self, timespans: torch.Tensor, seq_len: int) -> None:
-        """A helper method to validate the timespan tensor."""
-        if timespans.dim() != 1:
-            raise ValueError(
-                f"Timespans should be 1-dimensional, got: '{timespans.shape=}'"
-            )
-
-        if len(timespans) != seq_len:
-            raise ValueError(
-                f"Timespans length '{len(timespans)}' doesn't match: '{seq_len=}'"
-            )
-
     def forward(
-        self,
-        x: torch.Tensor,
-        h_state: Optional[torch.Tensor] = None,
-        timespans: Optional[torch.Tensor] = None,
+        self, x: torch.Tensor, h_state: Optional[torch.Tensor] = None
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Performs a forward pass through the network.
 
         Parameters:
-            x (torch.Tensor): an input tensor of shape: `(batch_size,
-                seq_len, features)` or `(batch_size, features)`.
-                When `x` is 2-dimensional, it is automatically expanded to
-                `(batch_size, 1, features)` within the method.
+            x (torch.Tensor): an input tensor of shape: `(batch_size, features)`.
                 - `batch_size` the number of samples per timestep.
-                - `seq_len` the temporal dimension (e.g., timesteps,
-                frames, tokens, audio samples).
                 - `features` the features at each timestep (e.g.,
                 image features, joint coordinates, word embeddings, raw amplitude
                 values).
@@ -150,10 +129,6 @@ class LiquidNCPNetwork(nn.Module):
                 - `batch_size` the number of samples.
                 - `n_units` the total number of hidden neurons
                     (`n_neurons + out_features`).
-            timespans (torch.Tensor, optional): a 1-dimensional tensor of shape
-                `(seq_len,)`. Represents the time intervals between events.
-                Used for event-based data. When `None` defaults to `1.0` for all
-                timesteps. Default is 'None'
         Returns:
             y_pred,h_state (Tuple[torch.Tensor, torch.Tensor]): the network
             prediction and the final hidden state.
@@ -162,34 +137,20 @@ class LiquidNCPNetwork(nn.Module):
 
             `h_state` out shape is: `(batch_size, n_units)`.
         """
-        if x.dim() not in (2, 3):
+        if x.dim() != 2:
             raise ValueError(
-                f"Unsupported dimensionality: '{x.shape=}'. Should be 2 or 3 dimensional."
+                f"Unsupported dimensionality: '{x.shape=}'. Should be 2 dimensional with: '(batch_size, features)'."
             )
 
         x = x.to(torch.float32).to(self.device)
 
-        if x.dim() == 2:
-            x = x.unsqueeze(1)
-
-        batch_size, seq_len, features = x.size()
-
-        if timespans is not None:
-            self._validate_timespans(timespans, seq_len)
+        batch_size, features = x.size()
 
         if h_state is None:
             h_state = torch.zeros((batch_size, self.n_units), device=self.device)
 
-        output_sequence = []
-        for t in range(seq_len):
-            inputs = x[:, t]  # (batch_size, features)
-            ts = 1.0 if timespans is None else timespans[t]
-
-            h_out, h_state = self._ncp_forward(inputs, h_state.to(self.device), ts)
-            output_sequence.append(h_out)
-
         # Batch -> (batch_size, out_features)
-        y_pred = torch.stack(output_sequence, dim=1).squeeze(1)
+        y_pred, h_state = self._ncp_forward(x, h_state.to(self.device))
 
         # Single item -> (out_features)
         if y_pred.shape[0] == 1:

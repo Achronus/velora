@@ -91,11 +91,7 @@ class NCPLiquidCell(nn.Module):
         )
 
     def _new_hidden(
-        self,
-        x: torch.Tensor,
-        g_out: torch.Tensor,
-        h_out: torch.Tensor,
-        ts: float,
+        self, x: torch.Tensor, g_out: torch.Tensor, h_out: torch.Tensor
     ) -> torch.Tensor:
         """
         Computes the new hidden state.
@@ -104,7 +100,6 @@ class NCPLiquidCell(nn.Module):
             x (torch.Tensor): input values
             g_out (torch.Tensor): g_head output
             h_out (torch.Tensor): h_head output
-            ts (float): current timespan between events
 
         Returns:
             hidden (torch.Tensor): a new hidden state
@@ -115,13 +110,13 @@ class NCPLiquidCell(nn.Module):
         fh_g = self._sparse_head(x, self.f_head_to_g)
         fh_h = self._sparse_head(x, self.f_head_to_h)
 
-        gate_out = self.sigmoid(fh_g * ts + fh_h)  # [1 - σ(-[f(x, I, θf)], t)]
+        gate_out = self.sigmoid(fh_g + fh_h)  # [1 - σ(-[f(x, I, θf)], t)]
         f_head = 1.0 - gate_out  # σ(-f(x, I, θf), t)
 
         return g_head * f_head + gate_out * h_head
 
     def forward(
-        self, x: torch.Tensor, hidden: torch.Tensor, ts: float
+        self, x: torch.Tensor, hidden: torch.Tensor
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Performs a forward pass through the cell.
@@ -129,7 +124,6 @@ class NCPLiquidCell(nn.Module):
         Parameters:
             x (torch.Tensor): input values
             hidden (torch.Tensor): current hidden state
-            ts (float): current timespan between events
 
         Returns:
             y_pred,h_state (Tuple[torch.Tensor, torch.Tensor]): the cell prediction and the hidden state.
@@ -140,6 +134,6 @@ class NCPLiquidCell(nn.Module):
         g_out = self._sparse_head(x, self.g_head)
         h_out = self._sparse_head(x, self.h_head)
 
-        new_hidden = self._new_hidden(x, g_out, h_out, ts)
+        new_hidden = self._new_hidden(x, g_out, h_out)
         y_pred = self._sparse_head(x, self.proj) + new_hidden
         return y_pred, new_hidden
