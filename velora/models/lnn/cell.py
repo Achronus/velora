@@ -1,3 +1,5 @@
+from typing import Tuple
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -62,6 +64,9 @@ class NCPLiquidCell(nn.Module):
         self.f_head_to_g = nn.Linear(self.head_size, n_hidden, device=device)
         self.f_head_to_h = nn.Linear(self.head_size, n_hidden, device=device)
 
+        # Hidden state projection
+        self.proj = nn.Linear(self.head_size, n_hidden, device=device)
+
     def _prep_mask(self, mask: torch.Tensor) -> torch.Tensor:
         """
         Preprocesses mask to match head size.
@@ -107,15 +112,17 @@ class NCPLiquidCell(nn.Module):
         g_head = self.tanh(g_out)  # g(x, I, θ_g)
         h_head = self.tanh(h_out)  # h(x, I, θ_h)
 
-        fh_g = self.f_head_to_g(x)
-        fh_h = self.f_head_to_h(x)
+        fh_g = self._sparse_head(x, self.f_head_to_g)
+        fh_h = self._sparse_head(x, self.f_head_to_h)
 
         gate_out = self.sigmoid(fh_g * ts + fh_h)  # [1 - σ(-[f(x, I, θf)], t)]
         f_head = 1.0 - gate_out  # σ(-f(x, I, θf), t)
 
         return g_head * f_head + gate_out * h_head
 
-    def forward(self, x: torch.Tensor, hidden: torch.Tensor, ts: float) -> torch.Tensor:
+    def forward(
+        self, x: torch.Tensor, hidden: torch.Tensor, ts: float
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Performs a forward pass through the cell.
 
@@ -125,7 +132,7 @@ class NCPLiquidCell(nn.Module):
             ts (float): current timespan between events
 
         Returns:
-            hidden (torch.Tensor): a new hidden state
+            y_pred,h_state (Tuple[torch.Tensor, torch.Tensor]): the cell prediction and the hidden state.
         """
         x, hidden = x.to(self.device), hidden.to(self.device)
         x = torch.cat([x, hidden], dim=1)
@@ -133,4 +140,6 @@ class NCPLiquidCell(nn.Module):
         g_out = self._sparse_head(x, self.g_head)
         h_out = self._sparse_head(x, self.h_head)
 
-        return self._new_hidden(x, g_out, h_out, ts)
+        new_hidden = self._new_hidden(x, g_out, h_out, ts)
+        y_pred = self._sparse_head(x, self.proj) + new_hidden
+        return y_pred, new_hidden
