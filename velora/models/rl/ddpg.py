@@ -22,7 +22,6 @@ class DDPGActor(nn.Module):
         n_neurons: int,
         num_actions: int,
         *,
-        action_bounds: Tuple[float, float] = (-1.0, 1.0),
         device: torch.device | None = None,
     ):
         """
@@ -32,15 +31,11 @@ class DDPGActor(nn.Module):
             num_obs (int): the number of input observations
             n_neurons (int): the number of hidden neurons
             num_actions (int): the number of actions
-            action_bounds (Tuple[float, float], optional): a `(min, max)` pair
-                for the action space. Keeps the actions within these bounds.
-                Default is `(-1.0, 1.0)`
             device (torch.device, optional): the device to load `torch.Tensors`
                 onto. Default is `None`
         """
 
         super().__init__()
-        self.action_bounds = action_bounds
 
         self.ncp = LiquidNCPNetwork(
             in_features=num_obs,
@@ -64,11 +59,7 @@ class DDPGActor(nn.Module):
             predictions and new hidden state.
         """
         actions, new_hidden = self.ncp.forward(obs, hidden)
-
-        # Scale actions to bounds using tanh
-        low, high = self.action_bounds
-        scaled_actions = torch.tanh(actions) * (high - low) / 2 + (high + low) / 2
-
+        scaled_actions = torch.tanh(actions)  # Bounded: [-1, 1]
         return scaled_actions, new_hidden
 
 
@@ -138,9 +129,6 @@ class LiquidDDPG:
             inter_neurons = n_neurons - command_neurons
             ```
         action_dim (int): number of outputs (motor nodes)
-        action_bounds (Tuple[float, float], optional): the clip boundary for the
-            action space in the form of `(low, high)`.
-            Default is `(-1.0, 1.0)`
         optim (Type[torch.optim.Optimizer], optional): the type of `PyTorch`
             optimizer to use. Default is `torch.optim.Adam`
         buffer_size (int, optional): the maximum size of the ReplayBuffer.
@@ -159,7 +147,6 @@ class LiquidDDPG:
         n_neurons: int,
         action_dim: int,
         *,
-        action_bounds: Tuple[float, float] = (-1.0, 1.0),
         optim: Type[optim.Optimizer] = optim.Adam,
         buffer_size: int = 100_000,
         actor_lr: float = 1e-4,
@@ -177,7 +164,6 @@ class LiquidDDPG:
             self.state_dim,
             self.n_neurons,
             self.action_dim,
-            action_bounds=action_bounds,
             device=self.device,
         ).to(self.device)
 
@@ -380,7 +366,7 @@ class LiquidDDPG:
             if noise_scale > 0:
                 # Exploration noise
                 noise = self.noise.sample() * noise_scale
-                action = torch.clamp(action + noise, *self.actor.action_bounds)
+                action = torch.clamp(action + noise, min=-1, max=1)
 
         self.actor.train()
         return action.flatten(), hidden
