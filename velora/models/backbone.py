@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Tuple
 
 import torch
 import torch.nn as nn
@@ -74,3 +74,58 @@ class MLP(nn.Module):
             x (torch.Tensor): the input tensor
         """
         return self.fc(x)
+
+
+class BasicCNN(nn.Module):
+    def __init__(self, in_channels: int) -> None:
+        """
+        A CNN backbone from the DQN Nature paper:
+            Mnih, Volodymyr, et al.
+            "Human-level control through deep reinforcement learning."
+            Nature 518.7540 (2015): 529-533.
+
+        Only contains the Convolutional Network with a flattened output.
+        Useful for connecting with other architectures such as the
+        velora.models.LiquidNCPNetwork.
+
+        Parameters:
+            in_channels (int): the number of channels in the input image.
+                E.g., `3` for RGB or `1` for grayscale
+        """
+        super().__init__()
+        self.in_channels = in_channels
+
+        self.conv = nn.Sequential(
+            nn.Conv2d(in_channels, 32, kernel_size=8, stride=4, padding=0),
+            nn.ReLU(),
+            nn.Conv2d(32, 64, kernel_size=4, stride=2, padding=0),
+            nn.ReLU(),
+            nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=0),
+            nn.ReLU(),
+            nn.Flatten(),
+        )
+
+    def out_size(self, dim: Tuple[int, int]) -> int:
+        """
+        Calculates the size of the convolution output using a dummy input.
+
+        Parameters:
+            dim (Tuple[int, int]): the `(height, width)` of a single image
+        """
+        with torch.no_grad():
+            x = torch.zeros(1, self.in_channels, *dim)
+            return self.conv(x).size(1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Forward pass through the network.
+
+        Parameters:
+            x (torch.Tensor): a batch of images in the shape
+                `(batch_size, in_channels, height, width)`.
+                - `batch_size` - number of images in the batch
+                - `in_channels` - number of colour channels
+                - `height` - height of the images
+                - `width` - width of the images
+        """
+        return self.conv(x)
