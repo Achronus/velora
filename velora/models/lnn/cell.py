@@ -78,7 +78,7 @@ class NCPLiquidCell(nn.Module):
         3. Gets the absolute values of the mask (swapping -1 -> 1)
         """
         n_extras = mask.shape[1]
-        extra_nodes = torch.ones((n_extras, n_extras))
+        extra_nodes = torch.ones((n_extras, n_extras), device=self.device)
         mask = torch.concatenate([mask, extra_nodes])
         return torch.abs(mask.T)
 

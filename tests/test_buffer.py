@@ -4,7 +4,6 @@ from collections import deque
 import torch
 
 from velora.buffer import Experience, BatchExperience, ReplayBuffer, RolloutBuffer
-from velora.models.utils import to_tensor
 
 
 class TestExperience:
@@ -58,23 +57,6 @@ class TestBatchExperience:
         assert batch_experience.rewards.shape == (2,)
         assert batch_experience.next_states.shape == (2, 2)
         assert batch_experience.dones.shape == (2,)
-
-
-def test_to_tensor_conversion() -> None:
-    # Test list to tensor
-    result = to_tensor([1.0, 2.0, 3.0])
-    assert isinstance(result, torch.Tensor)
-    assert result.dtype == torch.float32
-
-    # Test tensor input
-    tensor_input = torch.tensor([1.0, 2.0, 3.0])
-    result = to_tensor(tensor_input)
-    assert torch.equal(result, tensor_input)
-
-    # Test stacking
-    tensor_list = [torch.tensor([1.0, 2.0]), torch.tensor([3.0, 4.0])]
-    result = to_tensor(tensor_list, stack=True)
-    assert result.shape == (2, 2)
 
 
 class TestReplayBuffer:
@@ -200,10 +182,10 @@ class TestRolloutBuffer:
 
         # Verify batch properties
         assert isinstance(batch, BatchExperience)
-        assert batch.states.shape == (num_experiences, 1, 2)
-        assert batch.actions.shape == (num_experiences,)
+        assert batch.states.shape == (num_experiences, 2)
+        assert batch.actions.shape == (num_experiences, 1)
         assert batch.rewards.shape == (num_experiences, 1)
-        assert batch.next_states.shape == (num_experiences, 1, 2)
+        assert batch.next_states.shape == (num_experiences, 2)
         assert batch.dones.shape == (num_experiences, 1)
 
     def test_clear_buffer(

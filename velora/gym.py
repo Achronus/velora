@@ -4,6 +4,8 @@ from typing import Callable, Literal, List, Tuple
 
 import gymnasium as gym
 from gymnasium import spaces
+from gymnasium.wrappers import RecordEpisodeStatistics
+from gymnasium.wrappers.numpy_to_torch import NumpyToTorch
 
 import numpy as np
 import torch
@@ -78,6 +80,27 @@ def wrap_gym_env(
         return wrapper(env)
 
     return reduce(apply_wrapper, wrappers, env)
+
+
+def add_core_env_wrappers(env: gym.Env, device: torch.device) -> gym.Env:
+    """
+    Wraps a [Gymnasium](https://gymnasium.farama.org/) environment with the following (in order) if not already applied:
+    - [RecordEpisodeStatistics](https://gymnasium.farama.org/api/wrappers/misc_wrappers/#gymnasium.wrappers.RecordEpisodeStatistics)
+    - [NumpyToTorch](https://gymnasium.farama.org/api/wrappers/misc_wrappers/#gymnasium.wrappers.NumpyToTorch)
+
+    Extremely important in pre-built algorithms.
+
+    Parameters:
+        env (gym.Env): the Gymnasium environment
+        device (torch.device): the PyTorch device to perform computations on
+    """
+    if not isinstance(env, RecordEpisodeStatistics):
+        env = RecordEpisodeStatistics(env)
+
+    if not isinstance(env, NumpyToTorch):
+        env = NumpyToTorch(env, device=device)
+
+    return env
 
 
 def make_wrapped_vec_env(

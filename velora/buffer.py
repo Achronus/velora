@@ -5,7 +5,7 @@ from typing import List, Tuple
 
 import torch
 
-from velora.models.utils import to_tensor
+from velora.utils.torch import to_tensor, stack_tensor
 
 
 @dataclass
@@ -54,7 +54,17 @@ class ReplayBuffer:
         self.buffer.append(exp)
 
     def sample(self, batch_size: int) -> BatchExperience:
-        """Returns a random batch of experiences."""
+        """
+        Returns a random batch of experiences.
+
+        Parameters:
+            batch_size (int): the number of items to sample
+
+        Returns:
+            batch (BatchExperience): an object of samples with the attributes
+            (`states`, `actions`, `rewards`, `next_states`, `dones`).
+            All have the same shape `(batch_size, features)`.
+        """
         if len(self.buffer) < batch_size:
             raise ValueError(
                 f"Buffer does not contain enough experiences. Available: {len(self.buffer)}, Requested: {batch_size}"
@@ -65,11 +75,11 @@ class ReplayBuffer:
         states, actions, rewards, next_states, dones = zip(*batch)
 
         return BatchExperience(
-            states=to_tensor(states, stack=True, device=self.device),
-            actions=to_tensor(actions, device=self.device),
-            rewards=to_tensor(rewards, device=self.device, unsqueeze=1),
-            next_states=to_tensor(next_states, stack=True, device=self.device),
-            dones=to_tensor(dones, device=self.device, unsqueeze=1),
+            states=stack_tensor(states, device=self.device),
+            actions=to_tensor(actions, device=self.device).unsqueeze(1),
+            rewards=to_tensor(rewards, device=self.device).unsqueeze(1),
+            next_states=stack_tensor(next_states, device=self.device),
+            dones=to_tensor(dones, device=self.device).unsqueeze(1),
         )
 
     def __len__(self) -> int:
@@ -100,23 +110,25 @@ class RolloutBuffer:
         self.buffer.append(exp)
 
     def sample(self) -> BatchExperience:
-        """Returns the entire rollout buffer as a batch."""
+        """
+        Returns the entire rollout buffer as a batch.
+
+        Returns:
+            batch (BatchExperience): an object of samples with the attributes
+            (`states`, `actions`, `rewards`, `next_states`, `dones`).
+            All have the same shape `(batch_size, features)`.
+        """
         if len(self.buffer) == 0:
             raise BufferError("Buffer is empty!")
 
         states, actions, rewards, next_states, dones = zip(*self.buffer)
 
         return BatchExperience(
-            states=to_tensor(states, stack=True, device=self.device, unsqueeze=1),
-            actions=to_tensor(actions, device=self.device),
-            rewards=to_tensor(rewards, device=self.device, unsqueeze=1),
-            next_states=to_tensor(
-                next_states,
-                stack=True,
-                device=self.device,
-                unsqueeze=1,
-            ),
-            dones=to_tensor(dones, device=self.device, unsqueeze=1),
+            states=stack_tensor(states, device=self.device),
+            actions=to_tensor(actions, device=self.device).unsqueeze(1),
+            rewards=to_tensor(rewards, device=self.device).unsqueeze(1),
+            next_states=stack_tensor(next_states, device=self.device),
+            dones=to_tensor(dones, device=self.device).unsqueeze(1),
         )
 
     def clear(self) -> None:

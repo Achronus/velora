@@ -2,8 +2,9 @@ from copy import deepcopy
 from typing import Tuple, Type
 
 from velora.buffer import BatchExperience, Experience, ReplayBuffer
+from velora.gym import add_core_env_wrappers
 from velora.models import LiquidNCPNetwork
-from velora.models.utils import soft_update
+from velora.utils.torch import soft_update
 
 import torch
 import torch.nn as nn
@@ -208,7 +209,7 @@ class LiquidDDPG:
             target_q, _ = self.critic_target.forward(next_states, next_actions)
             target_q = batch.rewards + (1 - batch.dones) * gamma * target_q
 
-        current_q, _ = self.critic.forward(batch.states, batch.actions.unsqueeze(1))
+        current_q, _ = self.critic.forward(batch.states, batch.actions)
         critic_loss = self.loss.forward(current_q, target_q)
 
         self.critic_optim.zero_grad()
@@ -280,6 +281,8 @@ class LiquidDDPG:
             raise EnvironmentError(
                 f"Invalid '{env.action_space=}'. Must be 'gym.spaces.Box'."
             )
+
+        env = add_core_env_wrappers(env, self.device)
 
         episode_rewards = []
         training_started = False
