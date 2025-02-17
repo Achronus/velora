@@ -47,6 +47,10 @@ flake8-docstrings = "^1.7.0"
 stable-baselines3 = { extras = ["extra"], version = "^2.5.0" }
 tensorboard = "^2.19.0"
 
+
+[tool.poetry.group.ci.dependencies]
+git-cliff = "^2.8.0"
+
 [[tool.poetry.source]]
 name = "pytorch"
 url = "https://download.pytorch.org/whl/cu124"
