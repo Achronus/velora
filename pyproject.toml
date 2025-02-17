@@ -12,7 +12,7 @@ dependencies = [
     "gymnasium[all] (>=1.0,<1.1)",
     "pyyaml (>=6.0.2,<7.0)",
     "types-pyyaml (>=6.0,<7.0)",
-    "wandb (>=0.19.4,<0.20.0)",
+    "wandb (>=0.19.6,<0.20.0)",
     "torch (>=2.6.0,<3.0.0)",
     "torchvision (>=0.21.0,<0.22.0)",
 ]
@@ -24,7 +24,7 @@ torchvision = { source = "pytorch" }
 
 [tool.poetry.group.docs.dependencies]
 mkdocs = "^1.6.1"
-mkdocs-material = "^9.5.42"
+mkdocs-material = "^9.6.4"
 
 
 [tool.poetry.group.notebook.dependencies]
@@ -33,7 +33,7 @@ ipywidgets = "^8.1.5"
 
 
 [tool.poetry.group.testing.dependencies]
-pytest = "^8.3.3"
+pytest = "^8.3.4"
 pytest-cov = "^6.0.0"
 mypy = "^1.13.0"
 flake8 = "^7.1.1"
