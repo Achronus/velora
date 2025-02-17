@@ -12,7 +12,7 @@ Found on:
 
 # Velora
 
-**Velora** is a lightweight and extensible framework built on top of powerful libraries like `Gymnasium` (`Gym`) and `PyTorch`, specializing in a unique approach to Deep Reinforcement Learning (RL) algorithms, a paradigm we call *Liquid RL*.
+**Velora** is a lightweight and extensible framework built on top of powerful libraries like [Gymnasium](https://gymnasium.farama.org/) and [PyTorch](https://pytorch.org/), specializing in a unique approach to Deep Reinforcement Learning (RL) algorithms, a paradigm we call *Liquid RL*.
 
 Instead of Fully-connected Networks, Velora combines [Liquid Neural Networks](https://arxiv.org/abs/2006.04439) (LNNs) with [Neural Circuit Policies](https://arxiv.org/abs/1803.08554) (NCPs), specifically [Ordinary Neural Circuits](https://proceedings.mlr.press/v119/hasani20a.html) (ONCs).
 
@@ -27,7 +27,7 @@ Velora offers Liquidfied PyTorch-based implementations of RL algorithms, designe
 
 In other frameworks, we've seen a trend of heavy abstraction in favour of minimal lines of code. Our approach aims to offer a best of both worlds, abstracting code away but making the details explainable on the backend, while giving you the freedom to customize as needed.
 
-To get started, simply install it through `PIP`:
+To get started, simply install it through [pip](https://pypi.org/):
 
 ```bash
 pip install velora
@@ -82,7 +82,7 @@ model = LiquidDDPG(
 metrics = model.train(env, batch_size, n_episodes=300)
 ```
 
-Currently, the framework only supports `Gymnasium` environments and will likely stay that way.
+Currently, the framework only supports [Gymnasium](https://gymnasium.farama.org/) environments and will likely stay that way.
 
 ## API Structure
 
@@ -92,25 +92,29 @@ The frameworks API is designed to be simple and intuitive. We've broken into two
 
 The primary building blocks you'll use regularly.
 
-- `from velora.models import [algorithm]`
+```python
+from velora.models import [algorithm]
+```
 
 ### Extras
 
 Utility methods that you may use occasionally.
 
-- `from velora.gym import [method]`
-- `from velora.utils import [method]`
+```python
+from velora.gym import [method]
+from velora.utils import [method]
+```
 
 ## Customization
 
 Customization is at the heart of Velora but requires a deeper understanding of the API.
 
-We'll have documentation on this soon.
+You can read more about it in the [documentation tutorials](https://velora.achronus.dev/learn/customize).
 
 ## Active Development
 
-🚧 You can view the [roadmap here](#) 🚧 - 🔜 *Coming soon!* 🔜
+🚧 View the [Roadmap](https://velora.achronus.dev/starting/roadmap) 🚧
 
 **Velora** is a tool that is continuously being developed. There's still a lot to do to make it a fully functioning framework, such as detailed API documentation, and more RL algorithms.
 
-Our goal is to provide a quality open-source product that works 'out-of-the-box' that everyone can experiment with, and then gradually fix unexpected bugs and introduce more features on the road to a `v1.0.0` release.
+Our goal is to provide a quality open-source product that works 'out-of-the-box' that everyone can experiment with, and then gradually fix unexpected bugs and introduce more features on the road to a `v1` release.
