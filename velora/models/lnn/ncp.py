@@ -5,7 +5,7 @@ import torch
 import torch.nn as nn
 
 from velora.models.lnn.cell import NCPLiquidCell
-from velora.models.lnn.wiring import Wiring
+from velora.models.wiring import Wiring
 
 
 class LiquidNCPNetwork(nn.Module):
