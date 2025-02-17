@@ -20,24 +20,25 @@ class LiquidNCPNetwork(nn.Module):
     ) -> None:
         """
         A Liquid Neural Circuit Policy network with three layers:
-        1. Inter (includes sensory inputs)
-        2. Command
-        3. Motor (output)
+            1. Inter (includes sensory inputs)
+            2. Command
+            3. Motor (output)
+
+        Each layer is a `NCPLiquidCell`.
+
+        `inter` and `command` layer neurons are set automatically using:
+        ```python
+        command_neurons = max(int(0.4 * n_neurons), 1)
+        inter_neurons = n_neurons - command_neurons
+        ```
 
         Parameters:
             in_features (int): number of inputs (sensory nodes)
             n_neurons (int): number of decision nodes (inter and command nodes).
-                Nodes are set automatically based on the following:
-                ```python
-                command_neurons = max(int(0.4 * n_neurons), 1)
-                inter_neurons = n_neurons - command_neurons
-                ```
             out_features (int): number of out features (motor nodes)
             sparsity_level (float, optional): controls the connection sparsity
-                between neurons. Must be a value between `[0.1, 0.9]`. When `0.1` neurons are very dense, when `0.9` they are very sparse. Default
-                is '0.5'
+                between neurons. Must be a value between `[0.1, 0.9]`. When `0.1` neurons are very dense, when `0.9` they are very sparse.
             device (torch.device, optional): the device to load tensors on.
-                Default is 'None'
         """
         super().__init__()
 
@@ -85,9 +86,8 @@ class LiquidNCPNetwork(nn.Module):
         """
         Performs a single timestep through the network layers.
 
-        Splits the hidden state into respective chunks for each layer (out_features)
-        to maintain their own independent hidden state dynamics. Then, merges them
-        together to create a new hidden state.
+        Splits the hidden state into respective chunks for each layer
+        (`out_features`) to maintain their own independent hidden state dynamics. Then, merges them together to create a new hidden state.
 
         Parameters:
             x (torch.Tensor): the current batch of data for the timestep with
@@ -95,8 +95,8 @@ class LiquidNCPNetwork(nn.Module):
             hidden (torch.Tensor): the current hidden state
 
         Returns:
-            y_pred,new_h_state (Tuple[torch.Tensor, torch.Tensor]): the network prediction and the merged hidden state from all layers
-            (updated state memory).
+            y_pred (torch.Tensor): the network prediction.
+            new_h_state (torch.Tensor): the merged hidden state from all layers (updated state memory).
         """
         h_state = torch.split(hidden, self._out_sizes, dim=1)
 
@@ -120,22 +120,21 @@ class LiquidNCPNetwork(nn.Module):
 
         Parameters:
             x (torch.Tensor): an input tensor of shape: `(batch_size, features)`.
+
                 - `batch_size` the number of samples per timestep.
                 - `features` the features at each timestep (e.g.,
                 image features, joint coordinates, word embeddings, raw amplitude
                 values).
             h_state (torch.Tensor, optional): initial hidden state of the RNN with
-                shape: `(batch_size, n_units)`. Default is 'None'.
+                shape: `(batch_size, n_units)`.
+
                 - `batch_size` the number of samples.
                 - `n_units` the total number of hidden neurons
                     (`n_neurons + out_features`).
+
         Returns:
-            y_pred,h_state (Tuple[torch.Tensor, torch.Tensor]): the network
-            prediction and the final hidden state.
-
-            When `y_pred` has `batch_size=1`. Out shape is: `(out_features)`. Otherwise, `(batch_size, out_features)`.
-
-            `h_state` out shape is: `(batch_size, n_units)`.
+            y_pred (torch.Tensor): the network prediction. When `batch_size=1`. Out shape is `(out_features)`. Otherwise, `(batch_size, out_features)`.
+            h_state (torch.Tensor): the final hidden state. Output shape is `(batch_size, n_units)`.
         """
         if x.dim() != 2:
             raise ValueError(

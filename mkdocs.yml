@@ -31,6 +31,12 @@ edit_uri: edit/main/docs
 
 extra_css:
   - "assets/css/icons.css"
+  - https://unpkg.com/katex@0/dist/katex.min.css
+
+extra_javascript:
+  - "assets/js/katex.js"
+  - https://unpkg.com/katex@0/dist/katex.min.js
+  - https://unpkg.com/katex@0/dist/contrib/auto-render.min.js
 
 nav:
   - Velora: index.md
@@ -51,11 +57,9 @@ nav:
           - Customization - User Guide: learn/customize/index.md
       - API Reference:
           - API Reference: learn/reference/index.md
-      #     - zentra_api.auth: 
-      #       - zentra_api.auth: learn/reference/auth/index.md
-      #       - context: learn/reference/auth/context.md
-      #       - enums: learn/reference/auth/enums.md
-      #       - security: learn/reference/auth/security.md
+          - models: 
+            - lnn: learn/reference/models/lnn.md
+            - rl: learn/reference/models/rl.md
   - Help: help.md
   - Changelog: 
       - v0.0.1 (Alpha): changelog/v0.0.1.md
@@ -90,17 +94,25 @@ markdown_extensions:
       alternate_style: true
   - pymdownx.tasklist:
       custom_checkbox: true
+  - pymdownx.arithmatex:
+      generic: true
   - toc:
       permalink: true
       title: Page Contents
-
 
 plugins:
   - search
   - mkdocstrings:
       handlers:
         python:
+          paths: [velora]
+          inventories:
+            - url: https://docs.python.org/3/objects.inv
+              domains: [std, py]
+            - url: https://pytorch.org/docs/stable/objects.inv
+            - url: https://docs.pydantic.dev/latest/objects.inv
           options:
+            annotations_path: source
             show_source: true
             show_root_toc_entry: false
             show_object_full_path: true

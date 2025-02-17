@@ -24,21 +24,19 @@ class NCPLiquidCell(nn.Module):
         Plus, it follows an Ordinary Neural Circuit (ONC) approach from this paper:
         [Reinforcement Learning with Ordinary Neural Circuits](https://proceedings.mlr.press/v119/hasani20a.html).
 
-        Same as `LTCCell` but with a weight sparsity mask instead of a
-        backbone. Intended for small-scale architectures.
-
         Equation:
+        $$
         x(t) =
-            σ(-f(x, I, θ_f), t) g(x, I, θ_g)
-            + [1 - σ(-[f(x, I, θ_f)]t)] h(x, I, θ_h)
+            \\sigma(-f(x, I, θ_f), t) \\; g(x, I, θ_g)
+            + \\left[ 1 - \\sigma(-[\\;f(x, I, θ_f)\\;]\\;t) \\right] \\; h(x, I, θ_h)
+        $$
 
         Parameters:
-            in_features (int): number of input nodes
-            n_hidden (int): number of hidden nodes
+            in_features (int): number of input nodes.
+            n_hidden (int): number of hidden nodes.
             mask (torch.Tensor): a matrix of sparse connections
-                usually containing a combination of `[-1, 1, 0]`
+                usually containing a combination of `[-1, 1, 0]`.
             device (torch.device, optional): the device to load tensors on.
-                Default is 'None'
         """
 
         super().__init__()
@@ -69,13 +67,19 @@ class NCPLiquidCell(nn.Module):
 
     def _prep_mask(self, mask: torch.Tensor) -> torch.Tensor:
         """
-        Preprocesses mask to match head size.
+        Utility method. Preprocesses mask to match head size.
 
         Performs three operations:
-        1. Adds a padded matrix of 1s to end of mask in shape
-            `(n_extras, n_extras)` where `n_extras=mask.shape[1]`
-        2. Transposes mask from col matrix -> row matrix
-        3. Gets the absolute values of the mask (swapping -1 -> 1)
+            1. Adds a padded matrix of 1s to end of mask in shape
+               `(n_extras, n_extras)` where `n_extras=mask.shape[1]`
+            2. Transposes mask from col matrix -> row matrix
+            3. Gets the absolute values of the mask (swapping `-1 -> 1`)
+
+        Parameters:
+            mask (torch.Tensor): weight sparsity mask.
+
+        Returns:
+            mask (torch.Tensor): an updated mask.
         """
         n_extras = mask.shape[1]
         extra_nodes = torch.ones((n_extras, n_extras), device=self.device)
@@ -83,7 +87,16 @@ class NCPLiquidCell(nn.Module):
         return torch.abs(mask.T)
 
     def _sparse_head(self, x: torch.Tensor, head: nn.Linear) -> torch.Tensor:
-        """Computes the output for a sparsity mask head."""
+        """
+        Utility method. Computes the output for a sparsity mask head.
+
+        Parameters:
+            x (torch.Tensor): layer inputs.
+            head (nn.Linear): linear head to use with sparse connections.
+
+        Returns:
+            y_pred (torch.Tensor): sparse head prediction.
+        """
         return F.linear(
             x.to(torch.float32),
             head.weight * self.sparsity_mask,
@@ -94,12 +107,12 @@ class NCPLiquidCell(nn.Module):
         self, x: torch.Tensor, g_out: torch.Tensor, h_out: torch.Tensor
     ) -> torch.Tensor:
         """
-        Computes the new hidden state.
+        Helper method. Computes the new hidden state.
 
         Parameters:
-            x (torch.Tensor): input values
-            g_out (torch.Tensor): g_head output
-            h_out (torch.Tensor): h_head output
+            x (torch.Tensor): input values.
+            g_out (torch.Tensor): g_head output.
+            h_out (torch.Tensor): h_head output.
 
         Returns:
             hidden (torch.Tensor): a new hidden state
@@ -122,11 +135,12 @@ class NCPLiquidCell(nn.Module):
         Performs a forward pass through the cell.
 
         Parameters:
-            x (torch.Tensor): input values
-            hidden (torch.Tensor): current hidden state
+            x (torch.Tensor): input values.
+            hidden (torch.Tensor): current hidden state.
 
         Returns:
-            y_pred,h_state (Tuple[torch.Tensor, torch.Tensor]): the cell prediction and the hidden state.
+            y_pred (torch.Tensor): the cell prediction.
+            h_state (torch.Tensor): the hidden state.
         """
         x, hidden = x.to(self.device), hidden.to(self.device)
         x = torch.cat([x, hidden], dim=1)
