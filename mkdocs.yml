@@ -1,0 +1,110 @@
+site_name: Velora
+site_description: A Liquid Reinforcement Learning (RL) framework
+site_url: https://velora.achronus.dev/
+
+theme:
+  name: "material"
+  language: en
+  palette:
+    scheme: slate
+    primary: blue
+    accent: cyan
+  features:
+    - navigation.tabs
+    - navigation.indexes
+    - navigation.top
+    - navigation.path
+    - navigation.footer
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.code.annotate
+  logo: assets/imgs/logo.png
+  favicon: favicon.png
+  icon:
+    repo: fontawesome/brands/github
+
+repo_name: Achronus/velora
+repo_url: https://github.com/Achronus/velora
+edit_uri: edit/main/docs
+
+extra_css:
+  - "assets/css/icons.css"
+
+nav:
+  - Velora: index.md
+  - Getting Started:
+      - Getting Started: starting/index.md
+      - Roadmap: starting/roadmap.md
+      - Appreciation: starting/homage.md
+      - License: starting/license.md
+  - Learn:
+      - Tutorial - User Guide:
+          - Tutorial - User Guide: learn/tutorial/index.md
+          - DDPG: learn/tutorial/ddpg.md
+          # - Creating Routes: learn/tutorial/create-routes.md
+          # - Creating Tables: learn/tutorial/create-tables.md
+          # - Authentication: learn/tutorial/authentication.md
+          # - Project Settings: learn/tutorial/settings.md
+      - Customization - User Guide:
+          - Customization - User Guide: learn/customize/index.md
+      - API Reference:
+          - API Reference: learn/reference/index.md
+      #     - zentra_api.auth: 
+      #       - zentra_api.auth: learn/reference/auth/index.md
+      #       - context: learn/reference/auth/context.md
+      #       - enums: learn/reference/auth/enums.md
+      #       - security: learn/reference/auth/security.md
+  - Help: help.md
+  - Changelog: 
+      - v0.0.1 (Alpha): changelog/v0.0.1.md
+  
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/Achronus/velora
+    - icon: fontawesome/brands/python
+      link: https://pypi.org/project/velora
+
+markdown_extensions:
+  - attr_list
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - tables
+  - md_in_html
+  - footnotes
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+      options:
+        custom_icons:
+          - docs/assets/icons
+  - pymdownx.highlight:
+      pygments_lang_class: true
+      auto_title: true
+      linenums: true
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - toc:
+      permalink: true
+      title: Page Contents
+
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            show_source: true
+            show_root_toc_entry: false
+            show_object_full_path: true
+            show_symbol_type_heading: true
+            show_symbol_type_toc: true
+            show_object_full_path: false
+            docstring_style: google
