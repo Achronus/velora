@@ -105,7 +105,7 @@ class LiquidNCPNetwork(nn.Module):
 
         # Handle layer independence
         for i, layer in enumerate(self.layers.values()):
-            y_pred, h = layer.forward(inputs, h_state[i])
+            y_pred, h = layer(inputs, h_state[i])
             inputs = y_pred  # (batch_size, layer_out_features)
             new_h_state.append(h)
 

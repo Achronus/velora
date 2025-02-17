@@ -59,7 +59,7 @@ class DDPGActor(nn.Module):
             actions,hidden (Tuple[torch.Tensor, torch.Tensor]): returns the action
             predictions and new hidden state.
         """
-        actions, new_hidden = self.ncp.forward(obs, hidden)
+        actions, new_hidden = self.ncp(obs, hidden)
         scaled_actions = torch.tanh(actions)  # Bounded: [-1, 1]
         return scaled_actions, new_hidden
 
@@ -112,7 +112,7 @@ class DDPGCritic(nn.Module):
         """
         inputs = torch.cat([obs, actions], dim=-1)
 
-        q_values, new_hidden = self.ncp.forward(inputs, hidden)
+        q_values, new_hidden = self.ncp(inputs, hidden)
         return q_values, new_hidden
 
 
@@ -205,12 +205,12 @@ class LiquidDDPG:
         """
         with torch.no_grad():
             next_states = batch.next_states
-            next_actions, _ = self.actor_target.forward(next_states)
-            target_q, _ = self.critic_target.forward(next_states, next_actions)
+            next_actions, _ = self.actor_target(next_states)
+            target_q, _ = self.critic_target(next_states, next_actions)
             target_q = batch.rewards + (1 - batch.dones) * gamma * target_q
 
-        current_q, _ = self.critic.forward(batch.states, batch.actions)
-        critic_loss = self.loss.forward(current_q, target_q)
+        current_q, _ = self.critic(batch.states, batch.actions)
+        critic_loss: torch.Tensor = self.loss(current_q, target_q)
 
         self.critic_optim.zero_grad()
         critic_loss.backward()
@@ -225,9 +225,9 @@ class LiquidDDPG:
         Returns:
             actor_loss (float): the Actor's loss value.
         """
-        next_actions, _ = self.actor.forward(states)
-        actor_q, _ = self.critic.forward(states, next_actions)
-        actor_loss = -actor_q.mean()
+        next_actions, _ = self.actor(states)
+        actor_q, _ = self.critic(states, next_actions)
+        actor_loss: torch.Tensor = -actor_q.mean()
 
         self.actor_optim.zero_grad()
         actor_loss.backward()
@@ -364,7 +364,7 @@ class LiquidDDPG:
         """
         self.actor.eval()
         with torch.no_grad():
-            action, hidden = self.actor.forward(state.unsqueeze(0), hidden)
+            action, hidden = self.actor(state.unsqueeze(0), hidden)
 
             if noise_scale > 0:
                 # Exploration noise
