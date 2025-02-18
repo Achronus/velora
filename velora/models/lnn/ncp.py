@@ -5,23 +5,27 @@ import torch
 import torch.nn as nn
 
 from velora.models.lnn.cell import NCPLiquidCell
-from velora.models.wiring import Wiring
+from velora.wiring import Wiring
 
 
 class LiquidNCPNetwork(nn.Module):
     """
-    A Liquid Neural Circuit Policy network with three layers:
-        1. Inter (includes sensory inputs)
-        2. Command
-        3. Motor (output)
+    A Liquid Neural Circuit Policy (NCP) Network with three layers:
+
+    1. Inter (input)
+    2. Command (hidden)
+    3. Motor (output)
 
     Each layer is a `NCPLiquidCell`.
 
-    `inter` and `command` layer neurons are set automatically using:
-    ```python
-    command_neurons = max(int(0.4 * n_neurons), 1)
-    inter_neurons = n_neurons - command_neurons
-    ```
+    !!! note "Decision nodes"
+
+        `inter` and `command` neurons are automatically calculated using:
+
+        ```python
+        command_neurons = max(int(0.4 * n_neurons), 1)
+        inter_neurons = n_neurons - command_neurons
+        ```
     """
 
     def __init__(
@@ -95,7 +99,9 @@ class LiquidNCPNetwork(nn.Module):
         Performs a single timestep through the network layers.
 
         Splits the hidden state into respective chunks for each layer
-        (`out_features`) to maintain their own independent hidden state dynamics. Then, merges them together to create a new hidden state.
+        (`out_features`) to maintain their own independent hidden state dynamics.
+
+        Then, merges them together to create a new hidden state.
 
         Parameters:
             x (torch.Tensor): the current batch of data for the timestep with

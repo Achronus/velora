@@ -61,6 +61,11 @@ nav:
           - models: 
             - lnn: learn/reference/models/lnn.md
             - ddpg: learn/reference/models/ddpg.md
+          - buffer: learn/reference/buffer.md
+          - gymnasium: learn/reference/gym.md
+          - noise: learn/reference/noise.md
+          - utils: learn/reference/utils.md
+          - wiring: learn/reference/wiring.md
   - Help: help.md
   - Changelog: 
       - v0.0.1 (Alpha): changelog/v0.0.1.md

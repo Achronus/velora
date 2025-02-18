@@ -71,9 +71,10 @@ class NCPLiquidCell(nn.Module):
         """
         Utility method. Preprocesses mask to match head size.
 
-        Performs three operations:
+        !!! note "Performs three operations"
+
             1. Adds a padded matrix of 1s to end of mask in shape
-               `(n_extras, n_extras)` where `n_extras=mask.shape[1]`
+                `(n_extras, n_extras)` where `n_extras=mask.shape[1]`
             2. Transposes mask from col matrix -> row matrix
             3. Gets the absolute values of the mask (swapping `-1 -> 1`)
 

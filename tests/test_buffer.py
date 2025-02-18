@@ -197,7 +197,7 @@ class TestRolloutBuffer:
         assert len(rollout_buffer) == 3
 
         # Clear buffer
-        rollout_buffer.clear()
+        rollout_buffer.empty()
         assert len(rollout_buffer) == 0
 
     def test_len_method(
@@ -208,5 +208,5 @@ class TestRolloutBuffer:
         assert len(rollout_buffer) == 1
         rollout_buffer.push(sample_experience)
         assert len(rollout_buffer) == 2
-        rollout_buffer.clear()
+        rollout_buffer.empty()
         assert len(rollout_buffer) == 0

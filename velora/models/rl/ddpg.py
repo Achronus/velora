@@ -123,11 +123,14 @@ class LiquidDDPG:
     A Liquid variant of the Deep Deterministic Policy Gradient (DDPG)
     algorithm from the paper: [Continuous Control with Deep Reinforcement Learning](https://arxiv.org/abs/1509.02971).
 
-    `inter` and `command` layer neurons are set automatically using:
-    ```python
-    command_neurons = max(int(0.4 * n_neurons), 1)
-    inter_neurons = n_neurons - command_neurons
-    ```
+    !!! note "Decision nodes"
+
+        `inter` and `command` neurons are automatically calculated using:
+
+        ```python
+        command_neurons = max(int(0.4 * n_neurons), 1)
+        inter_neurons = n_neurons - command_neurons
+        ```
     """
 
     def __init__(
@@ -283,7 +286,7 @@ class LiquidDDPG:
         output_count: int = 100,
     ) -> None:
         """
-        Trains the agent on a Gymnasium environment.
+        Trains the agent on a Gymnasium environment using a `ReplayBuffer`.
 
         Parameters:
             env (gym.Env): the Gymnasium environment to train on

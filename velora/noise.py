@@ -5,19 +5,21 @@ import torch
 
 class OUNoise:
     """
-    Implements the Ornstein-Uhlenbeck process for generating noise.
+    Implements the [Ornstein-Uhlenbeck](https://journals.aps.org/pr/abstract/10.1103/PhysRev.36.823) (OU) process for generating noise. Often used in Reinforcement Learning to encourage exploration.
 
-    Often used in Reinforcement Learning to encourage exploration.
+    Uses the approach discussed in the DDPG paper: [Continuous Control with Deep Reinforcement Learning](https://arxiv.org/abs/1509.02971).
 
-    Parameters:
-        size (int): size of the sample tensor (e.g., action size).
-        mu (float, optional): The mean value to which the noise gravitates.
-            Defaults to `0.0`.
-        theta (float, optional): The speed of mean reversion. Defaults to `0.15`.
-        sigma (float, optional): The scale of the random component.
-            Defaults to `0.2`.
-        device (torch.device, optional): the device for computation.
-            Defaults to `cpu`
+    $$
+    X_{t+1} = X_{t} + \\theta (\\mu - X_{t}) + \\sigma \\xi_{t}
+    $$
+
+    Where:
+
+    - $X_t$ is the current noise state.
+    - $\\theta$ is the mean-reverting factor (controls how quickly the noise returns to $\\mu$).
+    - $\\mu$ is the long-term mean.
+    - $\\sigma$ is the noise scale.
+    - $\\xi_t \\sim \\mathcal{N}(0,1)$ is standard Gaussian noise.
     """
 
     def __init__(
@@ -29,6 +31,14 @@ class OUNoise:
         sigma: float = 0.2,
         device: torch.device = "cpu",
     ) -> None:
+        """
+        Parameters:
+            size (int): size of the sample tensor (e.g., action size)
+            mu (float, optional): ($\\mu$) The mean value to which the noise gravitates
+            theta (float, optional): ($\\theta$) The speed of mean reversion
+            sigma (float, optional): ($\\sigma$) The scale of the random component
+            device (torch.device, optional): the device to perform computations on
+        """
         self.mu = torch.full((size,), mu, dtype=torch.float32, device=device)
         self.theta = theta
         self.sigma = sigma
@@ -39,15 +49,15 @@ class OUNoise:
         self.reset()
 
     def reset(self) -> None:
-        """Resets the noise process to the mean value."""
+        """Resets the noise process to the mean ($\\mu$) value."""
         self.state = deepcopy(self.mu)
 
     def sample(self) -> torch.Tensor:
         """
-        Generates a new noise sample using the Ornstein-Uhlenbeck process.
+        Generates a new noise sample.
 
         Returns:
-            torch.Tensor: A noise sample of the same shape as `mu`.
+            sample (torch.Tensor): A noise sample of the same shape as $\\mu$.
         """
         t = torch.randn(self.state.shape, dtype=torch.float32, device=self.device)
         dx = self.theta * (self.mu - self.state) + self.sigma * t
