@@ -2,13 +2,21 @@ from dataclasses import dataclass
 from typing import Tuple
 
 import numpy as np
-from pydantic import BaseModel
 
 import torch
 
 
-class NeuronCounts(BaseModel):
-    """Storage container for layer counts."""
+@dataclass
+class NeuronCounts:
+    """
+    Storage container for NCP neuron category counts.
+
+    Parameters:
+        sensory (int): number of input nodes
+        inter (int): number of decision nodes
+        command (int): number of high-level decision nodes
+        motor (int): number of output nodes
+    """
 
     sensory: int
     inter: int
@@ -16,8 +24,17 @@ class NeuronCounts(BaseModel):
     motor: int
 
 
-class ConnectionCounts(BaseModel):
-    """Storage container for synapse connection counts."""
+@dataclass
+class SynapseCounts:
+    """
+    Storage container for NCP neuron synapse connection counts.
+
+    Parameters:
+        sensory (int): number of connections for input nodes
+        inter (int): number of connections for decision nodes
+        command (int): number of connections for high-level decision nodes
+        motor (int): number of connections for output nodes
+    """
 
     sensory: int
     inter: int
@@ -27,32 +44,31 @@ class ConnectionCounts(BaseModel):
 
 @dataclass
 class LayerMasks:
-    """Storage container for layer masks."""
+    """
+    Storage container for layer masks.
+
+    Parameters:
+        inter (torch.Tensor): sparse weight mask for input layer
+        command (torch.Tensor): sparse weight mask for hidden layer
+        motor (torch.Tensor): sparse weight mask for output layer
+    """
 
     inter: torch.Tensor
     command: torch.Tensor
     motor: torch.Tensor
 
 
-class WiringConfig(BaseModel):
-    """A model for extracting wiring config settings."""
-
-    n_neurons: NeuronCounts
-    n_connections: ConnectionCounts
-    density_level: float
-
-
 class Wiring:
     """
-    Wiring for a Neural Circuit Policy (NCP).
+    Creates sparse wiring masks for Neural Circuit Policy (NCP) Networks.
 
-    Parameters:
-        in_features (int): number of inputs (sensory nodes)
-        n_neurons (int): number of decision nodes (inter and command nodes)
-        out_features (int): number of out features (motor nodes)
-        sparsity_level (float, optional): controls the connection sparsity between
-            neurons. Must be a value between `[0.1, 0.9]`. When `0.1` neurons are
-            very dense, when `0.9` they are very sparse. Default is '0.5'
+    !!! note
+
+        NCPs have three layers:
+
+        1. Inter (input)
+        2. Command (hidden)
+        3. Motor (output)
     """
 
     def __init__(
@@ -63,6 +79,19 @@ class Wiring:
         *,
         sparsity_level: float = 0.5,
     ) -> None:
+        """
+        Parameters:
+            in_features (int): number of inputs (sensory nodes)
+            n_neurons (int): number of decision nodes (inter and command nodes)
+            out_features (int): number of out features (motor nodes)
+            sparsity_level (float, optional): controls the connection sparsity between
+                neurons.
+
+                Must be a value between `[0.1, 0.9]` -
+
+                - When `0.1` neurons are very dense.
+                - When `0.9` neurons are very sparse.
+        """
         if sparsity_level < 0.1 or sparsity_level > 0.9:
             raise ValueError(f"'{sparsity_level=}' must be between '[0.1, 0.9]'.")
 
@@ -83,12 +112,17 @@ class Wiring:
 
         self.build()
 
-    def config(self) -> WiringConfig:
-        """Returns parameters as a config."""
-        return WiringConfig(n_neurons=self.counts, **self.__dict__)
-
     def _init_masks(self, n_inputs: int) -> LayerMasks:
-        """Create all layer masks."""
+        """
+        Helper method. Initializes all layer masks with zeros
+        and stores them in a container.
+
+        Parameters:
+            n_inputs (int): the number of input nodes in the layer
+
+        Returns:
+            masks (LayerMasks): initialized layer masks.
+        """
         return LayerMasks(
             inter=torch.zeros(
                 (n_inputs, self.counts.inter),
@@ -106,18 +140,31 @@ class Wiring:
 
     def _synapse_count(self, count: int, scale: int = 1) -> int:
         """
-        A helper method for computing the synapse count.
+        Helper method. Computes the synapse count for a single layer.
 
         Parameters:
             count (int): the number of neurons
-            scale (int, optional): a scale factor. Default is '1'
+            scale (int, optional): a scale factor
+
+        Returns:
+            count (int): synapse count.
         """
         return max(int(count * self.density_level * scale), 1)
 
     def _set_counts(
         self, in_features: int, out_features: int
-    ) -> Tuple[NeuronCounts, ConnectionCounts]:
-        """Computes the node layer and connection counts."""
+    ) -> Tuple[NeuronCounts, SynapseCounts]:
+        """
+        Helper method. Computes the node layer and connection counts.
+
+        Parameters:
+            in_features (int): number of network input nodes
+            out_features (int): number of network output nodes
+
+        Returns:
+            neuron_counts (NeuronCounts): object with neuron counts.
+            synapse_counts (SynapseCounts): object with synapse connection counts.
+        """
         counts = NeuronCounts(
             sensory=in_features,
             inter=self.n_inter,
@@ -125,7 +172,7 @@ class Wiring:
             motor=out_features,
         )
 
-        connections = ConnectionCounts(
+        connections = SynapseCounts(
             sensory=self._synapse_count(self.n_inter),
             inter=self._synapse_count(self.n_command),
             command=self._synapse_count(self.n_command, scale=2),
@@ -135,40 +182,52 @@ class Wiring:
         return counts, connections
 
     @staticmethod
-    def polarity(shape: tuple[int, ...] = (1,)) -> torch.IntTensor:
+    def polarity(shape: Tuple[int, ...] = (1,)) -> torch.IntTensor:
         """
-        Randomly selects a polarity of `-1` or `1` based on shape
-        and returns the results as a torch tensor.
+        Utility method. Randomly selects a polarity of `-1` or `1`, `n` times
+        based on shape.
+
+        Parameters:
+            shape (Tuple[int, ...]): size of the polarity matrix to generate.
+
+        Returns:
+            matrix (torch.Tensor): a polarity matrix filled with `-1` and `1`.
         """
         return torch.IntTensor(np.random.choice([-1, 1], shape))
 
     def _build_connections(self, mask: torch.Tensor, count: int) -> torch.Tensor:
         """
-        Randomly assigns connections to a set of nodes by populating its mask.
+        Helper method. Randomly assigns connections to a set of nodes by populating
+        its mask.
 
-        Performs two operations:
-        1. Applies minimum connections (count) to all nodes.
-        2. Checks all nodes have at least 1 connection.
-            If not, adds a connection to 'missing' nodes.
+        !!! note "Performs two operations"
+
+            1. Applies minimum connections (count) to all nodes.
+            2. Checks all nodes have at least 1 connection.
+                If not, adds a connection to 'missing' nodes.
 
         Parameters:
-            mask (torch.Tensor): the mask matrix.
-            count (int): the number of connections per node.
+            mask (torch.Tensor): the initialized mask
+            count (int): the number of connections per node
 
-        Example:
+        Examples:
             Given 2 sensory (input) nodes and 5 inter neurons, we can define
             our first layer (inter) mask as:
+
             ```python
             import torch
 
             inter_mask = torch.zeros((2, 5), dtype=torch.int32)
             n_connections = 2
 
-            inter_mask = build_connections(inter_mask, n_connections)
+            inter_mask = wiring._build_connections(inter_mask, n_connections)
 
             # tensor([[-1,  1,  0,  0,  1],
             #         [ 0,  0, -1, -1,  0]], dtype=torch.int32)
             ```
+
+        Returns:
+            mask (torch.Tensor): updated layer sparsity mask.
         """
         num_nodes, num_cols = mask.shape
 
@@ -201,14 +260,17 @@ class Wiring:
         self, array: torch.Tensor, count: int
     ) -> torch.Tensor:
         """
-        Adds recurrent connections to a set of nodes.
+        Utility method. Adds recurrent connections to a set of nodes.
 
-        Used for the command neurons to simulate bidirectional
-        connections.
+        Used to simulate bidirectional connections between command neurons. Strictly
+        used for visualization purposes.
 
         Parameters:
-            array (torch.Tensor): the matrix array to apply changes to
+            array (torch.Tensor): an initialized matrix to update
             count (int): total number of connections to add
+
+        Returns:
+            matrix (torch.Tensor): the updated matrix.
         """
         n_nodes = array.shape[0]
 
@@ -221,12 +283,15 @@ class Wiring:
 
     def build(self) -> None:
         """
-        Builds the mask connections for each layer.
+        Builds the mask wiring for each layer.
 
-        The NCP has three layers with separate masks:
-        1. Sensory -> inter
-        2. Inter -> command
-        3. Command -> motor
+        !!! note "Layer format"
+
+            Follows a three layer format, each with separate masks:
+
+            1. Sensory -> inter
+            2. Inter -> command
+            3. Command -> motor
 
         Plus, command recurrent connections for visualization.
         """
@@ -255,5 +320,9 @@ class Wiring:
     def data(self) -> Tuple[LayerMasks, NeuronCounts]:
         """
         Retrieves wiring storage containers for layer masks and node counts.
+
+        Returns:
+            masks (LayerMasks): the object containing layer masks.
+            counts (NeuronCounts): the object containing node counts.
         """
         return self.masks, self.counts
