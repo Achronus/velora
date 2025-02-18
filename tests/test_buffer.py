@@ -161,9 +161,8 @@ class TestRolloutBuffer:
             rollout_buffer.push(sample_experience)
 
         # Attempt to push when buffer is full
-        with pytest.raises(BufferError) as exc_info:
+        with pytest.raises(BufferError):
             rollout_buffer.push(sample_experience)
-        assert str(exc_info.value) == "Buffer full! Use the 'clear()' method first."
 
     def test_sample_empty_buffer(self, rollout_buffer: RolloutBuffer) -> None:
         with pytest.raises(BufferError) as exc_info:

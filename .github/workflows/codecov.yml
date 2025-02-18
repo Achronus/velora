@@ -19,20 +19,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
+      - name: Log in to GitHub Container Registry
+        run: echo "${{ secrets.GHCR_PAT }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
-      - name: Install Poetry
+      - name: Pull Testing Docker Image
         run: |
-          curl -sSL https://install.python-poetry.org | python3 -
-
-      - name: Install dependencies
-        run: poetry install --with testing
+          docker pull ghcr.io/achronus/velora-testdeps:latest
 
       - name: Run tests and collect coverage
-        run: poetry run pytest --cov=zentra --cov-report xml tests/
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/app \
+            ghcr.io/achronus/velora-testdeps:latest \
+            pytest --cov=velora --cov-report xml tests/
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5

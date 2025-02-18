@@ -5,12 +5,7 @@ from functools import partial
 import gymnasium as gym
 from gymnasium import spaces
 
-from velora.gym import (
-    get_latest_env_names,
-    wrap_gym_env,
-    get_obs_shape,
-    get_action_size,
-)
+from velora.gym import get_latest_env_names, wrap_gym_env
 
 
 class TestWrapGymEnv:
@@ -62,40 +57,6 @@ class TestWrapGymEnv:
 
         assert isinstance(wrapped_env, WrapperB)
         assert isinstance(wrapped_env.env, WrapperA)
-
-
-class TestGetObsShape:
-    def test_box_space(self):
-        space = spaces.Box(low=-1, high=1, shape=(4, 84, 84))
-        assert get_obs_shape(space) == (4, 84, 84)
-
-    def test_discrete_space(self):
-        space = spaces.Discrete(10)
-        assert get_obs_shape(space) == (10,)
-
-    def test_unsupported_space(self):
-        space = spaces.MultiDiscrete([3, 3, 3])
-        with pytest.raises(NotImplementedError):
-            get_obs_shape(space)
-
-
-class TestGetActionSize:
-    def test_box_space(self):
-        space = spaces.Box(low=-1, high=1, shape=(4,))
-        assert get_action_size(space) == 4
-
-    def test_box_space_multidimensional(self):
-        space = spaces.Box(low=-1, high=1, shape=(2, 3))
-        assert get_action_size(space) == 6
-
-    def test_discrete_space(self):
-        space = spaces.Discrete(10)
-        assert get_action_size(space) == 10
-
-    def test_unsupported_space(self):
-        space = spaces.MultiDiscrete([3, 3, 3])
-        with pytest.raises(NotImplementedError):
-            get_action_size(space)
 
 
 class TestGetLatestEnvNames:
