@@ -18,34 +18,16 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-      - name: Configure Git Credentials
+
+      - name: Log in to GitHub Container Registry
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Pull Documentation Docker Image
+        run: docker pull ghcr.io/achronus/velora-docs:latest
+
+      - name: Build and Deploy MkDocs
         run: |
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install Poetry
-        run: |
-          curl -sSL https://install.python-poetry.org | python3 -
-
-      - name: Set Poetry config to create virtualenvs inside project
-        run: poetry config virtualenvs.in-project true
-
-      - run: echo "cache_id=$(date --utc '+%V')" >> $GITHUB_ENV
-
-      - uses: actions/cache@v4
-        with:
-          key: mkdocs-material-${{ env.cache_id }}
-          path: .cache
-          restore-keys: |
-            mkdocs-material-
-
-      - name: Install dependencies
-        run: poetry install --only docs
-
-      - name: Deploy MkDocs
-        run: poetry run mkdocs gh-deploy --force
+          docker run --rm \
+            -v ${{ github.workspace }}:/app \
+            ghcr.io/achronus/velora-docs:latest \
+            gh-deploy --force
