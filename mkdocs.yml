@@ -44,6 +44,7 @@ nav:
       - Getting Started: starting/index.md
       - Roadmap: starting/roadmap.md
       - Appreciation: starting/homage.md
+      - Brief History & Motivation: starting/history.md
       - License: starting/license.md
   - Learn:
       - Tutorial - User Guide:
@@ -59,7 +60,7 @@ nav:
           - API Reference: learn/reference/index.md
           - models: 
             - lnn: learn/reference/models/lnn.md
-            - rl: learn/reference/models/rl.md
+            - ddpg: learn/reference/models/ddpg.md
   - Help: help.md
   - Changelog: 
       - v0.0.1 (Alpha): changelog/v0.0.1.md
@@ -111,6 +112,7 @@ plugins:
               domains: [std, py]
             - url: https://pytorch.org/docs/stable/objects.inv
             - url: https://docs.pydantic.dev/latest/objects.inv
+            - url: https://gymnasium.farama.org/objects.inv
           options:
             annotations_path: source
             show_source: true

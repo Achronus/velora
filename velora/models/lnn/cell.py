@@ -6,6 +6,24 @@ import torch.nn.functional as F
 
 
 class NCPLiquidCell(nn.Module):
+    """
+    A Neural Circuit Policy (NCP) Liquid Time-Constant (LTC) cell.
+
+    The LTC cell follows the closed-form continuous-depth
+    (CFC; Equation 10) solution from the paper:
+    [Closed-form Continuous-time Neural Models](https://arxiv.org/abs/2106.13898).
+
+    Plus, it follows an Ordinary Neural Circuit (ONC) approach from this paper:
+    [Reinforcement Learning with Ordinary Neural Circuits](https://proceedings.mlr.press/v119/hasani20a.html).
+
+    Equation:
+    $$
+    x(t) =
+        \\sigma(-f(x, I, θ_f), t) \\; g(x, I, θ_g)
+        + \\left[ 1 - \\sigma(-[\\;f(x, I, θ_f)\\;]\\;t) \\right] \\; h(x, I, θ_h)
+    $$
+    """
+
     def __init__(
         self,
         in_features: int,
@@ -15,22 +33,6 @@ class NCPLiquidCell(nn.Module):
         device: torch.device | None = None,
     ) -> None:
         """
-        A Neural Circuit Policy (NCP) Liquid Time-Constant (LTC) cell.
-
-        The LTC cell follows the closed-form continuous-depth
-        (CFC; Equation 10) solution from the paper:
-        [Closed-form Continuous-time Neural Models](https://arxiv.org/abs/2106.13898).
-
-        Plus, it follows an Ordinary Neural Circuit (ONC) approach from this paper:
-        [Reinforcement Learning with Ordinary Neural Circuits](https://proceedings.mlr.press/v119/hasani20a.html).
-
-        Equation:
-        $$
-        x(t) =
-            \\sigma(-f(x, I, θ_f), t) \\; g(x, I, θ_g)
-            + \\left[ 1 - \\sigma(-[\\;f(x, I, θ_f)\\;]\\;t) \\right] \\; h(x, I, θ_h)
-        $$
-
         Parameters:
             in_features (int): number of input nodes.
             n_hidden (int): number of hidden nodes.

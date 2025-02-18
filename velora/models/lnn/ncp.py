@@ -9,6 +9,21 @@ from velora.models.wiring import Wiring
 
 
 class LiquidNCPNetwork(nn.Module):
+    """
+    A Liquid Neural Circuit Policy network with three layers:
+        1. Inter (includes sensory inputs)
+        2. Command
+        3. Motor (output)
+
+    Each layer is a `NCPLiquidCell`.
+
+    `inter` and `command` layer neurons are set automatically using:
+    ```python
+    command_neurons = max(int(0.4 * n_neurons), 1)
+    inter_neurons = n_neurons - command_neurons
+    ```
+    """
+
     def __init__(
         self,
         in_features: int,
@@ -19,25 +34,18 @@ class LiquidNCPNetwork(nn.Module):
         device: torch.device | None = None,
     ) -> None:
         """
-        A Liquid Neural Circuit Policy network with three layers:
-            1. Inter (includes sensory inputs)
-            2. Command
-            3. Motor (output)
-
-        Each layer is a `NCPLiquidCell`.
-
-        `inter` and `command` layer neurons are set automatically using:
-        ```python
-        command_neurons = max(int(0.4 * n_neurons), 1)
-        inter_neurons = n_neurons - command_neurons
-        ```
-
         Parameters:
             in_features (int): number of inputs (sensory nodes)
             n_neurons (int): number of decision nodes (inter and command nodes).
             out_features (int): number of out features (motor nodes)
             sparsity_level (float, optional): controls the connection sparsity
-                between neurons. Must be a value between `[0.1, 0.9]`. When `0.1` neurons are very dense, when `0.9` they are very sparse.
+                between neurons.
+
+                Must be a value between `[0.1, 0.9]` -
+
+                - When `0.1` neurons are very dense.
+                - When `0.9` they are very sparse.
+
             device (torch.device, optional): the device to load tensors on.
         """
         super().__init__()

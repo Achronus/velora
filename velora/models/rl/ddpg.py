@@ -17,6 +17,10 @@ from velora.noise import OUNoise
 
 
 class DDPGActor(nn.Module):
+    """
+    A Liquid NCP Actor Network for the DDPG algorithm.
+    """
+
     def __init__(
         self,
         num_obs: int,
@@ -26,14 +30,11 @@ class DDPGActor(nn.Module):
         device: torch.device | None = None,
     ):
         """
-        An Actor Network for the DDPG algorithm.
-
         Parameters:
             num_obs (int): the number of input observations
             n_neurons (int): the number of hidden neurons
             num_actions (int): the number of actions
-            device (torch.device, optional): the device to load `torch.Tensors`
-                onto. Default is `None`
+            device (torch.device, optional): the device to perform computations on
         """
 
         super().__init__()
@@ -53,11 +54,11 @@ class DDPGActor(nn.Module):
 
         Parameters:
             obs (torch.Tensor): the batch of state observations
-            hidden (torch.Tensor, optional): the hidden state. Default is `None`
+            hidden (torch.Tensor, optional): the hidden state
 
         Returns:
-            actions,hidden (Tuple[torch.Tensor, torch.Tensor]): returns the action
-            predictions and new hidden state.
+            actions (torch.Tensor): the action predictions.
+            hidden (torch.Tensor): the new hidden state.
         """
         actions, new_hidden = self.ncp(obs, hidden)
         scaled_actions = torch.tanh(actions)  # Bounded: [-1, 1]
@@ -65,6 +66,10 @@ class DDPGActor(nn.Module):
 
 
 class DDPGCritic(nn.Module):
+    """
+    A Liquid NCP Critic Network for the DDPG algorithm.
+    """
+
     def __init__(
         self,
         num_obs: int,
@@ -74,14 +79,11 @@ class DDPGCritic(nn.Module):
         device: torch.device | None = None,
     ):
         """
-        A Critic Network for the DDPG algorithm.
-
         Parameters:
             num_obs (int): the number of input observations
             n_neurons (int): the number of hidden neurons
             num_actions (int): the number of actions
-            device (torch.device, optional): the device to load `torch.Tensors`
-                onto. Default is `None`
+            device (torch.device, optional): the device to perform computations on
         """
         super().__init__()
 
@@ -104,11 +106,11 @@ class DDPGCritic(nn.Module):
         Parameters:
             obs (torch.Tensor): the batch of state observations
             actions (torch.Tensor): the batch of actions
-            hidden (torch.Tensor, optional): the hidden state. Default is `None`
+            hidden (torch.Tensor, optional): the hidden state
 
         Returns:
-            q_values,hidden (Tuple[torch.Tensor, torch.Tensor]): returns the Q-Value
-            predictions and new hidden state.
+            q_values (torch.Tensor): the Q-Value predictions.
+            hidden (torch.Tensor): the new hidden state.
         """
         inputs = torch.cat([obs, actions], dim=-1)
 
@@ -118,28 +120,14 @@ class DDPGCritic(nn.Module):
 
 class LiquidDDPG:
     """
-    A Liquid Network variant of the Deep Deterministic Policy Gradient (DDPG)
-    algorithm from: https://arxiv.org/abs/1509.02971.
+    A Liquid variant of the Deep Deterministic Policy Gradient (DDPG)
+    algorithm from the paper: [Continuous Control with Deep Reinforcement Learning](https://arxiv.org/abs/1509.02971).
 
-    Parameters:
-        state_dim (int): number of inputs (sensory nodes)
-        n_neurons (int): number of decision nodes (inter and command nodes).
-            Nodes are set automatically based on the following:
-            ```python
-            command_neurons = max(int(0.4 * n_neurons), 1)
-            inter_neurons = n_neurons - command_neurons
-            ```
-        action_dim (int): number of outputs (motor nodes)
-        optim (Type[torch.optim.Optimizer], optional): the type of `PyTorch`
-            optimizer to use. Default is `torch.optim.Adam`
-        buffer_size (int, optional): the maximum size of the ReplayBuffer.
-            Default is `100_000`
-        actor_lr (float, optional): the actor optimizer learning rate.
-            Default is `1e-4`
-        critic_lr (float, optional): the critic optimizer learning rate.
-            Default is `1e-3`
-        device (torch.device, optional): the device to load `torch.Tensors` onto.
-            Default is `None`
+    `inter` and `command` layer neurons are set automatically using:
+    ```python
+    command_neurons = max(int(0.4 * n_neurons), 1)
+    inter_neurons = n_neurons - command_neurons
+    ```
     """
 
     def __init__(
@@ -154,8 +142,18 @@ class LiquidDDPG:
         critic_lr: float = 1e-3,
         device: torch.device | None = None,
     ) -> None:
-        super().__init__()
-
+        """
+        Parameters:
+            state_dim (int): number of inputs (sensory nodes)
+            n_neurons (int): number of decision nodes (inter and command nodes).
+            action_dim (int): number of outputs (motor nodes)
+            optim (Type[torch.optim.Optimizer], optional): the type of `PyTorch`
+                optimizer to use
+            buffer_size (int, optional): the maximum size of the ReplayBuffer
+            actor_lr (float, optional): the actor optimizer learning rate
+            critic_lr (float, optional): the critic optimizer learning rate
+            device (torch.device, optional): the device to perform computations on
+        """
         self.state_dim = state_dim
         self.n_neurons = n_neurons
         self.action_dim = action_dim
@@ -192,13 +190,25 @@ class LiquidDDPG:
         self.noise = OUNoise(action_dim, device=device)
 
     def _update_target_networks(self, tau: float) -> None:
-        """Performs a soft update on the target networks."""
+        """
+        Helper method. Performs a soft update on the target networks.
+
+        Parameters:
+            tau (float): a soft decay coefficient for updating the target network
+                weights
+        """
         soft_update(self.actor, self.actor_target, tau)
         soft_update(self.critic, self.critic_target, tau)
 
     def _update_critic(self, batch: BatchExperience, gamma: float) -> float:
         """
-        Performs a Critic Network update.
+        Helper method. Performs a Critic Network update.
+
+        Parameters:
+            batch (BatchExperience): an object containing a batch of experience
+                with `(states, actions, rewards, next_states, dones)` from the
+                buffer
+            gamma (float): the reward discount factor
 
         Returns:
             critic_loss (float): the Critic's loss value.
@@ -220,7 +230,10 @@ class LiquidDDPG:
 
     def _update_actor(self, states: torch.Tensor) -> float:
         """
-        Performs an Actor Network update.
+        Helper method. Performs an Actor Network update.
+
+        Parameters:
+            states (torch.Tensor): a batch of state experiences from the buffer
 
         Returns:
             actor_loss (float): the Actor's loss value.
@@ -236,7 +249,17 @@ class LiquidDDPG:
         return actor_loss.item()
 
     def _train_step(self, batch_size: int, gamma: float) -> Tuple[float, float]:
-        """Performs a single training step."""
+        """
+        Helper method. Performs a single training step.
+
+        Parameters:
+            batch_size (int): number of samples in a batch
+            gamma (float): the reward discount factor
+
+        Returns:
+            critic_loss (float): the critic loss.
+            actor_loss (float): the actor loss.
+        """
         if len(self.buffer) < batch_size:
             return
 
@@ -260,22 +283,23 @@ class LiquidDDPG:
         output_count: int = 100,
     ) -> None:
         """
-        Trains the agent.
+        Trains the agent on a Gymnasium environment.
 
         Parameters:
             env (gym.Env): the Gymnasium environment to train on
             batch_size (int): the number of features in a single batch
-            n_episodes (int, optional): the total number of episodes to train for.
-                Default is `1000`
-            max_steps (int, optional): the total number of steps per episode.
-                Default is `1000`
+            n_episodes (int, optional): the total number of episodes to train for
+            max_steps (int, optional): the total number of steps per episode
             noise_scale (float, optional): the exploration noise added when
-                selecting an action. Default is `0.1`
-            gamma (float, optional): the reward discount factor. Default is `0.99`
+                selecting an action
+            gamma (float, optional): the reward discount factor
             tau (float, optional): the soft update factor used to slowly update
-                the target networks. Default is `0.005`
+                the target networks
             output_count (int, optional): the episodic rate for displaying
-                information to the console. Default is `100`
+                information to the console
+
+        Returns:
+            results (TrainResults): an object containing training results.
         """
         if not isinstance(env.action_space, gym.spaces.Box):
             raise EnvironmentError(
@@ -353,14 +377,13 @@ class LiquidDDPG:
 
         Parameters:
             state (torch.Tensor): the current state
-            hidden (torch.Tensor, optional): the current hidden state.
-                Default is `None`
+            hidden (torch.Tensor, optional): the current hidden state
             noise_scale (float, optional): the exploration noise added when
-                selecting an action. Default is `0.1`
+                selecting an action
 
         Returns:
-            action,hidden (Tuple[torch.Tensor, torch.Tensor]): the action prediction
-            and hidden state.
+            action (torch.Tensor): the action prediction on the given state
+            hidden (torch.Tensor): the Actor networks new hidden state
         """
         self.actor.eval()
         with torch.no_grad():
