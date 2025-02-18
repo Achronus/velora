@@ -36,6 +36,7 @@ class WeightsAndBiases(Analytics):
             project=project_name,
             name=run_name,
             config=config,
+            monitor_gym=True,
             **kwargs,
         )
 

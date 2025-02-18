@@ -1,11 +1,7 @@
-from velora.models.base import AgentModel, TorchAgentModel
-from velora.models.sarsa import Sarsa, QLearning, ExpectedSarsa
-
+from velora.models.lnn import LiquidNCPNetwork
+from velora.models.rl.ddpg import LiquidDDPG
 
 __all__ = [
-    "AgentModel",
-    "TorchAgentModel",
-    "Sarsa",
-    "QLearning",
-    "ExpectedSarsa",
+    "LiquidNCPNetwork",
+    "LiquidDDPG",
 ]
