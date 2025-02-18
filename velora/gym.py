@@ -7,7 +7,6 @@ from gymnasium import spaces
 from gymnasium.wrappers import RecordEpisodeStatistics
 from gymnasium.wrappers.numpy_to_torch import NumpyToTorch
 
-import numpy as np
 import torch
 
 
@@ -39,7 +38,7 @@ def wrap_gym_env(
 ) -> gym.Env:
     """
     Creates a new [Gymnasium](https://gymnasium.farama.org/) environment with
-    one or more [gymnasium.Wrappers](https://gymnasium.farama.org/api/wrappers/table/) wrappers applied.
+    one or more [gymnasium.Wrappers](https://gymnasium.farama.org/api/wrappers/table/) applied.
 
     Parameters:
         env (gymnasium.Env | str): a name of a Gymnasium environment or the
@@ -65,8 +64,8 @@ def wrap_gym_env(
             partial(NormalizeObservation, epsilon=1e-8),
             partial(NormalizeReward, gamma=0.99, epsilon=1e-8),
             partial(ClipReward, max_reward=10.0),
-            RecordEpisodeStatistics,
-            partial(NumpyToTorch, device=torch.device("cuda"))
+            # RecordEpisodeStatistics,
+            # partial(NumpyToTorch, device=torch.device("cuda"))
         ])
         ```
 
@@ -85,10 +84,11 @@ def wrap_gym_env(
 def add_core_env_wrappers(env: gym.Env, device: torch.device) -> gym.Env:
     """
     Wraps a [Gymnasium](https://gymnasium.farama.org/) environment with the following (in order) if not already applied:
+
     - [RecordEpisodeStatistics](https://gymnasium.farama.org/api/wrappers/misc_wrappers/#gymnasium.wrappers.RecordEpisodeStatistics)
     - [NumpyToTorch](https://gymnasium.farama.org/api/wrappers/misc_wrappers/#gymnasium.wrappers.NumpyToTorch)
 
-    Extremely important in pre-built algorithms.
+    Used in all pre-built algorithms.
 
     Parameters:
         env (gym.Env): the Gymnasium environment
@@ -116,6 +116,7 @@ def make_wrapped_vec_env(
     Creates a vectorized [Gymnasium environment](https://gymnasium.farama.org/api/vector/) with predefined wrappers.
 
     Wrappers included:
+
     - [NormalizeObservation](https://gymnasium.farama.org/api/vector/wrappers/#gymnasium.wrappers.vector.NormalizeObservation)
     - [NormalizeReward](https://gymnasium.farama.org/api/vector/wrappers/#gymnasium.wrappers.vector.NormalizeReward)
     - [RecordEpisodeStatistics](https://gymnasium.farama.org/api/vector/wrappers/#gymnasium.wrappers.vector.RecordEpisodeStatistics)
@@ -124,16 +125,15 @@ def make_wrapped_vec_env(
 
     Parameters:
         name (str): the name of the environment
-        n_envs (int, optional): the number of parallel environments (Default is `3`)
+        n_envs (int, optional): the number of parallel environments
         epsilon (float, optional): stability parameter for normalization scaling.
             Used in the `NormalizeObservation` and `NormalizeReward` wrappers
-            (Default is `1e-8`)
         max_reward (float, optional): the max absolute value for discounted return.
-            Used in the `ClipReward` wrapper (Default is `10.0`)
+            Used in the `ClipReward` wrapper
         gamma (float, optional): the discount factor used in `NormalizeReward`
-            wrapper. Applies to the exponential moving average (Default is `0.99`)
+            wrapper. Applies to the exponential moving average
         device (str, optional): the type of CUDA device to load onto.
-            Used in the `NumpyToTorch` wrapper (Default is `cpu`)
+            Used in the `NumpyToTorch` wrapper
     """
     from gymnasium.wrappers.vector import (
         NormalizeObservation,
@@ -156,45 +156,26 @@ def make_wrapped_vec_env(
     return envs
 
 
-def get_obs_shape(obs_space: spaces.Space) -> tuple[int, ...]:
-    """
-    Gets the shape of the observation space (useful for buffers).
-
-    Args:
-        obs_space (gymnasium.spaces.Space): A [Gymnasium](https://gymnasium.farama.org/api/spaces/) environments observation space
-    """
-    if not isinstance(obs_space, (spaces.Discrete, spaces.Box)):
-        raise NotImplementedError(f"'{obs_space}' observation space is not supported")
-
-    if isinstance(obs_space, spaces.Box):
-        return obs_space.shape
-
-    return (obs_space.n,)
-
-
-def get_action_size(action_space: spaces.Space) -> int:
-    """
-    Gets the action space size.
-
-    Args:
-        action_space (gymnasium.spaces.Space): A [Gymnasium](https://gymnasium.farama.org/api/spaces/) environments action space
-    """
-    if not isinstance(action_space, (spaces.Discrete, spaces.Box)):
-        raise NotImplementedError(f"'{action_space}' action space is not supported")
-
-    if isinstance(action_space, spaces.Box):
-        return np.prod(action_space.shape).item()
-
-    return action_space.n
-
-
 def get_action_bounds(action_space: spaces.Box) -> Tuple[float, float]:
-    """Returns the actions bounds from a Box action space."""
+    """
+    Gets the action bounds from a [Box](https://gymnasium.farama.org/api/spaces/fundamental/#gymnasium.spaces.Box) action space.
+
+    Returns:
+        bounds (Tuple[float, float]): the `(low, high)` action thresholds.
+    """
+    if not isinstance(action_space, spaces.Box):
+        raise ValueError(f"'{action_space}' action space is not supported.")
+
     return action_space.low.item(), action_space.high.item()
 
 
 def get_latest_env_names() -> List[str]:
-    """Returns a list of the latest gymnasium environment names."""
+    """
+    Returns a list of the latest [Gymnasium](https://gymnasium.farama.org/) environment names.
+
+    Returns:
+        gym_names (List[str]): a list of names for all latest versions.
+    """
     env_dict = {}
 
     for env in gym.envs.registry.keys():
