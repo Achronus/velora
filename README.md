@@ -1,4 +1,4 @@
-![Logo](/assets/imgs/velora-main.jpg)
+![Logo](https://github.com/Achronus/velora/blob/main/assets/imgs/main.jpg)
 
 [![codecov](https://codecov.io/gh/Achronus/velora/graph/badge.svg?token=OF7WP5Q9PT)](https://codecov.io/gh/Achronus/velora)
 ![Python Version](https://img.shields.io/pypi/pyversions/velora)

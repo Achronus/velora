@@ -167,3 +167,4 @@ cython_debug/
 /examples/*logs/
 /old
 /_build
+CHANGELOG.md

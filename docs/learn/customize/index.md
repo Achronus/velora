@@ -1,3 +1,3 @@
-# Liquid DDPG
+# Customization - User Guide
 
 !!! construction "Coming soon"

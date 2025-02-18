@@ -50,10 +50,6 @@ nav:
       - Tutorial - User Guide:
           - Tutorial - User Guide: learn/tutorial/index.md
           - DDPG: learn/tutorial/ddpg.md
-          # - Creating Routes: learn/tutorial/create-routes.md
-          # - Creating Tables: learn/tutorial/create-tables.md
-          # - Authentication: learn/tutorial/authentication.md
-          # - Project Settings: learn/tutorial/settings.md
       - Customization - User Guide:
           - Customization - User Guide: learn/customize/index.md
       - API Reference:
@@ -68,8 +64,8 @@ nav:
           - wiring: learn/reference/wiring.md
   - Help: help.md
   - Changelog: 
+      - v0.0.2 (Beta): changelog/v0.0.2.md
       - v0.0.1 (Alpha): changelog/v0.0.1.md
-  
 
 extra:
   social:
