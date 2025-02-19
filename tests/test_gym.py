@@ -4,8 +4,17 @@ from functools import partial
 
 import gymnasium as gym
 from gymnasium import spaces
+from gymnasium.wrappers import RecordEpisodeStatistics
+from gymnasium.wrappers.numpy_to_torch import NumpyToTorch
 
-from velora.gym import get_latest_env_names, wrap_gym_env
+import torch
+
+from velora.gym import (
+    get_latest_env_names,
+    wrap_gym_env,
+    add_core_env_wrappers,
+    get_action_bounds,
+)
 
 
 class TestWrapGymEnv:
@@ -57,6 +66,49 @@ class TestWrapGymEnv:
 
         assert isinstance(wrapped_env, WrapperB)
         assert isinstance(wrapped_env.env, WrapperA)
+
+
+class TestAddCoreEnvWrappers:
+    @pytest.fixture
+    def mock_env(self) -> gym.Env:
+        return gym.make("CartPole-v1")
+
+    @pytest.fixture
+    def device(self) -> torch.device:
+        return torch.device("cpu")
+
+    def test_applies_wrappers(self, mock_env: gym.Env, device: torch.device):
+        wrapped_env = add_core_env_wrappers(mock_env, device)
+
+        assert isinstance(wrapped_env, NumpyToTorch)
+        assert isinstance(wrapped_env.env, RecordEpisodeStatistics)
+
+    def test_duplicate_wrappers(self, mock_env: gym.Env, device: torch.device):
+        wrapped_once = add_core_env_wrappers(mock_env, device)
+        wrapped_twice = add_core_env_wrappers(wrapped_once, device)
+
+        assert isinstance(wrapped_twice, NumpyToTorch)
+        assert isinstance(wrapped_twice.env, RecordEpisodeStatistics)
+        assert wrapped_once is wrapped_twice  # No redundant wrapping
+
+
+class TestGetActionBounds:
+    @pytest.fixture
+    def box_space(self) -> gym.spaces.Box:
+        return gym.spaces.Box(low=-1.0, high=1.0, shape=(1,), dtype=float)
+
+    @pytest.fixture
+    def discrete_space(self) -> gym.spaces.Discrete:
+        return gym.spaces.Discrete(5)
+
+    def test_valid(self, box_space: gym.spaces.Box):
+        low, high = get_action_bounds(box_space)
+        assert low == -1.0
+        assert high == 1.0
+
+    def test_invalid(self, discrete_space: gym.spaces.Discrete):
+        with pytest.raises(ValueError, match="action space is not supported"):
+            get_action_bounds(discrete_space)
 
 
 class TestGetLatestEnvNames:

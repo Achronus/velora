@@ -94,66 +94,25 @@ def add_core_env_wrappers(env: gym.Env, device: torch.device) -> gym.Env:
         env (gym.Env): the Gymnasium environment
         device (torch.device): the PyTorch device to perform computations on
     """
-    if not isinstance(env, RecordEpisodeStatistics):
+    has_stats = False
+    has_torch = False
+
+    current_env = env
+    while hasattr(current_env, "env"):
+        if isinstance(current_env, RecordEpisodeStatistics):
+            has_stats = True
+        if isinstance(current_env, NumpyToTorch):
+            has_torch = True
+
+        current_env = current_env.env
+
+    if not has_stats:
         env = RecordEpisodeStatistics(env)
 
-    if not isinstance(env, NumpyToTorch):
+    if not has_torch:
         env = NumpyToTorch(env, device=device)
 
     return env
-
-
-def make_wrapped_vec_env(
-    name: str,
-    *,
-    n_envs: int = 3,
-    epsilon: float = 1e-8,
-    max_reward: float = 10.0,
-    gamma: float = 0.99,
-    device: str = "cpu",
-) -> gym.vector.SyncVectorEnv:
-    """
-    Creates a vectorized [Gymnasium environment](https://gymnasium.farama.org/api/vector/) with predefined wrappers.
-
-    Wrappers included:
-
-    - [NormalizeObservation](https://gymnasium.farama.org/api/vector/wrappers/#gymnasium.wrappers.vector.NormalizeObservation)
-    - [NormalizeReward](https://gymnasium.farama.org/api/vector/wrappers/#gymnasium.wrappers.vector.NormalizeReward)
-    - [RecordEpisodeStatistics](https://gymnasium.farama.org/api/vector/wrappers/#gymnasium.wrappers.vector.RecordEpisodeStatistics)
-    - [ClipReward](https://gymnasium.farama.org/api/vector/wrappers/#gymnasium.wrappers.vector.ClipReward)
-    - [NumpyToTorch](https://gymnasium.farama.org/api/vector/wrappers/#gymnasium.wrappers.vector.NumpyToTorch)
-
-    Parameters:
-        name (str): the name of the environment
-        n_envs (int, optional): the number of parallel environments
-        epsilon (float, optional): stability parameter for normalization scaling.
-            Used in the `NormalizeObservation` and `NormalizeReward` wrappers
-        max_reward (float, optional): the max absolute value for discounted return.
-            Used in the `ClipReward` wrapper
-        gamma (float, optional): the discount factor used in `NormalizeReward`
-            wrapper. Applies to the exponential moving average
-        device (str, optional): the type of CUDA device to load onto.
-            Used in the `NumpyToTorch` wrapper
-    """
-    from gymnasium.wrappers.vector import (
-        NormalizeObservation,
-        NormalizeReward,
-        RecordEpisodeStatistics,
-        ClipReward,
-    )
-    from gymnasium.wrappers.vector.numpy_to_torch import NumpyToTorch
-
-    envs = gym.make_vec(
-        name,
-        num_envs=n_envs,
-        vectorization_mode="sync",
-    )
-    envs = NormalizeObservation(envs, epsilon=epsilon)
-    envs = NormalizeReward(envs, gamma=gamma, epsilon=epsilon)
-    envs = ClipReward(envs, max_reward=max_reward)
-    envs = RecordEpisodeStatistics(envs)
-    envs = NumpyToTorch(envs, device=torch.device(device))
-    return envs
 
 
 def get_action_bounds(action_space: spaces.Box) -> Tuple[float, float]:
