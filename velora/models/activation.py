@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Literal, Self
+from typing import Literal
 
 import torch
 import torch.nn as nn
@@ -52,10 +52,8 @@ class ActivationEnum(Enum):
     LECUN_TANH = LeCunTanh()
 
     @classmethod
-    def get(cls, name: str | Self) -> nn.Module:
+    def get(cls, name: ActivationTypeLiteral) -> nn.Module:
         """Get the `torch.nn` activation function."""
-        if isinstance(name, cls):
-            return name.value
         try:
             return cls[name.upper()].value
         except KeyError:

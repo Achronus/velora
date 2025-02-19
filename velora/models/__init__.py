@@ -1,5 +1,5 @@
 from velora.models.lnn import LiquidNCPNetwork
-from velora.models.rl.ddpg import LiquidDDPG
+from velora.models.ddpg import LiquidDDPG
 
 __all__ = [
     "LiquidNCPNetwork",

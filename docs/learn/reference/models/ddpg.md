@@ -1,3 +1,3 @@
-# velora.models.rl.ddpg
+# velora.models.ddpg
 
-::: velora.models.rl.ddpg
+::: velora.models.ddpg
