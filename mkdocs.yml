@@ -57,6 +57,8 @@ nav:
           - models: 
             - lnn: learn/reference/models/lnn.md
             - ddpg: learn/reference/models/ddpg.md
+            - activation: learn/reference/models/activation.md
+            - backbone: learn/reference/models/backbone.md
           - buffer: learn/reference/buffer.md
           - gymnasium: learn/reference/gym.md
           - noise: learn/reference/noise.md
