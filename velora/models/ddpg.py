@@ -266,7 +266,7 @@ class LiquidDDPG:
         if len(self.buffer) < batch_size:
             return
 
-        batch: BatchExperience = self.buffer.sample(batch_size)
+        batch = self.buffer.sample(batch_size)
 
         critic_loss = self._update_critic(batch, gamma)
         actor_loss = self._update_actor(batch.states)
@@ -366,6 +366,7 @@ class LiquidDDPG:
                     f"Actor Loss: {avg_actor_loss:.2f}"
                 )
 
+        env.close()
         return episode_rewards
 
     def predict(

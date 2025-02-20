@@ -84,8 +84,7 @@ class Wiring:
             in_features (int): number of inputs (sensory nodes)
             n_neurons (int): number of decision nodes (inter and command nodes)
             out_features (int): number of out features (motor nodes)
-            sparsity_level (float, optional): controls the connection sparsity between
-                neurons.
+            sparsity_level (float, optional): controls the connection sparsity between neurons.
 
                 Must be a value between `[0.1, 0.9]` -
 
