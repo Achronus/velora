@@ -99,7 +99,7 @@ class Wiring:
         self.n_command = max(int(0.4 * n_neurons), 1)
         self.n_inter = n_neurons - self.n_command
 
-        self.counts, self.n_connections = self._set_counts(
+        self.counts, self._n_connections = self._set_counts(
             in_features,
             out_features,
         )
@@ -110,6 +110,11 @@ class Wiring:
         )
 
         self.build()
+
+    @property
+    def n_connections(self) -> SynapseCounts:
+        """Gets the `SynapseCounts` object containing neuron connection counts."""
+        return self._n_connections
 
     def _init_masks(self, n_inputs: int) -> LayerMasks:
         """

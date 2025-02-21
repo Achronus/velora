@@ -4,15 +4,13 @@ Buffers a central piece for RL algorithms and are used heavily in our own implem
 
 In Off-Policy agents we use a `ReplayBuffer` and in On-Policy, a `RolloutBuffer`.
 
-???+ api "API Docs"
-
-    [`velora.buffer.ReplayBuffer`](../reference/buffer.md#velora.buffer.ReplayBuffer)
-
-    [`velora.buffer.RolloutBuffer`](../reference/buffer.md#velora.buffer.RolloutBuffer)
-
 We have our own implementations of these that are easy to work with 😊.
 
 ## Replay Buffer
+
+???+ api "API Docs"
+
+    [`velora.buffer.ReplayBuffer`](../reference/buffer.md#velora.buffer.ReplayBuffer)
 
 To create a `ReplayBuffer`, simply give it a `capacity` and a `torch.device` (optional):
 
@@ -98,6 +96,10 @@ len(buffer)  # 1
 This code should work 'as is'.
 
 ## Rollout Buffer
+
+???+ api "API Docs"
+
+    [`velora.buffer.RolloutBuffer`](../reference/buffer.md#velora.buffer.RolloutBuffer)
 
 The `RolloutBuffer` is almost identical to the `ReplayBuffer` with the addition of an `empty()` method that must be used after the buffer is full.
 
@@ -194,6 +196,10 @@ This code should work 'as is'.
 As we've mentioned, `Experience` and `BatchExperience` are two dataclasses.
 
 ### Experience
+
+???+ api "API Docs"
+
+    [`velora.buffer.Experience`](../reference/buffer.md#velora.buffer.Experience)
 
 `Experience` is the one you use to put data into the buffer:
 
@@ -323,6 +329,11 @@ env.close()
 This code should work 'as is'.
 
 ### BatchExperience
+
+???+ api "API Docs"
+
+    [`velora.buffer.BatchExperience`](../reference/buffer.md#velora.buffer.BatchExperience)
+
 
 `BatchExperience` is the one you get out of the buffer:
 

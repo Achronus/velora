@@ -58,7 +58,7 @@ nav:
           - Liquid Networks: learn/customize/liquid.md
           - Buffers: learn/customize/buffers.md
           - Actor-Critics: learn/customize/acs.md
-          # - Backbones: learn/customize/backbone.md
+          - Backbones: learn/customize/backbone.md
       - Theory:
           - Theory: learn/theory/index.md
           - Liquid Neural Networks: learn/theory/lnn.md

@@ -2,13 +2,11 @@
 
 Now that we know how to build our sparsely connected neurons, we can start building our own LNNs.
 
+## Cells as Layers
+
 ???+ api "API Docs"
 
     [`velora.models.lnn.NCPLiquidCell`](../reference/models/lnn.md#velora.models.lnn.cell.NCPLiquidCell)
-    
-    [`velora.models.lnn.LiquidNCPNetwork`](../reference/models/lnn.md#velora.models.lnn.ncp.LiquidNCPNetwork)
-
-## Cells as Layers
 
 We've actually already seen how to do this!
 
@@ -40,7 +38,7 @@ However, using the layers is the tricky part. Since we are using a Recurrent arc
 
 This requires a bit of wizardry ✨. Let's look at some code first:
 
-```python hl_lines="6 13-14 17"
+```python hl_lines="5 10 17-18 21"
 from typing import Tuple
 
 import torch
@@ -91,11 +89,13 @@ def ncp_forward(x: torch.Tensor, hidden: torch.Tensor
     
     Keep an eye out for this when building your own models! 😉
 
-Firstly, we calculate the `output sizes` for each layer and store them in as a list.
+Firstly, we calculate the `output sizes` for each layer and store them in a list.
 
-Next, we iterate over each layer, passing the layers prediction into the next layer, while storing the layer's hidden state in a list.
+Next, we go into the function, split our hidden state into batches that match the output sizes.
 
-Then, flatten the networks hidden states back into a single tensor and return the final layer's prediction with the flattened hidden state array.
+Then, we iterate over each layer, passing the layers prediction into the next layer, while storing the layer's hidden state in a list.
+
+Lastly, we flatten the networks hidden states back into a single tensor and return the final layer's prediction with the flattened hidden state array.
 
 Now we can start using our network! Given some input `x` and an empty hidden state, we can make a prediction:
 
@@ -190,7 +190,11 @@ And that's it! Now you can use cells individually! But honestly, all of that is 
 
 So instead, why don't we use a prebuilt version? 😉
 
-## Prebuilt Network
+## Prebuilt Networks
+
+???+ api "API Docs"
+
+    [`velora.models.lnn.LiquidNCPNetwork`](../reference/models/lnn.md#velora.models.lnn.ncp.LiquidNCPNetwork)
 
 We can eliminate the need to do the previous step by using our prebuilt `LiquidNCPNetwork`.
 

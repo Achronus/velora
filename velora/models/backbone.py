@@ -35,7 +35,8 @@ class MLP(nn.Module):
             out_features (int): the number of output features
             activation (str, optional): the type of activation function used
                 between layers
-            dropout_p (float, optional): the dropout probability rate
+            dropout_p (float, optional): the dropout probability rate used between
+                layers
         """
         super().__init__()
 
@@ -136,6 +137,9 @@ class BasicCNN(nn.Module):
         Returns:
             output_size (int): the number of feature maps.
         """
+        if len(dim) != 2:
+            raise ValueError(f"Invalid '{dim=}'. Should be '(height, width)'.")
+
         with torch.no_grad():
             x = torch.zeros(1, self.in_channels, *dim)
             return self.conv(x).size(1)
@@ -156,4 +160,9 @@ class BasicCNN(nn.Module):
         Returns:
             y_pred (torch.Tensor): the flattened predicted feature maps.
         """
+        if x.dim() != 4:
+            raise ValueError(
+                f"Invalid '{x.shape=}'. Should be `(batch_size, in_channels, height, width)`."
+            )
+
         return self.conv(x)

@@ -79,6 +79,10 @@ Both are designed to be simple and intuitive.
 
 ### NeuronCounts
 
+???+ api "API Docs"
+
+    [`velora.wiring.NeuronCounts`](../../learn/reference/wiring.md#velora.wiring.NeuronCounts)
+
 `NeuronCounts` holds the counts for each type of node:
 
 ```python
@@ -103,6 +107,10 @@ class NeuronCounts:
 ```
 
 ### LayerMasks
+
+???+ api "API Docs"
+
+    [`velora.wiring.LayerMasks`](../../learn/reference/wiring.md#velora.wiring.LayerMasks)
 
 `LayerMasks` holds the created sparsity masks for each NCP layer:
 
@@ -143,6 +151,51 @@ set_seed(64)
 
 wiring = Wiring(in_features=3, n_neurons=10, out_features=1)
 masks, counts = wiring.data()
+```
+
+This code should work 'as is'.
+
+### SynapseCounts
+
+???+ api "API Docs"
+
+    [`velora.wiring.SynapseCounts`](../../learn/reference/wiring.md#velora.wiring.SynapseCounts)
+
+`SynapseCounts` holds the synapse connection counts for each node type:
+
+```python
+@dataclass
+class SynapseCounts:
+    """
+    Storage container for NCP neuron synapse connection counts.
+
+    Parameters:
+        sensory (int): number of connections for input nodes
+        inter (int): number of connections for decision nodes
+        command (int): number of connections for high-level decision nodes
+        motor (int): number of connections for output nodes
+    """
+
+    sensory: int
+    inter: int
+    command: int
+    motor: int
+```
+
+As we've discussed, you likely won't ever need to use this. It's strictly used internally inside the `Wiring` class.
+
+To access it through a created `Wiring` class instance, we use the `n_connections` attribute:
+
+```python
+from velora.utils import set_seed
+from velora.wiring import Wiring
+
+set_seed(64)
+
+wiring = Wiring(in_features=3, n_neurons=10, out_features=1)
+wiring.n_connections
+
+# SynapseCounts(sensory=3, inter=2, command=4, motor=2)
 ```
 
 This code should work 'as is'.
