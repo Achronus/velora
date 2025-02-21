@@ -2,7 +2,7 @@ from typing import Dict, Literal
 import pytest
 import torch
 
-from velora.wiring import Wiring, LayerMasks, NeuronCounts
+from velora.wiring import SynapseCounts, Wiring, LayerMasks, NeuronCounts
 
 WiringParamsType = Dict[
     Literal["in_features", "n_neurons", "out_features", "sparsity_level"],
@@ -48,6 +48,10 @@ class TestWiring:
             wiring.n_command,
             wiring_params["out_features"],
         )
+
+    def test_n_connections(self, wiring: Wiring):
+        result = SynapseCounts(sensory=3, inter=2, command=4, motor=2)
+        assert wiring.n_connections == result
 
     def test_invalid_sparsity_level(self):
         invalid_values = [-0.1, 0.0, 0.05, 0.95, 1.0, 1.5]

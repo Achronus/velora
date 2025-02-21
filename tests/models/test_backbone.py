@@ -38,18 +38,31 @@ class TestMLP:
 
 
 class TestBasicCNN:
-    def test_init(self):
-        model = BasicCNN(in_channels=3)
+    @pytest.fixture
+    def model(self) -> BasicCNN:
+        return BasicCNN(in_channels=3)
+
+    def test_init(self, model: BasicCNN):
         assert isinstance(model.conv, nn.Sequential)
 
-    def test_forward(self):
-        model = BasicCNN(in_channels=3)
+    def test_forward(self, model: BasicCNN):
         x = torch.randn(2, 3, 84, 84)  # Batch of 2, 3 channels, 84x84 image size
         output: torch.Tensor = model(x)
         assert len(output.shape) == 2  # Should be a flattened output
 
-    def test_out_size(self):
-        model = BasicCNN(in_channels=3)
+    def test_out_size(self, model: BasicCNN):
         output_size = model.out_size((84, 84))
         assert isinstance(output_size, int)
         assert output_size > 0
+
+    def test_out_size_shape_error(self, model: BasicCNN):
+        x = torch.randn(1, 64, 64)
+
+        with pytest.raises(ValueError):
+            model.out_size(x)
+
+    def test_forward_shape_error(self, model: BasicCNN):
+        x = torch.randn(1, 64, 64)
+
+        with pytest.raises(ValueError):
+            model(x)
