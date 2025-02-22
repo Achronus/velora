@@ -200,8 +200,8 @@ class LiquidDDPG:
             tau (float): a soft decay coefficient for updating the target network
                 weights
         """
-        soft_update(self.actor, self.actor_target, tau)
-        soft_update(self.critic, self.critic_target, tau)
+        soft_update(self.actor, self.actor_target, tau=tau)
+        soft_update(self.critic, self.critic_target, tau=tau)
 
     def _update_critic(self, batch: BatchExperience, gamma: float) -> float:
         """

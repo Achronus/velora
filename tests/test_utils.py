@@ -197,7 +197,7 @@ class TestNetworkUpdates:
 
             # Perform soft update
             tau = 0.5
-            soft_update(source_net, target_net, tau)
+            soft_update(source_net, target_net, tau=tau)
 
             # Check if parameters were updated correctly
             for initial_target, current_target, source in zip(
