@@ -50,8 +50,8 @@ nav:
       - User Guide - Tutorials:
           - User Guide - Tutorials: learn/tutorial/index.md
           - DDPG: learn/tutorial/ddpg.md
-          # - Gymnasium: learn/tutorial/gym.md
-          # - Utilities: learn/tutorial/utils.md
+          - Gymnasium: learn/tutorial/gym.md
+          - Utilities: learn/tutorial/utils.md
       - Customization:
           - Customization: learn/customize/index.md
           - Wiring: learn/customize/wiring.md

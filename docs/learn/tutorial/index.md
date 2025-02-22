@@ -2,7 +2,7 @@
 
 This tutorial series shows you how to use [`velora`](#) with most of its features, step by step.
 
-Each section shows a different algorithm or set of methods that you can work with.
+Each section shows a different agent algorithm or set of methods that you can work with.
 
 ??? tip "In a Hurry?"
 

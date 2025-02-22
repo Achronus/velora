@@ -160,6 +160,26 @@ This code should work 'as is'.
 
 ---
 
-And that completes the customization tutorials! :partying_face:
+And that completes the customization tutorials! Well done for getting this far! 👏
 
-Well done for getting this far! 👏 And thanks for reading! 😍
+Still eager to learn more? Try one of the options 👇:
+
+<div class="grid cards" markdown>
+
+-   :fontawesome-solid-droplet:{ .lg .middle } __User Guide__
+
+    ---
+
+    Learn how to use Velora's core algorithms and utility methods.
+
+    [:octicons-arrow-right-24: Read more](../tutorial/index.md)
+
+-   :material-note-search:{ .lg .middle } __Theory__
+
+    ---
+
+    Read the theory behind the RL algorithms Velora uses.
+
+    [:octicons-arrow-right-24: Start learning](../theory/index.md)
+
+</div>

@@ -20,6 +20,9 @@ def to_tensor(
         items (List[Any]): a list of items of any type
         dtype (torch.dtype, optional): the data type for the tensor
         device (torch.device, optional): the device to perform computations on
+
+    Returns:
+        tensor (torch.Tensor): the updated `torch.Tensor`.
     """
     return torch.tensor(items).to(dtype).to(device)
 
@@ -40,11 +43,14 @@ def stack_tensor(
         items (List[torch.Tensor]): a list of torch.Tensors full of items
         dtype (torch.dtype, optional): the data type for the tensor
         device (torch.device, optional): the device to perform computations on
+
+    Returns:
+        tensor (torch.Tensor): the updated `torch.Tensor`.
     """
     return torch.stack(items).to(dtype).to(device)
 
 
-def soft_update(source: nn.Module, target: nn.Module, tau: float = 0.005) -> None:
+def soft_update(source: nn.Module, target: nn.Module, *, tau: float = 0.005) -> None:
     """
     Performs a soft parameter update between two PyTorch Networks.
 

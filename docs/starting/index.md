@@ -1,12 +1,12 @@
 # Getting Started
 
-To get started, simply install it through [pip [:material-arrow-right-bottom:]](https://pypi.org/):
+To get started, simply install it through [pip [:material-arrow-right-bottom:]](https://pypi.org/project/velora/):
 
 ```bash
 pip install velora
 ```
 
-Here's a simple example that should work 'as is':
+Here's a simple example:
 
 ```python
 from functools import partial
@@ -54,6 +54,8 @@ model = LiquidDDPG(
 )
 metrics = model.train(env, batch_size, n_episodes=300)
 ```
+
+This code should work 'as is'.
 
 Currently, the framework only supports [Gymnasium [:material-arrow-right-bottom:]](https://gymnasium.farama.org/) environments and will likely stay that way.
 

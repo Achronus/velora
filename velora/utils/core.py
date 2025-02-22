@@ -24,6 +24,9 @@ def set_device(device: str = "auto") -> torch.device:
 
             - Set to `cuda:0`, if available.
             - Else, `cpu`.
+
+    Returns:
+        device (torch.device): the `PyTorch` device.
     """
     if device == "auto":
         device = "cuda:0" if torch.cuda.is_available() else "cpu"
