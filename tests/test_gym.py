@@ -9,12 +9,7 @@ from gymnasium.wrappers.numpy_to_torch import NumpyToTorch
 
 import torch
 
-from velora.gym import (
-    get_latest_env_names,
-    wrap_gym_env,
-    add_core_env_wrappers,
-    get_action_bounds,
-)
+from velora.gym import wrap_gym_env, add_core_env_wrappers
 
 
 class TestWrapGymEnv:
@@ -90,25 +85,6 @@ class TestAddCoreEnvWrappers:
         assert isinstance(wrapped_twice, NumpyToTorch)
         assert isinstance(wrapped_twice.env, RecordEpisodeStatistics)
         assert wrapped_once is wrapped_twice  # No redundant wrapping
-
-
-class TestGetActionBounds:
-    @pytest.fixture
-    def box_space(self) -> gym.spaces.Box:
-        return gym.spaces.Box(low=-1.0, high=1.0, shape=(1,), dtype=float)
-
-    @pytest.fixture
-    def discrete_space(self) -> gym.spaces.Discrete:
-        return gym.spaces.Discrete(5)
-
-    def test_valid(self, box_space: gym.spaces.Box):
-        low, high = get_action_bounds(box_space)
-        assert low == -1.0
-        assert high == 1.0
-
-    def test_invalid(self, discrete_space: gym.spaces.Discrete):
-        with pytest.raises(ValueError, match="action space is not supported"):
-            get_action_bounds(discrete_space)
 
 
 class TestGetLatestEnvNames:

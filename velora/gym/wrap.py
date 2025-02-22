@@ -1,9 +1,7 @@
 from functools import reduce
-import re
-from typing import Callable, Literal, List, Tuple
+from typing import Callable, Literal, List
 
 import gymnasium as gym
-from gymnasium import spaces
 from gymnasium.wrappers import RecordEpisodeStatistics
 from gymnasium.wrappers.numpy_to_torch import NumpyToTorch
 
@@ -53,19 +51,13 @@ def wrap_gym_env(
         from gymnasium.wrappers import (
             NormalizeObservation,
             NormalizeReward,
-            RecordEpisodeStatistics,
             ClipReward,
         )
-        from gymnasium.wrappers.numpy_to_torch import NumpyToTorch
-
-        import torch
 
         env = wrap_gym_env("InvertedPendulum-v5", [
             partial(NormalizeObservation, epsilon=1e-8),
             partial(NormalizeReward, gamma=0.99, epsilon=1e-8),
-            partial(ClipReward, max_reward=10.0),
-            # RecordEpisodeStatistics,
-            # partial(NumpyToTorch, device=torch.device("cuda"))
+            partial(ClipReward, max_reward=10.0)
         ])
         ```
 
@@ -85,8 +77,8 @@ def add_core_env_wrappers(env: gym.Env, device: torch.device) -> gym.Env:
     """
     Wraps a [Gymnasium](https://gymnasium.farama.org/) environment with the following (in order) if not already applied:
 
-    - [RecordEpisodeStatistics](https://gymnasium.farama.org/api/wrappers/misc_wrappers/#gymnasium.wrappers.RecordEpisodeStatistics)
-    - [NumpyToTorch](https://gymnasium.farama.org/api/wrappers/misc_wrappers/#gymnasium.wrappers.NumpyToTorch)
+    - [RecordEpisodeStatistics](https://gymnasium.farama.org/api/wrappers/misc_wrappers/#gymnasium.wrappers.RecordEpisodeStatistics) - for easily retrieving episode statistics.
+    - [NumpyToTorch](https://gymnasium.farama.org/api/wrappers/misc_wrappers/#gymnasium.wrappers.NumpyToTorch) - for turning environment feedback into `PyTorch` tensors.
 
     Used in all pre-built algorithms.
 
@@ -113,40 +105,3 @@ def add_core_env_wrappers(env: gym.Env, device: torch.device) -> gym.Env:
         env = NumpyToTorch(env, device=device)
 
     return env
-
-
-def get_action_bounds(action_space: spaces.Box) -> Tuple[float, float]:
-    """
-    Gets the action bounds from a [Box](https://gymnasium.farama.org/api/spaces/fundamental/#gymnasium.spaces.Box) action space.
-
-    Returns:
-        bounds (Tuple[float, float]): the `(low, high)` action thresholds.
-    """
-    if not isinstance(action_space, spaces.Box):
-        raise ValueError(f"'{action_space}' action space is not supported.")
-
-    return action_space.low.item(), action_space.high.item()
-
-
-def get_latest_env_names() -> List[str]:
-    """
-    Returns a list of the latest [Gymnasium](https://gymnasium.farama.org/) environment names.
-
-    Returns:
-        gym_names (List[str]): a list of names for all latest versions.
-    """
-    env_dict = {}
-
-    for env in gym.envs.registry.keys():
-        match = re.match(r"(.+)-v(\d+)", env)
-        if match:
-            base_name, version = match.groups()
-            version = int(version)
-
-            # Keep only the latest version
-            if base_name not in env_dict or version > env_dict[base_name]:
-                env_dict[base_name] = version
-
-    # Reconstruct the latest version environments
-    latest_envs = [f"{name}-v{version}" for name, version in env_dict.items()]
-    return latest_envs
