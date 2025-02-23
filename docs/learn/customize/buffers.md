@@ -191,6 +191,34 @@ len(buffer)  # 0
 
 This code should work 'as is'.
 
+## Saving and Loading Buffers
+
+Sometimes you might want to reuse a buffers state in a different project. Well, now you can!
+
+We offer both a `save()` and `load()` feature for all buffers 😎.
+
+Once you've created a buffer and used it, simply pass in a `filepath` to the `save` method to store it like `PyTorch` parameters:
+
+```python
+from velora.buffer import ReplayBuffer
+
+buffer = ReplayBuffer(capacity=100, device="cpu")
+
+buffer.save('checkpoints/buffer_100_cpu.pt')
+```
+
+This code should work 'as is'.
+
+Then, to restore it into a new buffer instance, we use `load()` like so:
+
+```python
+from velora.buffer import ReplayBuffer
+
+buffer = ReplayBuffer.load('checkpoints/buffer_100_cpu.pt')
+```
+
+This code should work 'as is'.
+
 ## Experience Dataclasses
 
 As we've mentioned, `Experience` and `BatchExperience` are two dataclasses.

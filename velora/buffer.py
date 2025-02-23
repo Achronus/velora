@@ -1,12 +1,17 @@
 from abc import abstractmethod
 from collections import deque
 from dataclasses import dataclass, astuple
+from pathlib import Path
 import random
-from typing import Any, Deque, Dict, List, Literal, Tuple, override
+from typing import Any, Deque, Dict, List, Literal, Self, Tuple, override
 
 import torch
 
 from velora.utils.torch import to_tensor, stack_tensor
+
+
+StateDictKeys = Literal["buffer", "capacity", "device"]
+BufferKeys = Literal["states", "actions", "rewards", "next_states", "dones"]
 
 
 @dataclass
@@ -127,6 +132,102 @@ class BufferBase:
             size (int): the current size of the buffer.
         """
         return len(self.buffer)
+
+    def state_dict(self) -> Dict[StateDictKeys, Any]:
+        """
+        Return a dictionary containing the buffers contents. Includes:
+
+        - `buffer` - serialized arrays of `{states, actions, rewards, next_states, dones}`.
+        - `capacity` - the maximum capacity of the buffer.
+        - `device` - the device used for computations.
+
+        Returns:
+            state_dict (Dict[Literal["buffer", "capacity", "device"], Any]): a dictionary containing the current state of the buffer.
+        """
+        if len(self.buffer) > 0:
+            states, actions, rewards, next_states, dones = zip(*self.buffer)
+
+            serialized_buffer: Dict[BufferKeys, List[Any]] = {
+                "states": stack_tensor(states).cpu().tolist(),
+                "actions": to_tensor(actions).cpu().tolist(),
+                "rewards": to_tensor(rewards).cpu().tolist(),
+                "next_states": stack_tensor(next_states).cpu().tolist(),
+                "dones": to_tensor(dones).cpu().tolist(),
+            }
+        else:
+            serialized_buffer = {key: [] for key in list(BufferKeys.__args__)}
+
+        return {
+            "buffer": serialized_buffer,
+            "capacity": self.capacity,
+            "device": str(self.device) if self.device else None,
+        }
+
+    def save(self, filepath: str | Path) -> None:
+        """
+        Saves a buffers state to a file.
+
+        Parameters:
+            filepath (str | Path): where to save the buffer state
+
+        Example Usage:
+        ```python
+        from velora.buffer import ReplayBuffer
+
+        buffer = ReplayBuffer(capacity=100, device="cpu")
+
+        buffer.save('checkpoints/buffer_100_cpu.pt')
+        ```
+        """
+        save_path = Path(filepath)
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+
+        state_dict = self.state_dict()
+        torch.save(state_dict, save_path)
+
+    @classmethod
+    def load(cls, filepath: str | Path) -> Self:
+        """
+        Restores the buffer from a saved state.
+
+        Parameters:
+            filepath (str | Path): buffer state file location
+
+        Example Usage:
+        ```python
+        from velora.buffer import ReplayBuffer
+
+        buffer = ReplayBuffer.load('checkpoints/buffer_100_cpu.pt')
+        ```
+        """
+        state_dict = torch.load(filepath)
+
+        buffer = cls(
+            state_dict["capacity"],
+            device=torch.device(state_dict["device"]),
+        )
+
+        data: Dict[BufferKeys, List[Any]] = state_dict["buffer"]
+
+        # Recreate experiences from the parallel arrays
+        for state, action, reward, next_state, done in zip(
+            data["states"],
+            data["actions"],
+            data["rewards"],
+            data["next_states"],
+            data["dones"],
+        ):
+            buffer.push(
+                Experience(
+                    state=to_tensor(state, device=cls.device),
+                    action=action,
+                    reward=reward,
+                    next_state=to_tensor(next_state, device=cls.device),
+                    done=done,
+                )
+            )
+
+        return buffer
 
 
 class ReplayBuffer(BufferBase):
