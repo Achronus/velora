@@ -179,12 +179,6 @@ class LiquidDDPG:
         self.actor_target = deepcopy(self.actor)
         self.critic_target = deepcopy(self.critic)
 
-        # Freeze target networks
-        for p in self.actor_target.parameters():
-            p.requires_grad = False
-        for p in self.critic_target.parameters():
-            p.requires_grad = False
-
         self.actor_optim = optim(self.actor.parameters(), lr=actor_lr)
         self.critic_optim = optim(self.critic.parameters(), lr=critic_lr)
 

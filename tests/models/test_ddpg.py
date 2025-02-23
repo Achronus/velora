@@ -117,12 +117,6 @@ class TestLiquidDDPG:
         assert len(ddpg.buffer) == 0
         assert ddpg.buffer.capacity == ddpg_params["buffer_size"]
 
-        # Check if target networks have frozen parameters
-        for p in ddpg.actor_target.parameters():
-            assert not p.requires_grad
-        for p in ddpg.critic_target.parameters():
-            assert not p.requires_grad
-
     def test_update_target_networks(self, ddpg: LiquidDDPG):
         tau = 0.005
 
