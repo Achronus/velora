@@ -1,7 +1,8 @@
+from abc import abstractmethod
 from collections import deque
 from dataclasses import dataclass, astuple
 import random
-from typing import List, Tuple
+from typing import Any, Deque, Dict, List, Literal, Tuple, override
 
 import torch
 
@@ -68,7 +69,67 @@ class BatchExperience:
     dones: torch.Tensor
 
 
-class ReplayBuffer:
+class BufferBase:
+    """
+    A base class for all buffers.
+    """
+
+    def __init__(self, capacity: int, *, device: torch.device | None = None) -> None:
+        """
+        Parameters:
+            capacity (int): the total capacity of the buffer
+            device (torch.device, optional): the device to perform computations on
+        """
+        self.capacity = capacity
+        self.buffer: Deque[Experience] = deque(maxlen=capacity)
+        self.device = device
+
+    def push(self, exp: Experience) -> None:
+        """
+        Stores an experience in the buffer.
+
+        Parameters:
+            exp (Experience): a single set of experience as an object
+        """
+        self.buffer.append(exp)
+
+    def _batch(self, batch: List[Experience]) -> BatchExperience:
+        """
+        Helper method. Converts a `List[Experience]` into a `BatchExperience`.
+        """
+        states, actions, rewards, next_states, dones = zip(*batch)
+
+        return BatchExperience(
+            states=stack_tensor(states, device=self.device),
+            actions=to_tensor(actions, device=self.device).unsqueeze(1),
+            rewards=to_tensor(rewards, device=self.device).unsqueeze(1),
+            next_states=stack_tensor(next_states, device=self.device),
+            dones=to_tensor(dones, device=self.device).unsqueeze(1),
+        )
+
+    @abstractmethod
+    def sample(self) -> BatchExperience:
+        """
+        Samples experience from the buffer.
+
+        Returns:
+            batch (BatchExperience): an object of samples with the attributes (`states`, `actions`, `rewards`, `next_states`, `dones`).
+
+                All items have the same shape `(batch_size, features)`.
+        """
+        pass  # cover: no pragma
+
+    def __len__(self) -> int:
+        """
+        Gets the current size of the buffer.
+
+        Returns:
+            size (int): the current size of the buffer.
+        """
+        return len(self.buffer)
+
+
+class ReplayBuffer(BufferBase):
     """
     A Buffer for storing agent experiences. Used for Off-Policy agents.
 
@@ -82,19 +143,9 @@ class ReplayBuffer:
             capacity (int): the total capacity of the buffer
             device (torch.device, optional): the device to perform computations on
         """
-        self.capacity = capacity
-        self.buffer = deque(maxlen=capacity)
-        self.device = device
+        super().__init__(capacity, device=device)
 
-    def push(self, exp: Experience) -> None:
-        """
-        Stores an experience in the buffer.
-
-        Parameters:
-            exp (Experience): a single set of experience as an object
-        """
-        self.buffer.append(exp)
-
+    @override
     def sample(self, batch_size: int) -> BatchExperience:
         """
         Samples a random batch of experiences from the buffer.
@@ -113,28 +164,10 @@ class ReplayBuffer:
             )
 
         batch: List[Experience] = random.sample(self.buffer, batch_size)
-
-        states, actions, rewards, next_states, dones = zip(*batch)
-
-        return BatchExperience(
-            states=stack_tensor(states, device=self.device),
-            actions=to_tensor(actions, device=self.device).unsqueeze(1),
-            rewards=to_tensor(rewards, device=self.device).unsqueeze(1),
-            next_states=stack_tensor(next_states, device=self.device),
-            dones=to_tensor(dones, device=self.device).unsqueeze(1),
-        )
-
-    def __len__(self) -> int:
-        """
-        Gets the current size of the buffer.
-
-        Returns:
-            size (int): the current size of the buffer.
-        """
-        return len(self.buffer)
+        return self._batch(batch)
 
 
-class RolloutBuffer:
+class RolloutBuffer(BufferBase):
     """
     A Rollout Buffer for storing agent experiences. Used for On-Policy agents.
 
@@ -148,10 +181,9 @@ class RolloutBuffer:
             capacity (int): Maximum rollout length
             device (torch.device, optional): the device to perform computations on
         """
-        self.capacity = capacity
-        self.buffer = deque(maxlen=capacity)
-        self.device = device
+        super().__init__(capacity, device=device)
 
+    @override
     def push(self, exp: Experience) -> None:
         """
         Stores an experience in the buffer.
@@ -162,8 +194,9 @@ class RolloutBuffer:
         if len(self.buffer) == self.capacity:
             raise BufferError("Buffer full! Use the 'empty()' method first.")
 
-        self.buffer.append(exp)
+        super().push(exp)
 
+    @override
     def sample(self) -> BatchExperience:
         """
         Returns the entire rollout buffer as a batch of experience.
@@ -176,25 +209,8 @@ class RolloutBuffer:
         if len(self.buffer) == 0:
             raise BufferError("Buffer is empty!")
 
-        states, actions, rewards, next_states, dones = zip(*self.buffer)
-
-        return BatchExperience(
-            states=stack_tensor(states, device=self.device),
-            actions=to_tensor(actions, device=self.device).unsqueeze(1),
-            rewards=to_tensor(rewards, device=self.device).unsqueeze(1),
-            next_states=stack_tensor(next_states, device=self.device),
-            dones=to_tensor(dones, device=self.device).unsqueeze(1),
-        )
+        return self._batch(self.buffer)
 
     def empty(self) -> None:
         """Empties the buffer."""
         self.buffer.clear()
-
-    def __len__(self) -> int:
-        """
-        Gets the current size of the buffer.
-
-        Returns:
-            size (int): the current size of the buffer.
-        """
-        return len(self.buffer)
