@@ -2,20 +2,17 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any, Dict, Literal, Self, Tuple, Type, get_args
 
-from velora.buffer import BatchExperience, Experience, ReplayBuffer
-from velora.gym import add_core_env_wrappers
-from velora.models import LiquidNCPNetwork
-from velora.utils.torch import soft_update
-
+import gymnasium as gym
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
 
-import gymnasium as gym
-import numpy as np
-
+from velora.buffer import BatchExperience, Experience, ReplayBuffer
+from velora.gym import add_core_env_wrappers
+from velora.models import LiquidNCPNetwork
 from velora.noise import OUNoise
-
+from velora.utils.torch import soft_update
 
 CheckpointLiteral = Literal[
     "state_dim",

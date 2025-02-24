@@ -1,14 +1,13 @@
+import random
 from abc import abstractmethod
 from collections import deque
-from dataclasses import dataclass, astuple
+from dataclasses import astuple, dataclass
 from pathlib import Path
-import random
 from typing import Any, Deque, Dict, List, Literal, Self, Tuple, get_args, override
 
 import torch
 
-from velora.utils.torch import to_tensor, stack_tensor
-
+from velora.utils.torch import stack_tensor, to_tensor
 
 StateDictKeys = Literal["buffer", "capacity", "device"]
 BufferKeys = Literal["states", "actions", "rewards", "next_states", "dones"]

@@ -1,7 +1,7 @@
 from typing import Any
-from pydantic import PrivateAttr
 
 import wandb
+from pydantic import PrivateAttr
 from wandb.sdk.wandb_run import Run
 
 from velora.analytics.base import Analytics

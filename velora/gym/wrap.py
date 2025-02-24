@@ -1,12 +1,10 @@
 from functools import reduce
-from typing import Callable, Literal, List
+from typing import Callable, List, Literal
 
 import gymnasium as gym
+import torch
 from gymnasium.wrappers import RecordEpisodeStatistics
 from gymnasium.wrappers.numpy_to_torch import NumpyToTorch
-
-import torch
-
 
 WrapperType = List[gym.Wrapper | gym.vector.VectorWrapper | Callable]
 
