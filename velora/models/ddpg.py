@@ -10,7 +10,7 @@ import torch.optim as optim
 
 from velora.buffer import BatchExperience, Experience, ReplayBuffer
 from velora.gym import add_core_env_wrappers
-from velora.models import LiquidNCPNetwork
+from velora.models.lnn.ncp import LiquidNCPNetwork
 from velora.noise import OUNoise
 from velora.utils.torch import soft_update
 
@@ -357,9 +357,8 @@ class LiquidDDPG:
                 state = next_state
 
                 if done:
+                    episode_rewards.append(info["episode"]["r"].item())
                     break
-
-            episode_rewards.append(info["episode"]["r"].item())
 
             if training_started and (i_ep + 1) % window_size == 0:
                 avg_reward = np.mean(episode_rewards[-window_size:])

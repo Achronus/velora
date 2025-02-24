@@ -121,7 +121,7 @@ class BufferBase:
 
                 All items have the same shape `(batch_size, features)`.
         """
-        pass  # cover: no pragma
+        pass  # pragma: no cover
 
     def __len__(self) -> int:
         """
@@ -200,7 +200,11 @@ class BufferBase:
         ```
         """
         state_dict: Dict[StateDictKeys, Any] = torch.load(filepath)
-        device = torch.device(state_dict["device"])
+        device = (
+            torch.device(state_dict["device"])
+            if state_dict["device"] is not None
+            else None
+        )
 
         buffer = cls(
             state_dict["capacity"],

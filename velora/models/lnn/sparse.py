@@ -26,7 +26,7 @@ class SparseParameter(nn.Parameter):
             requires_grad (bool, optional): a flag to enable gradient computations
         """
         # __new__ handles the initialization
-        pass  # cover: no pragma
+        pass  # pragma: no cover
 
     def __new__(
         cls, data: torch.Tensor, mask: torch.Tensor, requires_grad: bool = True
@@ -40,7 +40,7 @@ class SparseParameter(nn.Parameter):
     def __deepcopy__(self, memo: Dict[int, Any]) -> Self:
         """Handle deep copying of the parameter including its mask."""
         if id(self) in memo:
-            return memo[id(self)]
+            return memo[id(self)]  # pragma: no cover
         else:
             result = type(self)(
                 self.data.clone(memory_format=torch.preserve_format),

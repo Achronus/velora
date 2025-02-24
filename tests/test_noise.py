@@ -38,7 +38,7 @@ class TestOUNoise:
         assert noise.sigma == sigma, "Incorrect sigma value"
         assert torch.all(noise.mu == mu), "Incorrect mu value"
         assert noise.mu.shape == (size,), "Incorrect mu shape"
-        assert noise.device == torch.device("cpu"), "Incorrect default device"
+        assert noise.device is None, "Incorrect default device"
 
     def test_custom_device(self) -> None:
         device = torch.device("cpu")  # Using CPU as it's always available

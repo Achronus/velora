@@ -1,4 +1,6 @@
 import pytest
+import os
+import tempfile
 from collections import deque
 
 import torch
@@ -74,7 +76,24 @@ class TestReplayBuffer:
             done=False,
         )
 
-    def test_buffer_initialization(self, replay_buffer: ReplayBuffer) -> None:
+    @pytest.fixture
+    def filled_buffer(
+        self, replay_buffer: ReplayBuffer, sample_experience: Experience
+    ) -> ReplayBuffer:
+        """Fixture that returns a replay buffer with 10 experiences."""
+        for i in range(10):
+            replay_buffer.push(
+                Experience(
+                    state=torch.tensor([float(i), float(i + 1)]),
+                    action=float(i),
+                    reward=float(i * 0.5),
+                    next_state=torch.tensor([float(i + 1), float(i + 2)]),
+                    done=(i == 9),
+                )
+            )
+        return replay_buffer
+
+    def test_buffer_init(self, replay_buffer: ReplayBuffer) -> None:
         assert replay_buffer.capacity == 100
         assert isinstance(replay_buffer.buffer, deque)
         assert len(replay_buffer.buffer) == 0
@@ -125,6 +144,104 @@ class TestReplayBuffer:
         replay_buffer.push(sample_experience)
         assert len(replay_buffer) == 1
 
+    def test_state_dict_empty_buffer(self, replay_buffer: ReplayBuffer) -> None:
+        state_dict = replay_buffer.state_dict()
+
+        assert state_dict["capacity"] == 100
+        assert state_dict["device"] is None
+
+        # Check that buffer fields are empty lists
+        for key in ["states", "actions", "rewards", "next_states", "dones"]:
+            assert state_dict["buffer"][key] == []
+
+    def test_state_dict_filled_buffer(self, filled_buffer: ReplayBuffer) -> None:
+        state_dict = filled_buffer.state_dict()
+
+        assert state_dict["capacity"] == 100
+        assert state_dict["device"] is None
+
+        # Check buffer contents
+        buffer_data = state_dict["buffer"]
+        assert len(buffer_data["states"]) == 10
+        assert len(buffer_data["actions"]) == 10
+        assert len(buffer_data["rewards"]) == 10
+        assert len(buffer_data["next_states"]) == 10
+        assert len(buffer_data["dones"]) == 10
+
+        # Check specific values
+        assert buffer_data["states"][0] == [0.0, 1.0]
+        assert buffer_data["actions"][1] == 1.0
+        assert buffer_data["rewards"][2] == 1.0
+        assert buffer_data["next_states"][3] == [4.0, 5.0]
+        assert buffer_data["dones"][9] == 1.0
+
+    def test_save_load(self, filled_buffer: ReplayBuffer) -> None:
+        with tempfile.NamedTemporaryFile(suffix=".pt", delete=False) as temp_file:
+            filepath = temp_file.name
+
+        try:
+            # Save the buffer
+            filled_buffer.save(filepath)
+            assert os.path.exists(filepath)
+
+            # Load the buffer
+            loaded_buffer = ReplayBuffer.load(filepath)
+
+            # Check properties
+            assert loaded_buffer.capacity == filled_buffer.capacity
+            assert loaded_buffer.device == filled_buffer.device
+            assert len(loaded_buffer) == len(filled_buffer)
+
+            # Check experiences by sampling
+            original_batch = filled_buffer.sample(batch_size=5)
+            loaded_batch = loaded_buffer.sample(batch_size=5)
+
+            # Due to random sampling, we can't directly compare the batches
+            # But we can check they have the same shape and general characteristics
+            assert original_batch.states.shape == loaded_batch.states.shape
+            assert original_batch.actions.shape == loaded_batch.actions.shape
+            assert original_batch.rewards.shape == loaded_batch.rewards.shape
+            assert original_batch.next_states.shape == loaded_batch.next_states.shape
+            assert original_batch.dones.shape == loaded_batch.dones.shape
+
+        finally:
+            # Clean up
+            if os.path.exists(filepath):
+                os.unlink(filepath)
+
+    def test_create_filepath(self) -> None:
+        # Test with string path
+        string_path = "models/checkpoint.pt"
+        buffer_path = ReplayBuffer.create_filepath(string_path)
+        assert str(buffer_path) == "models\\checkpoint.buffer.pt"
+
+        # Test with Path object
+        from pathlib import Path
+
+        path_obj = Path("models/checkpoint.pth")
+        buffer_path = ReplayBuffer.create_filepath(path_obj)
+        assert str(buffer_path) == "models\\checkpoint.buffer.pth"
+
+        # Test with multiple extensions
+        complex_path = "models/run1.model.pt"
+        buffer_path = ReplayBuffer.create_filepath(complex_path)
+        assert str(buffer_path) == "models\\run1.model.buffer.pt"
+
+    def test_save_directory_creation(self, filled_buffer: ReplayBuffer) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            new_dir = os.path.join(temp_dir, "new_subdir", "nested")
+            filepath = os.path.join(new_dir, "buffer.pt")
+
+            # Directory shouldn't exist yet
+            assert not os.path.exists(new_dir)
+
+            # Save should create the directory
+            filled_buffer.save(filepath)
+
+            # Check directory and file were created
+            assert os.path.exists(new_dir)
+            assert os.path.exists(filepath)
+
 
 class TestRolloutBuffer:
     @pytest.fixture
@@ -141,7 +258,24 @@ class TestRolloutBuffer:
             done=False,
         )
 
-    def test_buffer_initialization(self, rollout_buffer: RolloutBuffer) -> None:
+    @pytest.fixture
+    def filled_buffer(
+        self, rollout_buffer: RolloutBuffer, sample_experience: Experience
+    ) -> RolloutBuffer:
+        """Fixture that returns a filled rollout buffer with 3 experiences."""
+        for i in range(3):
+            rollout_buffer.push(
+                Experience(
+                    state=torch.tensor([float(i), float(i + 1)]),
+                    action=float(i),
+                    reward=float(i * 0.5),
+                    next_state=torch.tensor([float(i + 1), float(i + 2)]),
+                    done=(i == 2),
+                )
+            )
+        return rollout_buffer
+
+    def test_buffer_init(self, rollout_buffer: RolloutBuffer) -> None:
         assert rollout_buffer.capacity == 5
         assert isinstance(rollout_buffer.buffer, deque)
         assert len(rollout_buffer.buffer) == 0
@@ -209,3 +343,201 @@ class TestRolloutBuffer:
         assert len(rollout_buffer) == 2
         rollout_buffer.empty()
         assert len(rollout_buffer) == 0
+
+    def test_state_dict_empty_buffer(self, rollout_buffer: RolloutBuffer) -> None:
+        state_dict = rollout_buffer.state_dict()
+
+        assert state_dict["capacity"] == 5
+        assert state_dict["device"] is None
+
+        # Check that buffer fields are empty lists
+        for key in ["states", "actions", "rewards", "next_states", "dones"]:
+            assert state_dict["buffer"][key] == []
+
+    def test_state_dict_filled_buffer(self, filled_buffer: RolloutBuffer) -> None:
+        state_dict = filled_buffer.state_dict()
+
+        assert state_dict["capacity"] == 5
+        assert state_dict["device"] is None
+
+        # Check buffer contents
+        buffer_data = state_dict["buffer"]
+        assert len(buffer_data["states"]) == 3
+        assert len(buffer_data["actions"]) == 3
+        assert len(buffer_data["rewards"]) == 3
+        assert len(buffer_data["next_states"]) == 3
+        assert len(buffer_data["dones"]) == 3
+
+        # Check specific values
+        assert buffer_data["states"][0] == [0.0, 1.0]
+        assert buffer_data["actions"][1] == 1.0
+        assert buffer_data["rewards"][2] == 1.0
+        assert buffer_data["next_states"][1] == [2.0, 3.0]
+        assert buffer_data["dones"][2] == 1.0
+
+    def test_save_load(self, filled_buffer: RolloutBuffer) -> None:
+        with tempfile.NamedTemporaryFile(suffix=".pt", delete=False) as temp_file:
+            filepath = temp_file.name
+
+        try:
+            # Save the buffer
+            filled_buffer.save(filepath)
+            assert os.path.exists(filepath)
+
+            # Load the buffer
+            loaded_buffer = RolloutBuffer.load(filepath)
+
+            # Check properties
+            assert loaded_buffer.capacity == filled_buffer.capacity
+            assert loaded_buffer.device == filled_buffer.device
+            assert len(loaded_buffer) == len(filled_buffer)
+
+            # Check experiences by sampling
+            original_batch = filled_buffer.sample()
+            loaded_batch = loaded_buffer.sample()
+
+            # With RolloutBuffer, we can compare directly as sampling isn't random
+            assert torch.allclose(original_batch.states, loaded_batch.states)
+            assert torch.allclose(original_batch.actions, loaded_batch.actions)
+            assert torch.allclose(original_batch.rewards, loaded_batch.rewards)
+            assert torch.allclose(original_batch.next_states, loaded_batch.next_states)
+            assert torch.allclose(original_batch.dones, loaded_batch.dones)
+
+        finally:
+            # Clean up
+            if os.path.exists(filepath):
+                os.unlink(filepath)
+
+    def test_create_filepath(self) -> None:
+        # Test with string path
+        string_path = "models/checkpoint.pt"
+        buffer_path = RolloutBuffer.create_filepath(string_path)
+        assert str(buffer_path) == "models\\checkpoint.buffer.pt"
+
+        # Test with Path object
+        from pathlib import Path
+
+        path_obj = Path("models/checkpoint.pth")
+        buffer_path = RolloutBuffer.create_filepath(path_obj)
+        assert str(buffer_path) == "models\\checkpoint.buffer.pth"
+
+    def test_save_directory_creation(self, filled_buffer: RolloutBuffer) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            new_dir = os.path.join(temp_dir, "new_subdir", "nested")
+            filepath = os.path.join(new_dir, "buffer.pt")
+
+            # Directory shouldn't exist yet
+            assert not os.path.exists(new_dir)
+
+            # Save should create the directory
+            filled_buffer.save(filepath)
+
+            # Check directory and file were created
+            assert os.path.exists(new_dir)
+            assert os.path.exists(filepath)
+
+    def test_empty_after_save(self, filled_buffer: RolloutBuffer) -> None:
+        with tempfile.NamedTemporaryFile(suffix=".pt", delete=False) as temp_file:
+            filepath = temp_file.name
+
+        try:
+            # Save the buffer
+            filled_buffer.save(filepath)
+
+            # Empty buffer
+            filled_buffer.empty()
+            assert len(filled_buffer) == 0
+
+            # Check state dict reflects empty buffer
+            state_dict = filled_buffer.state_dict()
+            for key in ["states", "actions", "rewards", "next_states", "dones"]:
+                assert state_dict["buffer"][key] == []
+
+            # Should be able to reload from file
+            loaded_buffer = RolloutBuffer.load(filepath)
+            assert len(loaded_buffer) == 3  # Original size before emptying
+
+            # Add more experiences to emptied buffer
+            filled_buffer.push(
+                Experience(
+                    state=torch.tensor([10.0, 11.0]),
+                    action=10.0,
+                    reward=5.0,
+                    next_state=torch.tensor([11.0, 12.0]),
+                    done=False,
+                )
+            )
+            assert len(filled_buffer) == 1
+
+        finally:
+            # Clean up
+            if os.path.exists(filepath):
+                os.unlink(filepath)
+
+    def test_load_and_continue_filling(self) -> None:
+        # Create and fill a buffer
+        buffer = RolloutBuffer(capacity=5)
+        for i in range(3):
+            buffer.push(
+                Experience(
+                    state=torch.tensor([float(i), float(i + 1)]),
+                    action=float(i),
+                    reward=float(i * 0.5),
+                    next_state=torch.tensor([float(i + 1), float(i + 2)]),
+                    done=(i == 2),
+                )
+            )
+
+        with tempfile.NamedTemporaryFile(suffix=".pt", delete=False) as temp_file:
+            filepath = temp_file.name
+
+        try:
+            # Save the buffer
+            buffer.save(filepath)
+
+            # Load the buffer
+            loaded_buffer = RolloutBuffer.load(filepath)
+            assert len(loaded_buffer) == 3
+
+            # Add more experiences
+            loaded_buffer.push(
+                Experience(
+                    state=torch.tensor([10.0, 11.0]),
+                    action=10.0,
+                    reward=5.0,
+                    next_state=torch.tensor([11.0, 12.0]),
+                    done=False,
+                )
+            )
+
+            assert len(loaded_buffer) == 4
+
+            # Try to add experiences up to capacity
+            loaded_buffer.push(
+                Experience(
+                    state=torch.tensor([11.0, 12.0]),
+                    action=11.0,
+                    reward=5.5,
+                    next_state=torch.tensor([12.0, 13.0]),
+                    done=True,
+                )
+            )
+
+            assert len(loaded_buffer) == 5
+
+            # Should raise error on next push
+            with pytest.raises(BufferError, match="Buffer full!"):
+                loaded_buffer.push(
+                    Experience(
+                        state=torch.tensor([12.0, 13.0]),
+                        action=12.0,
+                        reward=6.0,
+                        next_state=torch.tensor([13.0, 14.0]),
+                        done=False,
+                    )
+                )
+
+        finally:
+            # Clean up
+            if os.path.exists(filepath):
+                os.unlink(filepath)
