@@ -29,7 +29,7 @@ class OUNoise:
         mu: float = 0.0,
         theta: float = 0.15,
         sigma: float = 0.2,
-        device: torch.device = torch.device("cpu"),
+        device: torch.device | None = None,
     ) -> None:
         """
         Parameters:

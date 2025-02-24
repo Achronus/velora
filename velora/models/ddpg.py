@@ -330,7 +330,7 @@ class LiquidDDPG:
             critic_losses, actor_losses = [], []
             actor_hidden = None
 
-            for i_step in range(max_steps):
+            for _ in range(max_steps):
                 action, actor_hidden = self.predict(
                     state,
                     actor_hidden,
