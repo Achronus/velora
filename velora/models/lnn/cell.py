@@ -2,7 +2,8 @@ from typing import Tuple
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
+
+from velora.models.lnn.sparse import SparseLinear
 
 
 class NCPLiquidCell(nn.Module):
@@ -49,23 +50,53 @@ class NCPLiquidCell(nn.Module):
         self.device = device
 
         # Absolute to maintain masking (-1 -> 1)
-        self.sparsity_mask = nn.Parameter(
-            self._prep_mask(mask.to(device)),
-            requires_grad=False,
-        )
+        self.sparsity_mask = self._prep_mask(mask.to(device))
 
         self.tanh = nn.Tanh()  # Bounded: [-1, 1]
         self.sigmoid = nn.Sigmoid()  # Bounded: [0, 1]
 
-        self.g_head = nn.Linear(self.head_size, n_hidden, device=device)
-        self.h_head = nn.Linear(self.head_size, n_hidden, device=device)
+        self.g_head = self._make_layer()
+        self.h_head = self._make_layer()
 
         # LTC heads (f)
-        self.f_head_to_g = nn.Linear(self.head_size, n_hidden, device=device)
-        self.f_head_to_h = nn.Linear(self.head_size, n_hidden, device=device)
+        self.f_head_to_g = self._make_layer()
+        self.f_head_to_h = self._make_layer()
 
         # Hidden state projection
-        self.proj = nn.Linear(self.head_size, n_hidden, device=device)
+        self.proj = self._make_layer()
+
+        # Enforce weight sparsity - required
+        def weight_sparsity_hook(
+            module: nn.Module,
+            grad_input: tuple[torch.Tensor | None, ...],
+            grad_output: tuple[torch.Tensor, ...],
+        ) -> None:
+            if hasattr(module, "weight") and hasattr(module.weight, "mask"):
+                device = module.weight.data.device
+                module.weight.data *= module.weight.mask.to(device)
+
+        for module in self.modules():
+            if isinstance(module, SparseLinear):
+                module.register_forward_hook(weight_sparsity_hook)
+
+    def _make_layer(self) -> SparseLinear:
+        """
+        Helper method. Creates a new `SparseLinear` layer with the following values:
+
+        - `in_features` - `self.n_hidden + self.in_features`.
+        - `out_features` - `self.n_hidden`.
+        - `mask` - `self.sparsity_mask`.
+        - `device` - `self.device`.
+
+        Returns:
+            layer (SparseLinear): a `SparseLinear` layer.
+        """
+        return SparseLinear(
+            self.head_size,
+            self.n_hidden,
+            self.sparsity_mask,
+            device=self.device,
+        )
 
     def _prep_mask(self, mask: torch.Tensor) -> torch.Tensor:
         """
@@ -87,24 +118,7 @@ class NCPLiquidCell(nn.Module):
         n_extras = mask.shape[1]
         extra_nodes = torch.ones((n_extras, n_extras), device=self.device)
         mask = torch.concatenate([mask, extra_nodes])
-        return torch.abs(mask.T)
-
-    def _sparse_head(self, x: torch.Tensor, head: nn.Linear) -> torch.Tensor:
-        """
-        Utility method. Computes the output for a sparsity mask head.
-
-        Parameters:
-            x (torch.Tensor): layer inputs.
-            head (nn.Linear): linear head to use with sparse connections.
-
-        Returns:
-            y_pred (torch.Tensor): sparse head prediction.
-        """
-        return F.linear(
-            x.to(torch.float32),
-            head.weight * self.sparsity_mask,
-            head.bias,
-        )
+        return torch.abs(mask.T).to(self.device)
 
     def _new_hidden(
         self, x: torch.Tensor, g_out: torch.Tensor, h_out: torch.Tensor
@@ -123,8 +137,8 @@ class NCPLiquidCell(nn.Module):
         g_head = self.tanh(g_out)  # g(x, I, θ_g)
         h_head = self.tanh(h_out)  # h(x, I, θ_h)
 
-        fh_g = self._sparse_head(x, self.f_head_to_g)
-        fh_h = self._sparse_head(x, self.f_head_to_h)
+        fh_g = self.f_head_to_g(x)
+        fh_h = self.f_head_to_h(x)
 
         gate_out = self.sigmoid(fh_g + fh_h)  # [1 - σ(-[f(x, I, θf)], t)]
         f_head = 1.0 - gate_out  # σ(-f(x, I, θf), t)
@@ -148,9 +162,9 @@ class NCPLiquidCell(nn.Module):
         x, hidden = x.to(self.device), hidden.to(self.device)
         x = torch.cat([x, hidden], dim=1)
 
-        g_out = self._sparse_head(x, self.g_head)
-        h_out = self._sparse_head(x, self.h_head)
+        g_out = self.g_head(x)
+        h_out = self.h_head(x)
 
         new_hidden = self._new_hidden(x, g_out, h_out)
-        y_pred = self._sparse_head(x, self.proj) + new_hidden
+        y_pred = self.proj(x) + new_hidden
         return y_pred, new_hidden
