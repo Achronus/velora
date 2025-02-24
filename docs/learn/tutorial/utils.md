@@ -61,7 +61,7 @@ This code should work 'as is'.
 
 ## Torch
 
-During your own experiments, you might find yourself in need of a quick way to convert data to a `PyTorch` tensor, or want to perform a parameter update between two networks.
+During your own experiments, you might find yourself in need of a quick way to convert data to a `PyTorch` tensor, or want to perform a parameter update between two networks, or even quickly check the number of `parameters` in a model.
 
 We've got a few methods to help with this:
 
@@ -69,6 +69,8 @@ We've got a few methods to help with this:
 - `stack_tensor` - stacks a list of `torch.Tensors` into a single one.
 - `soft_update` - performs a soft parameter update between two `torch.nn.Modules`.
 - `hard_update` - performs a hard parameter update between two `torch.nn.Modules`.
+- `total_parameters` - calculates the total number of parameters for a `torch.nn.Module`.
+- `active_parameters` - calculates the number of active parameters for a `torch.nn.Module`.
 
 ### Item List to Tensor
 
@@ -188,6 +190,36 @@ hard_update(actor, target)
 ```
 
 This code should work 'as is'.
+
+### Model Parameter Counts
+
+???+ api "API Docs"
+
+    [`velora.utils.total_parameters(model)`](../reference/utils.md#velora.utils.torch.total_parameters)
+
+    [`velora.utils.active_parameters(model)`](../reference/utils.md#velora.utils.torch.active_parameters)
+
+Ever been curious about the number of parameters a model has? We've got a few methods to quickly help with this!
+
+`total_parameters()` for ALL parameters, and `active_parameters()` for ones in use:
+
+```python
+from velora.models import LiquidDDPG
+from velora.utils import total_parameters, active_parameters
+
+model = LiquidDDPG(4, 10, 1)
+
+total_params = total_parameters(model.actor)
+active_params = active_parameters(model.actor)
+```
+
+This code should work 'as is'.
+
+???+ warning "Active Parameters"
+
+    `active_parameters` is useful when you first initialize a sparsely connected model. 
+    
+    Using it after training, returns the same result as `total_parameters` due to floating point precision errors. Sparsity masked weights are still close to `0` but with a small `+-` variance. 
 
 ---
 

@@ -6,6 +6,7 @@ import torch.nn as nn
 
 from velora.models.lnn.cell import NCPLiquidCell
 from velora.wiring import Wiring
+from velora.utils.torch import active_parameters, total_parameters
 
 
 class LiquidNCPNetwork(nn.Module):
@@ -91,6 +92,29 @@ class LiquidNCPNetwork(nn.Module):
 
         self.ncp = nn.Sequential(self.layers)
         self._out_sizes = [layer.n_hidden for layer in self.layers.values()]
+
+        self._total_params = total_parameters(self.ncp)
+        self._active_params = active_parameters(self.ncp)
+
+    @property
+    def total_params(self) -> int:
+        """
+        Returns the network's total parameter count.
+
+        Returns:
+            count (int): the total parameter count.
+        """
+        return self._total_params
+
+    @property
+    def active_params(self) -> int:
+        """
+        Returns the network's activate parameter count.
+
+        Returns:
+            count (int): the active parameter count.
+        """
+        return self._active_params
 
     def _ncp_forward(
         self, x: torch.Tensor, hidden: torch.Tensor

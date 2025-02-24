@@ -9,3 +9,5 @@ Liquid Neural Network building blocks.
 ::: velora.models.lnn.cell
 
 ::: velora.models.lnn.ncp
+
+::: velora.models.lnn.sparse

@@ -74,3 +74,30 @@ def hard_update(source: nn.Module, target: nn.Module) -> None:
     """
     for target_param, param in zip(target.parameters(), source.parameters()):
         target_param.data.copy_(param.data)
+
+
+def total_parameters(model: nn.Module) -> int:
+    """
+    Calculates the total number of parameters used in a PyTorch `nn.Module`.
+
+    Parameters:
+        model (nn.Module): a PyTorch module with parameters
+
+    Returns:
+        count (int): the total number of parameters.
+    """
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+
+def active_parameters(model: nn.Module) -> int:
+    """
+    Calculates the active number of parameters used in a PyTorch `nn.Module`.
+    Filters out parameters that are `0`.
+
+    Parameters:
+        model (nn.Module): a PyTorch module with parameters
+
+    Returns:
+        count (int): the total active number of parameters.
+    """
+    return sum((p != 0).sum().item() for p in model.parameters() if p.requires_grad)
