@@ -1,5 +1,6 @@
 from copy import deepcopy
-from typing import Tuple, Type
+from pathlib import Path
+from typing import Any, Dict, Literal, Self, Tuple, Type, get_args
 
 from velora.buffer import BatchExperience, Experience, ReplayBuffer
 from velora.gym import add_core_env_wrappers
@@ -14,6 +15,21 @@ import gymnasium as gym
 import numpy as np
 
 from velora.noise import OUNoise
+
+
+CheckpointLiteral = Literal[
+    "state_dim",
+    "n_neurons",
+    "action_dim",
+    "buffer_size",
+    "device",
+    "actor",
+    "critic",
+    "actor_target",
+    "critic_target",
+    "actor_optim",
+    "critic_optim",
+]
 
 
 class DDPGActor(nn.Module):
@@ -160,6 +176,7 @@ class LiquidDDPG:
         self.state_dim = state_dim
         self.n_neurons = n_neurons
         self.action_dim = action_dim
+        self.buffer_size = buffer_size
         self.device = device
 
         self.actor = DDPGActor(
@@ -277,7 +294,7 @@ class LiquidDDPG:
         noise_scale: float = 0.1,
         gamma: float = 0.99,
         tau: float = 0.005,
-        output_count: int = 100,
+        window_size: int = 100,
     ) -> None:
         """
         Trains the agent on a Gymnasium environment using a `ReplayBuffer`.
@@ -292,8 +309,9 @@ class LiquidDDPG:
             gamma (float, optional): the reward discount factor
             tau (float, optional): the soft update factor used to slowly update
                 the target networks
-            output_count (int, optional): the episodic rate for displaying
-                information to the console
+            window_size (int, optional): controls the episode rate for displaying
+                information to the console and for calculating the reward moving
+                average
 
         Returns:
             results (TrainResults): an object containing training results.
@@ -312,7 +330,6 @@ class LiquidDDPG:
         for i_ep in range(n_episodes):
             state, _ = env.reset()
 
-            episode_reward = 0
             critic_losses, actor_losses = [], []
             actor_hidden = None
 
@@ -322,7 +339,7 @@ class LiquidDDPG:
                     actor_hidden,
                     noise_scale=noise_scale,
                 )
-                next_state, reward, terminated, truncated, _ = env.step(action)
+                next_state, reward, terminated, truncated, info = env.step(action)
                 done = terminated or truncated
 
                 self.buffer.push(
@@ -341,15 +358,14 @@ class LiquidDDPG:
                     actor_losses.append(actor_loss)
 
                 state = next_state
-                episode_reward += reward
 
                 if done:
                     break
 
-            episode_rewards.append(episode_reward)
+            episode_rewards.append(info["episode"]["r"].item())
 
-            if training_started and (i_ep + 1) % output_count == 0:
-                avg_reward = np.mean(episode_rewards[-output_count:])
+            if training_started and (i_ep + 1) % window_size == 0:
+                avg_reward = np.mean(episode_rewards[-window_size:])
                 avg_critic_loss = np.mean(critic_losses)
                 avg_actor_loss = np.mean(actor_losses)
 
@@ -394,3 +410,90 @@ class LiquidDDPG:
 
         self.actor.train()
         return action.flatten(), hidden
+
+    def save(self, filepath: str | Path, *, buffer: bool = False) -> None:
+        """
+        Saves the current model state into a file and optionally the buffer.
+
+        Parameters:
+            filepath (str | Path): the location to store the model state
+            buffer (bool, optional): a flag for storing the buffer state.
+                When `True`, creates a file matching `<filepath>.buffer.<filepath_ext>`
+        """
+        save_path = Path(filepath)
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+
+        checkpoint: Dict[CheckpointLiteral, Any] = {
+            "state_dim": self.state_dim,
+            "n_neurons": self.n_neurons,
+            "action_dim": self.action_dim,
+            "buffer_size": self.buffer_size,
+            "device": str(self.device),
+            "actor": self.actor.state_dict(),
+            "critic": self.critic.state_dict(),
+            "actor_target": self.actor_target.state_dict(),
+            "critic_target": self.critic_target.state_dict(),
+            "actor_optim": self.actor_optim.state_dict(),
+            "critic_optim": self.critic_optim.state_dict(),
+        }
+        torch.save(checkpoint, save_path)
+
+        if buffer:
+            buffer_path = self.buffer.create_filepath(save_path)
+            self.buffer.save(buffer_path)
+
+    @classmethod
+    def load(cls, filepath: str | Path, *, buffer: bool = False) -> Self:
+        """
+        Loads a saved model state with and optionally with a buffer.
+
+        Parameters:
+            filepath (str | Path): the location for the saved model state
+            buffer (bool, optional): a flag for loading the buffer state.
+                When `True`, filename must match `<filepath>.buffer.<filepath_ext>`
+        """
+        load_path = Path(filepath)
+        checkpoint: Dict[CheckpointLiteral, Any] = torch.load(load_path)
+        buffer_path = None
+
+        valid_keys = set(get_args(CheckpointLiteral))
+        if not all(key in valid_keys for key in checkpoint.keys()):
+            raise ValueError(
+                "File cannot be loaded. Mismatch between checkpoint keys! Are you loading the right file?"
+            )
+
+        # Create new model instance
+        model = cls(
+            checkpoint["state_dim"],
+            checkpoint["n_neurons"],
+            checkpoint["action_dim"],
+            buffer_size=checkpoint["buffer_size"],
+            device=torch.device(checkpoint["device"]),
+        )
+
+        # Check buffer valid
+        if buffer:
+            buffer_path = model.buffer.create_filepath(load_path)
+
+            if not buffer_path.exists():
+                raise FileNotFoundError(
+                    f"Buffer file '{buffer_path}' does not exist! Try with `buffer=False` instead."
+                )
+
+        model.actor.load_state_dict(checkpoint["actor"])
+        model.critic.load_state_dict(checkpoint["critic"])
+        model.actor_target.load_state_dict(checkpoint["actor_target"])
+        model.critic_target.load_state_dict(checkpoint["critic_target"])
+        model.actor_optim.load_state_dict(checkpoint["actor_optim"])
+        model.critic_optim.load_state_dict(checkpoint["critic_optim"])
+
+        if buffer:
+            model.buffer = model.buffer.load(buffer_path)
+
+        print(
+            f"Loaded model with:\n"
+            f"  state_dim={model.state_dim}, n_neurons={model.n_neurons}, action_dim={model.action_dim}\n"
+            f"  optim={type(model.actor_optim).__name__}, device={model.device}\n"
+            f"  buffer_size={model.buffer_size:,}, buffer_restored={buffer}"
+        )
+        return model

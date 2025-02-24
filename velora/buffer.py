@@ -3,7 +3,7 @@ from collections import deque
 from dataclasses import dataclass, astuple
 from pathlib import Path
 import random
-from typing import Any, Deque, Dict, List, Literal, Self, Tuple, override
+from typing import Any, Deque, Dict, List, Literal, Self, Tuple, get_args, override
 
 import torch
 
@@ -155,7 +155,7 @@ class BufferBase:
                 "dones": to_tensor(dones).cpu().tolist(),
             }
         else:
-            serialized_buffer = {key: [] for key in list(BufferKeys.__args__)}
+            serialized_buffer = {key: [] for key in list(get_args(BufferKeys))}
 
         return {
             "buffer": serialized_buffer,
@@ -200,11 +200,12 @@ class BufferBase:
         buffer = ReplayBuffer.load('checkpoints/buffer_100_cpu.pt')
         ```
         """
-        state_dict = torch.load(filepath)
+        state_dict: Dict[StateDictKeys, Any] = torch.load(filepath)
+        device = torch.device(state_dict["device"])
 
         buffer = cls(
             state_dict["capacity"],
-            device=torch.device(state_dict["device"]),
+            device=device,
         )
 
         data: Dict[BufferKeys, List[Any]] = state_dict["buffer"]
@@ -219,15 +220,31 @@ class BufferBase:
         ):
             buffer.push(
                 Experience(
-                    state=to_tensor(state, device=cls.device),
+                    state=to_tensor(state, device=device),
                     action=action,
                     reward=reward,
-                    next_state=to_tensor(next_state, device=cls.device),
+                    next_state=to_tensor(next_state, device=device),
                     done=done,
                 )
             )
 
         return buffer
+
+    @staticmethod
+    def create_filepath(filepath: str | Path) -> Path:
+        """
+        Updates a given `filepath` and converts it into a `buffer` friendly one.
+
+        Parameters:
+            filepath(str | Path): a filepath to convert
+
+        Returns:
+            buffer_path (Path): a buffer friendly filepath in the form `<filepath>.buffer.<filepath_ext>`.
+        """
+        path = Path(filepath)
+        extension = path.name.split(".")[-1]
+        buffer_name = path.name.replace(extension, f"buffer.{extension}")
+        return path.with_name(buffer_name)
 
 
 class ReplayBuffer(BufferBase):

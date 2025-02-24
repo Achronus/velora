@@ -251,7 +251,7 @@ class TestLiquidDDPG:
                     batch_size=batch_size,
                     n_episodes=n_episodes,
                     max_steps=10,
-                    output_count=output_count,
+                    window_size=output_count,
                 )
 
                 # Verify statistics were printed with correct format
