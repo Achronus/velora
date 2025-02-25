@@ -2,7 +2,6 @@ from dataclasses import dataclass
 from typing import Tuple
 
 import numpy as np
-
 import torch
 
 
@@ -84,8 +83,7 @@ class Wiring:
             in_features (int): number of inputs (sensory nodes)
             n_neurons (int): number of decision nodes (inter and command nodes)
             out_features (int): number of out features (motor nodes)
-            sparsity_level (float, optional): controls the connection sparsity between
-                neurons.
+            sparsity_level (float, optional): controls the connection sparsity between neurons.
 
                 Must be a value between `[0.1, 0.9]` -
 
@@ -100,7 +98,7 @@ class Wiring:
         self.n_command = max(int(0.4 * n_neurons), 1)
         self.n_inter = n_neurons - self.n_command
 
-        self.counts, self.n_connections = self._set_counts(
+        self.counts, self._n_connections = self._set_counts(
             in_features,
             out_features,
         )
@@ -111,6 +109,11 @@ class Wiring:
         )
 
         self.build()
+
+    @property
+    def n_connections(self) -> SynapseCounts:
+        """Gets the `SynapseCounts` object containing neuron connection counts."""
+        return self._n_connections
 
     def _init_masks(self, n_inputs: int) -> LayerMasks:
         """

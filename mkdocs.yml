@@ -47,16 +47,29 @@ nav:
       - Brief History & Motivation: starting/history.md
       - License: starting/license.md
   - Learn:
-      - Tutorial - User Guide:
-          - Tutorial - User Guide: learn/tutorial/index.md
+      - User Guide - Tutorials:
+          - User Guide - Tutorials: learn/tutorial/index.md
           - DDPG: learn/tutorial/ddpg.md
-      - Customization - User Guide:
-          - Customization - User Guide: learn/customize/index.md
+          - Saving & Loading Models: learn/tutorial/save.md
+          - Gymnasium: learn/tutorial/gym.md
+          - Utilities: learn/tutorial/utils.md
+      - Customization:
+          - Customization: learn/customize/index.md
+          - Wiring: learn/customize/wiring.md
+          - Liquid Networks: learn/customize/liquid.md
+          - Buffers: learn/customize/buffers.md
+          - Actor-Critics: learn/customize/acs.md
+          - Backbones: learn/customize/backbone.md
+      - Theory:
+          - Theory: learn/theory/index.md
+          - Liquid Neural Networks: learn/theory/lnn.md
       - API Reference:
           - API Reference: learn/reference/index.md
           - models: 
             - lnn: learn/reference/models/lnn.md
             - ddpg: learn/reference/models/ddpg.md
+            - activation: learn/reference/models/activation.md
+            - backbone: learn/reference/models/backbone.md
           - buffer: learn/reference/buffer.md
           - gymnasium: learn/reference/gym.md
           - noise: learn/reference/noise.md
@@ -64,6 +77,7 @@ nav:
           - wiring: learn/reference/wiring.md
   - Help: help.md
   - Changelog: 
+      - v0.0.3 (Beta): changelog/v0.0.3.md
       - v0.0.2 (Beta): changelog/v0.0.2.md
       - v0.0.1 (Alpha): changelog/v0.0.1.md
 

@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Literal, Self
+from typing import Literal
 
 import torch
 import torch.nn as nn
@@ -8,8 +8,10 @@ import torch.nn as nn
 class LeCunTanh(nn.Module):
     """
     Implements LeCun's Tanh activation function.
-
-    Constants are applied to keep the variance of the output close to 1.
+    $$
+    f(x) = 1.7159 \\tanh (\\frac{2}{3} x)
+    $$
+    Constants are applied to keep the variance of the output close to `1`.
     """
 
     def __init__(self) -> None:
@@ -37,7 +39,12 @@ ActivationTypeLiteral = Literal[
 
 
 class ActivationEnum(Enum):
-    """An Enum for PyTorch activation functions."""
+    """
+    An Enum for PyTorch activation functions.
+
+    Useful for getting activation functions dynamically using a `string` name.
+    Refer to the `get()` method for more details.
+    """
 
     RELU = nn.ReLU()
     TANH = nn.Tanh()
@@ -52,10 +59,17 @@ class ActivationEnum(Enum):
     LECUN_TANH = LeCunTanh()
 
     @classmethod
-    def get(cls, name: str | Self) -> nn.Module:
-        """Get the `torch.nn` activation function."""
-        if isinstance(name, cls):
-            return name.value
+    def get(cls, name: ActivationTypeLiteral) -> nn.Module:
+        """
+        Get the `torch.nn` activation function.
+
+        Parameters:
+            name (Literal["relu", "tanh", "elu", "leaky_relu", "prelu", "selu", "silu", "softsign", "sigmoid", "hardsigmoid", "lecun_tanh"]):
+                the name of the activation function.
+
+        Returns:
+            activation (nn.Module): the PyTorch activation module.
+        """
         try:
             return cls[name.upper()].value
         except KeyError:

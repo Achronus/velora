@@ -1,11 +1,16 @@
-from collections import deque
-from dataclasses import dataclass, astuple
 import random
-from typing import List, Tuple
+from abc import abstractmethod
+from collections import deque
+from dataclasses import astuple, dataclass
+from pathlib import Path
+from typing import Any, Deque, Dict, List, Literal, Self, Tuple, get_args, override
 
 import torch
 
-from velora.utils.torch import to_tensor, stack_tensor
+from velora.utils.torch import stack_tensor, to_tensor
+
+StateDictKeys = Literal["buffer", "capacity", "device"]
+BufferKeys = Literal["states", "actions", "rewards", "next_states", "dones"]
 
 
 @dataclass
@@ -68,7 +73,184 @@ class BatchExperience:
     dones: torch.Tensor
 
 
-class ReplayBuffer:
+class BufferBase:
+    """
+    A base class for all buffers.
+    """
+
+    def __init__(self, capacity: int, *, device: torch.device | None = None) -> None:
+        """
+        Parameters:
+            capacity (int): the total capacity of the buffer
+            device (torch.device, optional): the device to perform computations on
+        """
+        self.capacity = capacity
+        self.buffer: Deque[Experience] = deque(maxlen=capacity)
+        self.device = device
+
+    def push(self, exp: Experience) -> None:
+        """
+        Stores an experience in the buffer.
+
+        Parameters:
+            exp (Experience): a single set of experience as an object
+        """
+        self.buffer.append(exp)
+
+    def _batch(self, batch: List[Experience]) -> BatchExperience:
+        """
+        Helper method. Converts a `List[Experience]` into a `BatchExperience`.
+        """
+        states, actions, rewards, next_states, dones = zip(*batch)
+
+        return BatchExperience(
+            states=stack_tensor(states, device=self.device),
+            actions=to_tensor(actions, device=self.device).unsqueeze(1),
+            rewards=to_tensor(rewards, device=self.device).unsqueeze(1),
+            next_states=stack_tensor(next_states, device=self.device),
+            dones=to_tensor(dones, device=self.device).unsqueeze(1),
+        )
+
+    @abstractmethod
+    def sample(self) -> BatchExperience:
+        """
+        Samples experience from the buffer.
+
+        Returns:
+            batch (BatchExperience): an object of samples with the attributes (`states`, `actions`, `rewards`, `next_states`, `dones`).
+
+                All items have the same shape `(batch_size, features)`.
+        """
+        pass  # pragma: no cover
+
+    def __len__(self) -> int:
+        """
+        Gets the current size of the buffer.
+
+        Returns:
+            size (int): the current size of the buffer.
+        """
+        return len(self.buffer)
+
+    def state_dict(self) -> Dict[StateDictKeys, Any]:
+        """
+        Return a dictionary containing the buffers contents. Includes:
+
+        - `buffer` - serialized arrays of `{states, actions, rewards, next_states, dones}`.
+        - `capacity` - the maximum capacity of the buffer.
+        - `device` - the device used for computations.
+
+        Returns:
+            state_dict (Dict[Literal["buffer", "capacity", "device"], Any]): a dictionary containing the current state of the buffer.
+        """
+        if len(self.buffer) > 0:
+            states, actions, rewards, next_states, dones = zip(*self.buffer)
+
+            serialized_buffer: Dict[BufferKeys, List[Any]] = {
+                "states": stack_tensor(states).cpu().tolist(),
+                "actions": to_tensor(actions).cpu().tolist(),
+                "rewards": to_tensor(rewards).cpu().tolist(),
+                "next_states": stack_tensor(next_states).cpu().tolist(),
+                "dones": to_tensor(dones).cpu().tolist(),
+            }
+        else:
+            serialized_buffer = {key: [] for key in list(get_args(BufferKeys))}
+
+        return {
+            "buffer": serialized_buffer,
+            "capacity": self.capacity,
+            "device": str(self.device) if self.device else None,
+        }
+
+    def save(self, filepath: str | Path) -> None:
+        """
+        Saves a buffers state to a file.
+
+        Parameters:
+            filepath (str | Path): where to save the buffer state
+
+        Example Usage:
+        ```python
+        from velora.buffer import ReplayBuffer
+
+        buffer = ReplayBuffer(capacity=100, device="cpu")
+
+        buffer.save('checkpoints/buffer_100_cpu.pt')
+        ```
+        """
+        save_path = Path(filepath)
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+
+        state_dict = self.state_dict()
+        torch.save(state_dict, save_path)
+
+    @classmethod
+    def load(cls, filepath: str | Path) -> Self:
+        """
+        Restores the buffer from a saved state.
+
+        Parameters:
+            filepath (str | Path): buffer state file location
+
+        Example Usage:
+        ```python
+        from velora.buffer import ReplayBuffer
+
+        buffer = ReplayBuffer.load('checkpoints/buffer_100_cpu.pt')
+        ```
+        """
+        state_dict: Dict[StateDictKeys, Any] = torch.load(filepath)
+        device = (
+            torch.device(state_dict["device"])
+            if state_dict["device"] is not None
+            else None
+        )
+
+        buffer = cls(
+            state_dict["capacity"],
+            device=device,
+        )
+
+        data: Dict[BufferKeys, List[Any]] = state_dict["buffer"]
+
+        # Recreate experiences from the parallel arrays
+        for state, action, reward, next_state, done in zip(
+            data["states"],
+            data["actions"],
+            data["rewards"],
+            data["next_states"],
+            data["dones"],
+        ):
+            buffer.push(
+                Experience(
+                    state=to_tensor(state, device=device),
+                    action=action,
+                    reward=reward,
+                    next_state=to_tensor(next_state, device=device),
+                    done=done,
+                )
+            )
+
+        return buffer
+
+    @staticmethod
+    def create_filepath(filepath: str | Path) -> Path:
+        """
+        Updates a given `filepath` and converts it into a `buffer` friendly one.
+
+        Parameters:
+            filepath (str | Path): a filepath to convert
+
+        Returns:
+            buffer_path (Path): a buffer friendly filepath in the form `<filepath>.buffer.<filepath_ext>`.
+        """
+        path = Path(filepath)
+        extension = path.name.split(".")[-1]
+        buffer_name = path.name.replace(extension, f"buffer.{extension}")
+        return path.with_name(buffer_name)
+
+
+class ReplayBuffer(BufferBase):
     """
     A Buffer for storing agent experiences. Used for Off-Policy agents.
 
@@ -82,19 +264,9 @@ class ReplayBuffer:
             capacity (int): the total capacity of the buffer
             device (torch.device, optional): the device to perform computations on
         """
-        self.capacity = capacity
-        self.buffer = deque(maxlen=capacity)
-        self.device = device
+        super().__init__(capacity, device=device)
 
-    def push(self, exp: Experience) -> None:
-        """
-        Stores an experience in the buffer.
-
-        Parameters:
-            exp (Experience): a single set of experience as an object
-        """
-        self.buffer.append(exp)
-
+    @override
     def sample(self, batch_size: int) -> BatchExperience:
         """
         Samples a random batch of experiences from the buffer.
@@ -113,28 +285,10 @@ class ReplayBuffer:
             )
 
         batch: List[Experience] = random.sample(self.buffer, batch_size)
-
-        states, actions, rewards, next_states, dones = zip(*batch)
-
-        return BatchExperience(
-            states=stack_tensor(states, device=self.device),
-            actions=to_tensor(actions, device=self.device).unsqueeze(1),
-            rewards=to_tensor(rewards, device=self.device).unsqueeze(1),
-            next_states=stack_tensor(next_states, device=self.device),
-            dones=to_tensor(dones, device=self.device).unsqueeze(1),
-        )
-
-    def __len__(self) -> int:
-        """
-        Gets the current size of the buffer.
-
-        Returns:
-            size (int): the current size of the buffer.
-        """
-        return len(self.buffer)
+        return self._batch(batch)
 
 
-class RolloutBuffer:
+class RolloutBuffer(BufferBase):
     """
     A Rollout Buffer for storing agent experiences. Used for On-Policy agents.
 
@@ -148,10 +302,9 @@ class RolloutBuffer:
             capacity (int): Maximum rollout length
             device (torch.device, optional): the device to perform computations on
         """
-        self.capacity = capacity
-        self.buffer = deque(maxlen=capacity)
-        self.device = device
+        super().__init__(capacity, device=device)
 
+    @override
     def push(self, exp: Experience) -> None:
         """
         Stores an experience in the buffer.
@@ -162,8 +315,9 @@ class RolloutBuffer:
         if len(self.buffer) == self.capacity:
             raise BufferError("Buffer full! Use the 'empty()' method first.")
 
-        self.buffer.append(exp)
+        super().push(exp)
 
+    @override
     def sample(self) -> BatchExperience:
         """
         Returns the entire rollout buffer as a batch of experience.
@@ -176,25 +330,8 @@ class RolloutBuffer:
         if len(self.buffer) == 0:
             raise BufferError("Buffer is empty!")
 
-        states, actions, rewards, next_states, dones = zip(*self.buffer)
-
-        return BatchExperience(
-            states=stack_tensor(states, device=self.device),
-            actions=to_tensor(actions, device=self.device).unsqueeze(1),
-            rewards=to_tensor(rewards, device=self.device).unsqueeze(1),
-            next_states=stack_tensor(next_states, device=self.device),
-            dones=to_tensor(dones, device=self.device).unsqueeze(1),
-        )
+        return self._batch(self.buffer)
 
     def empty(self) -> None:
         """Empties the buffer."""
         self.buffer.clear()
-
-    def __len__(self) -> int:
-        """
-        Gets the current size of the buffer.
-
-        Returns:
-            size (int): the current size of the buffer.
-        """
-        return len(self.buffer)

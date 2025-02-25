@@ -29,7 +29,7 @@ class OUNoise:
         mu: float = 0.0,
         theta: float = 0.15,
         sigma: float = 0.2,
-        device: torch.device = "cpu",
+        device: torch.device | None = None,
     ) -> None:
         """
         Parameters:
@@ -39,6 +39,12 @@ class OUNoise:
             sigma (float, optional): ($\\sigma$) The scale of the random component
             device (torch.device, optional): the device to perform computations on
         """
+        if size <= 0:
+            raise ValueError("'size' must be larger than 0!")
+
+        if theta <= 0 or sigma <= 0:
+            raise ValueError("'theta' and 'sigma' must be larger than 0!")
+
         self.mu = torch.full((size,), mu, dtype=torch.float32, device=device)
         self.theta = theta
         self.sigma = sigma
