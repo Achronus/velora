@@ -50,6 +50,7 @@ nav:
       - User Guide - Tutorials:
           - User Guide - Tutorials: learn/tutorial/index.md
           - DDPG: learn/tutorial/ddpg.md
+          - Saving & Loading Models: learn/tutorial/save.md
           - Gymnasium: learn/tutorial/gym.md
           - Utilities: learn/tutorial/utils.md
       - Customization:

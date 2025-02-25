@@ -1,6 +1,6 @@
 from copy import deepcopy
 from pathlib import Path
-from typing import Any, Dict, Literal, Self, Tuple, Type, get_args
+from typing import Any, Dict, List, Literal, Self, Tuple, Type, get_args
 
 import gymnasium as gym
 import numpy as np
@@ -292,7 +292,7 @@ class LiquidDDPG:
         gamma: float = 0.99,
         tau: float = 0.005,
         window_size: int = 100,
-    ) -> None:
+    ) -> List[float]:
         """
         Trains the agent on a Gymnasium environment using a `ReplayBuffer`.
 
@@ -311,7 +311,7 @@ class LiquidDDPG:
                 average
 
         Returns:
-            results (TrainResults): an object containing training results.
+            ep_rewards (List[float]): a list of episode rewards.
         """
         if not isinstance(env.action_space, gym.spaces.Box):
             raise EnvironmentError(

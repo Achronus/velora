@@ -239,7 +239,7 @@ class BufferBase:
         Updates a given `filepath` and converts it into a `buffer` friendly one.
 
         Parameters:
-            filepath(str | Path): a filepath to convert
+            filepath (str | Path): a filepath to convert
 
         Returns:
             buffer_path (Path): a buffer friendly filepath in the form `<filepath>.buffer.<filepath_ext>`.

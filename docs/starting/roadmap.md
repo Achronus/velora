@@ -6,9 +6,13 @@ RL is a huge field and we can only cover a small sample of it. Our goal is to ad
 
 So far, we have a set of algorithms and extensions in mind with other options to consider. For the remainder of this roadmap we have a breakdown of different sections with checkboxes. Items that are <span style="color: #0FBB68;">green</span> are already implemented.
 
-## Primary
+## Beta Release
 
-These are items that are mandatory for the framework to reach a `v1` release.
+The beta release focuses on the major building blocks of the whole framework. Officially, we will be out of the beta version when we hit `0.1`.
+
+Here's our plans and progress so far:
+
+### 0.0.3
 
 <div class="grid cards" markdown>
 
@@ -16,7 +20,58 @@ These are items that are mandatory for the framework to reach a `v1` release.
 
     ---
 
+    - [x] [Liquid Neural Networks (CfC)](https://www.nature.com/articles/s42256-022-00556-7) - 2022
     - [x] [DDPG](https://arxiv.org/abs/1509.02971) - 2015
+
+- :fontawesome-solid-cube: Functionality
+
+    ---
+
+    - [x] Replay and Rollout Buffers
+    - [x] Saving and Loading models & buffers
+    - [x] Training and predicting with models
+
+</div>
+
+<div class="grid cards" markdown>
+
+- :material-cog: Utility
+
+    ---
+
+    - [x] Setting seed and device
+    - [x] Gymnasium environment search and wrappers
+    - [x] ✨ MORE DOCUMENTATION! ✨
+
+</div>
+
+### 0.1
+
+Remaining items needed to push out of the beta version.
+
+<div class="grid cards" markdown>
+
+- :fontawesome-solid-cube: Functionality
+
+    ---
+
+    - [ ] Agent performance tracking
+    - [ ] Early stopping and checkpoint save system
+    - [ ] Recording episode performance
+    - [ ] DDPG agent examples and benchmarks
+
+</div>
+
+## Road to 1.0 Release
+
+These are items that go beyond the beta release (still including them) that are mandatory for the framework to reach a `1.0` release.
+
+<div class="grid cards" markdown>
+
+- :material-robot: Algorithms
+
+    ---
+
     - [ ] [TRPO](https://arxiv.org/abs/1502.05477) - 2016
     - [ ] [A2C](https://arxiv.org/abs/1602.01783) - 2016
     - [ ] [PPO](https://arxiv.org/abs/1707.06347) - 2017
@@ -27,8 +82,6 @@ These are items that are mandatory for the framework to reach a `v1` release.
 
     ---
 
-    - [x] Replay Buffer
-    - [x] Rollout Buffer
     - [ ] [Prioritized Experience Replay](https://arxiv.org/abs/1511.05952) - 2016
     - [ ] [Curiosity](https://arxiv.org/abs/1705.05363) - 2017
     - [ ] [HER](https://arxiv.org/abs/1707.01495) - 2018
@@ -37,9 +90,9 @@ These are items that are mandatory for the framework to reach a `v1` release.
 
 </div>
 
-## Secondary
+## 1.0 and Beyond
 
-These are extra items to consider for the framework beyond `v1` release.
+These are extra items that we are considering for the framework beyond `1.0` release.
 
 <div class="grid cards" markdown>
 
