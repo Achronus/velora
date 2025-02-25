@@ -2,6 +2,7 @@ import pytest
 import os
 import tempfile
 from collections import deque
+from pathlib import Path
 
 import torch
 
@@ -213,19 +214,17 @@ class TestReplayBuffer:
         # Test with string path
         string_path = "models/checkpoint.pt"
         buffer_path = ReplayBuffer.create_filepath(string_path)
-        assert str(buffer_path) == "models\\checkpoint.buffer.pt"
+        assert buffer_path == Path("models", "checkpoint.buffer.pt")
 
         # Test with Path object
-        from pathlib import Path
-
         path_obj = Path("models/checkpoint.pth")
         buffer_path = ReplayBuffer.create_filepath(path_obj)
-        assert str(buffer_path) == "models\\checkpoint.buffer.pth"
+        assert buffer_path == Path("models", "checkpoint.buffer.pth")
 
         # Test with multiple extensions
         complex_path = "models/run1.model.pt"
         buffer_path = ReplayBuffer.create_filepath(complex_path)
-        assert str(buffer_path) == "models\\run1.model.buffer.pt"
+        assert buffer_path == Path("models", "run1.model.buffer.pt")
 
     def test_save_directory_creation(self, filled_buffer: ReplayBuffer) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -412,14 +411,12 @@ class TestRolloutBuffer:
         # Test with string path
         string_path = "models/checkpoint.pt"
         buffer_path = RolloutBuffer.create_filepath(string_path)
-        assert str(buffer_path) == "models\\checkpoint.buffer.pt"
+        assert buffer_path == Path("models", "checkpoint.buffer.pt")
 
-        # Test with Path object
-        from pathlib import Path
-
+        # Test with Path
         path_obj = Path("models/checkpoint.pth")
         buffer_path = RolloutBuffer.create_filepath(path_obj)
-        assert str(buffer_path) == "models\\checkpoint.buffer.pth"
+        assert buffer_path == Path("models", "checkpoint.buffer.pth")
 
     def test_save_directory_creation(self, filled_buffer: RolloutBuffer) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
