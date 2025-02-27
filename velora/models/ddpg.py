@@ -1,15 +1,17 @@
 from copy import deepcopy
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Self, Tuple, Type, get_args
+from typing import Any, Dict, List, Literal, Self, Tuple, Type, get_args, override
 
 import gymnasium as gym
-import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
 
 from velora.buffer import BatchExperience, Experience, ReplayBuffer
 from velora.gym import add_core_env_wrappers
+from velora.metrics.tracker import TrainMetrics, MetricsTracker
+from velora.models.base import RLAgent
+from velora.models.callbacks import TrainCallback, TrainState
 from velora.models.lnn.ncp import LiquidNCPNetwork
 from velora.noise import OUNoise
 from velora.utils.torch import soft_update
@@ -131,7 +133,7 @@ class DDPGCritic(nn.Module):
         return q_values, new_hidden
 
 
-class LiquidDDPG:
+class LiquidDDPG(RLAgent):
     """
     A Liquid variant of the Deep Deterministic Policy Gradient (DDPG)
     algorithm from the paper: [Continuous Control with Deep Reinforcement Learning](https://arxiv.org/abs/1509.02971).
@@ -281,18 +283,20 @@ class LiquidDDPG:
 
         return critic_loss, actor_loss
 
+    @override
     def train(
         self,
         env: gym.Env,
         batch_size: int,
         *,
         n_episodes: int = 1000,
+        callbacks: List[TrainCallback] | None = None,
         max_steps: int = 1000,
         noise_scale: float = 0.1,
         gamma: float = 0.99,
         tau: float = 0.005,
         window_size: int = 100,
-    ) -> List[float]:
+    ) -> TrainMetrics:
         """
         Trains the agent on a Gymnasium environment using a `ReplayBuffer`.
 
@@ -300,6 +304,8 @@ class LiquidDDPG:
             env (gym.Env): the Gymnasium environment to train on
             batch_size (int): the number of features in a single batch
             n_episodes (int, optional): the total number of episodes to train for
+            callbacks (List[TrainCallback], optional): a list of training callbacks
+                that are applied during the training process
             max_steps (int, optional): the total number of steps per episode
             noise_scale (float, optional): the exploration noise added when
                 selecting an action
@@ -311,7 +317,7 @@ class LiquidDDPG:
                 average
 
         Returns:
-            ep_rewards (List[float]): a list of episode rewards.
+            metrics (MetricsStore): an object containing episode metrics.
         """
         if not isinstance(env.action_space, gym.spaces.Box):
             raise EnvironmentError(
@@ -320,15 +326,18 @@ class LiquidDDPG:
 
         env = add_core_env_wrappers(env, self.device)
 
-        episode_rewards = []
+        callbacks = callbacks or []
         training_started = False
+        training_state = TrainState(total_episodes=n_episodes)
+        tracker = MetricsTracker(n_episodes, window_size)
 
         print(f"{batch_size=}, getting buffer samples.")
         for i_ep in range(n_episodes):
+            current_ep = i_ep + 1
             state, _ = env.reset()
 
-            critic_losses, actor_losses = [], []
             actor_hidden = None
+            episode_reward = 0
 
             for _ in range(max_steps):
                 action, actor_hidden = self.predict(
@@ -351,30 +360,51 @@ class LiquidDDPG:
                     critic_loss, actor_loss = self._train_step(batch_size, gamma)
                     self._update_target_networks(tau)
 
-                    critic_losses.append(critic_loss)
-                    actor_losses.append(actor_loss)
+                    tracker.log(
+                        {
+                            "critic_losses": critic_loss,
+                            "actor_losses": actor_loss,
+                        }
+                    )
+                    training_state.update(status="step")
+
+                    # Call step callbacks
+                    for cb in callbacks:
+                        training_state = cb(training_state)
 
                 state = next_state
 
                 if done:
-                    episode_rewards.append(info["episode"]["r"].item())
+                    episode_reward = info["episode"]["r"].item()
+                    tracker.log({"ep_rewards": episode_reward})
                     break
 
-            if training_started and (i_ep + 1) % window_size == 0:
-                avg_reward = np.mean(episode_rewards[-window_size:])
-                avg_critic_loss = np.mean(critic_losses)
-                avg_actor_loss = np.mean(actor_losses)
-
-                print(
-                    f"Episode: {i_ep + 1}/{n_episodes}, "
-                    f"Avg Reward: {avg_reward:.2f}, "
-                    f"Critic Loss: {avg_critic_loss:.2f}, "
-                    f"Actor Loss: {avg_actor_loss:.2f}"
+            if training_started:
+                training_state.update(
+                    status="episode",
+                    ep=current_ep,
+                    avg_reward=tracker.avg_reward(),
                 )
 
-        env.close()
-        return episode_rewards
+                # Call episode callbacks
+                for cb in callbacks:
+                    training_state = cb(training_state)
 
+                if current_ep % window_size == 0 or training_state.stop_training:
+                    tracker.print(current_ep)
+
+                if training_state.stop_training:
+                    break
+
+        # Call complete callbacks
+        for cb in callbacks:
+            training_state.status = "complete"
+            training_state = cb(training_state)
+
+        env.close()
+        return tracker.storage
+
+    @override
     def predict(
         self,
         state: torch.Tensor,

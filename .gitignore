@@ -165,6 +165,7 @@ cython_debug/
 /examples/*wandb/
 /examples/*videos/
 /examples/*logs/
+/examples/checkpoints*
 /old
 /_build
 CHANGELOG.md
