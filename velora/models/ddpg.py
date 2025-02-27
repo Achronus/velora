@@ -8,10 +8,10 @@ import torch.nn as nn
 import torch.optim as optim
 
 from velora.buffer import BatchExperience, Experience, ReplayBuffer
+from velora.callbacks import TrainCallback, TrainState
 from velora.gym import add_core_env_wrappers
-from velora.metrics.tracker import TrainMetrics, MetricsTracker
+from velora.metrics.tracker import MetricsTracker, TrainMetrics
 from velora.models.base import RLAgent
-from velora.models.callbacks import TrainCallback, TrainState
 from velora.models.lnn.ncp import LiquidNCPNetwork
 from velora.noise import OUNoise
 from velora.utils.torch import soft_update
