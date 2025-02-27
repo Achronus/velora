@@ -54,7 +54,10 @@ class MetricsTracker:
 
     def avg_reward(self) -> float:
         """Computes reward moving average based on the window size."""
-        return np.mean(self.storage.ep_rewards[-self.window_size :])
+        if len(self.storage.ep_rewards) >= self.window_size:
+            return np.mean(self.storage.ep_rewards[-self.window_size :])
+
+        return 0
 
     def print(self, current_ep: int) -> None:
         """

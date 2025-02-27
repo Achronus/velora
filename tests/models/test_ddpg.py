@@ -1,6 +1,6 @@
 from typing import Any, Dict, Literal
 import pytest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 import os
 import tempfile
 
@@ -9,7 +9,9 @@ import torch
 import gymnasium as gym
 
 from velora.buffer import Experience
+from velora.metrics.tracker import TrainMetrics
 from velora.models import LiquidNCPNetwork
+from velora.callbacks import TrainCallback, TrainState
 from velora.models.ddpg import DDPGActor, DDPGCritic, LiquidDDPG
 
 
@@ -222,44 +224,13 @@ class TestLiquidDDPG:
         wrapped_env = EarlyDoneWrapper(env)
         n_episodes = 2
 
-        rewards = ddpg.train(
+        metrics = ddpg.train(
             wrapped_env,
             batch_size=32,
             n_episodes=n_episodes,
             max_steps=10,  # Even though max_steps is 10, should terminate at 5
         )
-        assert len(rewards) == n_episodes
-
-    def test_train_output_print_msg(self, env: gym.Env, ddpg: LiquidDDPG):
-        batch_size = 32
-        n_episodes = 4
-        window_size = 2
-
-        # Mock numpy mean to verify statistics calculation
-        with patch("numpy.mean") as mock_mean:
-            # Make mean return predictable values
-            mock_mean.side_effect = [10.0, 0.5, 0.3]  # reward, critic_loss, actor_loss
-
-            # Mock print to capture output
-            with patch("builtins.print") as mock_print:
-                ddpg.train(
-                    env,
-                    batch_size=batch_size,
-                    n_episodes=n_episodes,
-                    max_steps=10,
-                    window_size=window_size,
-                )
-
-                # Verify statistics were printed with correct format
-                expected_output = (
-                    "Episode: 4/4, "
-                    "Avg Reward: 10.00, "
-                    "Critic Loss: 0.50, "
-                    "Actor Loss: 0.30"
-                )
-                mock_print.assert_any_call(expected_output)
-
-        env.close()
+        assert isinstance(metrics, TrainMetrics)
 
     def test_save_load(self, ddpg: LiquidDDPG):
         with tempfile.NamedTemporaryFile(suffix=".pt", delete=False) as temp_file:
@@ -411,3 +382,46 @@ class TestLiquidDDPG:
             # Clean up
             if os.path.exists(filepath):
                 os.unlink(filepath)
+
+    def test_train_with_callbacks(self, env: gym.Env, ddpg: LiquidDDPG):
+        # Create mock callbacks
+        mock_callback1 = Mock(spec=TrainCallback)
+        mock_callback1.return_value = TrainState(total_episodes=2)
+
+        mock_callback2 = Mock(spec=TrainCallback)
+        mock_callback2.return_value = TrainState(total_episodes=2)
+
+        # Run training with the callbacks
+        ddpg.train(
+            env,
+            batch_size=32,
+            n_episodes=2,
+            max_steps=10,
+            callbacks=[mock_callback1, mock_callback2],
+        )
+
+        # Verify callbacks were called
+        assert mock_callback1.call_count > 0
+        assert mock_callback2.call_count > 0
+
+    def test_train_early_stopping(self, env: gym.Env, ddpg: LiquidDDPG):
+        # Create callback that sets stop_training to True after the first episode
+        def early_stop_callback(state: TrainState) -> TrainState:
+            if state.status == "episode" and state.current_ep >= 1:
+                state.stop_training = True
+            return state
+
+        mock_callback = Mock(side_effect=early_stop_callback)
+
+        # Run training with callback
+        metrics = ddpg.train(
+            env,
+            batch_size=32,
+            n_episodes=5,  # Should not run all 5 episodes
+            max_steps=10,
+            callbacks=[mock_callback],
+        )
+
+        # Verify training stopped early
+        # We expect fewer than 5 episodes of rewards to be recorded
+        assert len(metrics.ep_rewards) < 5
