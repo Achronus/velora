@@ -56,7 +56,7 @@ Remaining items needed to push out of the beta version.
     ---
 
     - [ ] Agent performance tracking
-    - [ ] Early stopping and checkpoint save system
+    - [x] Early stopping and checkpoint save system
     - [ ] Recording episode performance
     - [ ] DDPG agent examples and benchmarks
 

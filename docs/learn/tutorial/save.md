@@ -4,7 +4,7 @@ Saving a trained model and loading it are extremely common and useful practices 
 
 Both are really easy to do with our API and work identically for all agents.
 
-Simply, select an agent you want to train, save it with it's instance `save` method and then `load` it the agent class method.
+Simply, select an agent you want to train, save it with it's instance `save` method and then `load` it with the agent class method.
 
 For our example, we'll use [`LiquidDDPG`](../tutorial/agents/ddpg.md).
 
@@ -26,22 +26,26 @@ env = gym.make("InvertedPendulum-v5")
 model = LiquidDDPG(4, 10, 1, device=device)
 metrics = model.train(env, 128, n_episodes=100)
 
-model.save('checkpoints/ddpg_10n_100kb_100ep_gpu_invpendulum.pt')
+model.save('checkpoints/ddpg/InvertedPendulum_final.pt')
 ```
 
 This code should work 'as is'.
 
-The only thing we need to do is give it a `filepath`. The complete model state will then be saved.
+The only thing we need to do is give it a `filepath`. The complete model state will then be saved along with a `model_config.json` file that provides comprehensive details about the trained agent.
 
 By default, we don't save the buffers state. However, if you want to, simply add `buffer=True` and it will store the buffer in a separate file.
 
 ```python
-model.save('checkpoints/ddpg_10n_100kb_100ep_gpu_invpendulum.pt', buffer=True)
+model.save('checkpoints/ddpg/InvertedPendulum_final.pt', buffer=True)
 ```
 
 The buffer name will be identical to the filename, with a `.buffer` added between the filename and extension. So, with our previous example, the buffer file would save to:
 
-> `checkpoints/ddpg_10n_100kb_100ep_gpu_invpendulum.buffer.pt`
+> `checkpoints/ddpg/InvertedPendulum_final.buffer.pt`
+
+Similarly, the `model_config.json` would save to:
+
+> `checkpoints/ddpg/model_config.json`
 
 ## Loading a Model
 
@@ -50,16 +54,22 @@ To load a model we use the `load` class method:
 ```python
 from velora.models import LiquidDDPG
 
-model = LiquidDDPG.load('checkpoints/ddpg_10n_100kb_100ep_gpu_invpendulum.pt')
+model = LiquidDDPG.load('checkpoints/ddpg/InvertedPendulum_final.pt')
 ```
 
 Like before, the only thing we need to do is give it a `filepath`. The complete model state will then be loaded into a new model instance.
+
+???+ note "model_config.json"
+
+    The `model_config.json` is not loaded into the model. 
+    
+    This file is only used for quickly checking the details of a trained agent when looking through the `checkpoint` folder.
 
 Again, we don't load the buffers state by default. `buffer=True` will do that.
 
 ```python
 model = LiquidDDPG.load(
-    'checkpoints/ddpg_10n_100kb_100ep_gpu_invpendulum.pt',
+    'checkpoints/ddpg/InvertedPendulum_final.pt',
     buffer=True,
 )
 ```
@@ -82,25 +92,9 @@ Choosing the right name for a model `checkpoint` is always a difficult one. We e
 
 Here's our recommendation:
 
-- All states should be stored in a `checkpoint` directory
-- All states should have a clear definition of the parameters used
-
-Core components to consider and include:
-
-- `agent_name` - first item in the filepath (e.g., `ddpg`)
-- `neuron_count` - followed by `n` (e.g., `10n`)
-- `buffer_size` - followed by `b` (e.g., `100kb`)
-- `episode_count` - followed by `ep` (e.g., `100ep`)
-- `compute_device` - e.g., `gpu` or `cpu`
-- `env_name` - environment name (e.g., `invpendulum`)
-
-???+ abstract "Future Plans"
-
-    We are looking into a better way to do this without the need for extremely long filenames.
-
-    For `DDPG` we also need to consider its hyperparameters such as `gamma`, `tau`, `batch_size`, and `noise_scale`. Other models also have different hyperparameters. Where would it end?! 😭
-
-    We'll likely convert this into a `config.yaml` file that is stored along with the `checkpoints`. It won't have any impact on the `save` and `load` methods but will be useful for quickly checking the model format.
+- All states should be stored in a `checkpoint` directory.
+- All states should have a clear `folder` for their algorithm.
+- All states should start with their `gymnasium.Env` name and either end in `ep[count]` or `final`.
 
 ---
 

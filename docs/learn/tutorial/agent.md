@@ -137,7 +137,7 @@ Here, we get back an `action` prediction and an updated `hidden` state.
 
     [Gymnasium [:material-arrow-right-bottom:]](https://gymnasium.farama.org/) environments are known to use `numpy` arrays for it's `state` spaces. Velora agents require `torch.Tensors` so you will need to pass the environment through a [NumpyToTorch [:material-arrow-right-bottom:]](https://gymnasium.farama.org/api/wrappers/misc_wrappers/#gymnasium.wrappers.NumpyToTorch) wrapper first.
 
-    To make things easier, we strongly recommend you use the [`velora.gym.add_core_env_wrappers`](../../tutorial/gym.md#core-wrappers) method instead. 
+    To make things easier, we strongly recommend you use the [`velora.gym.add_core_env_wrappers`](../tutorial/gym.md#core-wrappers) method instead. 
 
 Things become slightly more complicated with multiple predictions because we need to feed the `hidden` state back into the `predict()` method like so:
 

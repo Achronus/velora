@@ -120,7 +120,7 @@ We limit your control to the directory name to simplify the checkpoint process a
 
 ??? question "Why only the `dirname`?"
 
-    Under the hood, we use the `model.save()` method for storing checkpoints, so each checkpoint folder will also contain a `config.yaml` file with the hyperparameters that the model used during the training process. 
+    Under the hood, we use the `model.save()` method for storing checkpoints, so each checkpoint folder will also contain a `model_config.json` file containing comprehensive details of the trained agent. 
     
     That way, you don't need any complex `dirnames`! 😉
 

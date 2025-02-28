@@ -70,11 +70,12 @@ nav:
       - API Reference:
           - API Reference: learn/reference/index.md
           - models: 
-            - lnn: learn/reference/models/lnn.md
-            - base: learn/reference/models/base.md
-            - ddpg: learn/reference/models/ddpg.md
             - activation: learn/reference/models/activation.md
             - backbone: learn/reference/models/backbone.md
+            - base: learn/reference/models/base.md
+            - config: learn/reference/models/config.md
+            - ddpg: learn/reference/models/ddpg.md
+            - lnn: learn/reference/models/lnn.md
           - buffer: learn/reference/buffer.md
           - callbacks: learn/reference/callbacks.md
           - metrics: learn/reference/metrics.md
