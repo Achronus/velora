@@ -363,9 +363,9 @@ class TestLiquidDDPG:
             with open(config_path, "r") as f:
                 config_data = json.loads(f.read())
 
-            # Verify basic structure (adjust based on your config class)
-            assert "state_dim" in config_data
-            assert "action_dim" in config_data
+            # Verify basic structure
+            assert "agent" in config_data
+            assert "state_dim" in config_data["model_details"]
 
     def test_checkpoint_keys_validation(self, ddpg: LiquidDDPG):
         with tempfile.TemporaryDirectory() as temp_dir:

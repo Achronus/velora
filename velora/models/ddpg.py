@@ -12,7 +12,7 @@ from velora.callbacks import TrainCallback, TrainState
 from velora.gym import add_core_env_wrappers
 from velora.metrics.tracker import MetricsTracker, TrainMetrics
 from velora.models.base import RLAgent
-from velora.models.config import RLAgentConfig, TorchConfig, TrainConfig
+from velora.models.config import ModelDetails, RLAgentConfig, TorchConfig, TrainConfig
 from velora.models.lnn.ncp import LiquidNCPNetwork
 from velora.noise import OUNoise
 from velora.utils.torch import soft_update
@@ -207,6 +207,19 @@ class LiquidDDPG(RLAgent):
         self.env: str | None = None
         self.train_params: TrainConfig | None = None
 
+        # Additional config details
+        self.model_details = ModelDetails(
+            type="actor-critic",
+            target_networks=True,
+            action_noise="OUNoise",
+            **locals(),
+        )
+        self.torch_config = TorchConfig(
+            device=str(self.device),
+            optimizer=optim.__name__,
+            loss=self.loss.__class__.__name__,
+        )
+
     def _update_target_networks(self, tau: float) -> None:
         """
         Helper method. Performs a soft update on the target networks.
@@ -297,19 +310,10 @@ class LiquidDDPG(RLAgent):
         """
         return RLAgentConfig(
             agent=self.__class__.__name__,
-            state_dim=self.state_dim,
-            n_neurons=self.n_neurons,
-            action_dim=self.action_dim,
             env=self.env,
-            model_type="actor-critic",
-            target_networks=True,
-            action_noise="OUNoise",
+            model_details=self.model_details,
             buffer=self.buffer.config,
-            torch=TorchConfig(
-                device=str(self.device),
-                optimizer=self.actor_optim.__class__.__name__,
-                loss=self.loss.__class__.__name__,
-            ),
+            torch=self.torch_config,
             train_params=self.train_params,
         )
 
@@ -359,16 +363,10 @@ class LiquidDDPG(RLAgent):
         # Set training parameters
         self.env = env.spec.name  # Store env name
         self.train_params = TrainConfig(
-            batch_size=batch_size,
-            n_episodes=n_episodes,
-            max_steps=max_steps,
-            window_size=window_size,
-            gamma=gamma,
-            tau=tau,
-            noise_scale=noise_scale,
             callbacks=(
                 [cb.__class__.__name__ for cb in callbacks] if callbacks else None
             ),
+            **{k: v for k, v in locals().items() if k != "callbacks"},
         )
 
         callbacks = callbacks or []
