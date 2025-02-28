@@ -1,6 +1,6 @@
 from abc import abstractmethod
 from pathlib import Path
-from typing import Any, Self
+from typing import Any, Self, Tuple
 
 import gymnasium as gym
 import torch
@@ -29,7 +29,7 @@ class RLAgent:
     @abstractmethod
     def predict(
         self, state: torch.Tensor, hidden: torch.Tensor, *args, **kwargs
-    ) -> Any:
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         pass  # pragma: no cover
 
     @abstractmethod

@@ -14,6 +14,7 @@ class TrainState:
     A storage container for the current state of model training.
 
     Parameters:
+        env (str): the name of the environment to train on
         total_episodes (int): total number of training episodes
         status (Literal["episode", "step", "complete"], optional): the current stage of training.
 
@@ -24,6 +25,7 @@ class TrainState:
         avg_reward (float, optional): the episodes average reward value
     """
 
+    env: str
     total_episodes: int
     status: StatusLiteral = "episode"
     current_ep: int = 0
@@ -128,7 +130,6 @@ class SaveCheckpoints(TrainCallback):
     def __init__(
         self,
         agent: RLAgent,
-        prefix: str,
         dirname: str,
         *,
         frequency: int = 100,
@@ -137,15 +138,12 @@ class SaveCheckpoints(TrainCallback):
         """
         Parameters:
             agent (RLAgent): the agent to use
-            prefix (str): a name applied to the start of checkpoint filenames,
-                such as the `gym.Environment` name
             dirname (str): the model directory name to save checkpoints
                 Automatically created inside `checkpoints` directory.
             frequency (int, optional): save frequency (in episodes)
             buffer (bool, optional): whether to save the final buffer state
         """
         self.agent = agent
-        self.name_prefix = prefix
         self.filepath = Path("checkpoints", dirname)
         self.frequency = frequency
         self.buffer = buffer
@@ -171,37 +169,37 @@ class SaveCheckpoints(TrainCallback):
         ep_idx = state.current_ep
 
         should_save = False
-        str_suffix = None
+        filename = f"{state.env}_"
         buffer = False
 
         # Save checkpoint at specified frequency
         if state.status == "episode" and ep_idx != state.total_episodes:
             if ep_idx % self.frequency == 0:
                 should_save = True
-                str_suffix = f"ep{ep_idx}"
+                filename += f"ep{ep_idx}"
 
         # Perform final checkpoint save
         elif state.status == "complete":
             should_save = True
-            str_suffix = "final"
+            filename += "final"
             buffer = self.buffer
 
         if should_save:
-            self.save_checkpoint(ep_idx, str_suffix, buffer)
+            self.save_checkpoint(ep_idx, filename, buffer)
 
         return state
 
-    def save_checkpoint(self, ep: int, suffix: str, buffer: bool) -> None:
+    def save_checkpoint(self, ep: int, filename: str, buffer: bool) -> None:
         """
         Saves a checkpoint at a given episode with the given suffix.
 
         Parameters:
             ep (int): the current episode index
-            suffix (str): the suffix to add to the filename
+            filename (str): the checkpoint filename
             buffer (bool): whether to save the buffer state
         """
-        checkpoint_path = Path(self.filepath, f"{self.name_prefix}_{suffix}.pt")
-        buffer_path = Path(self.filepath, f"{self.name_prefix}_{suffix}.buffer.pt")
+        checkpoint_path = Path(self.filepath, f"{filename}.pt")
+        buffer_path = Path(self.filepath, f"{filename}.buffer.pt")
 
         self.agent.save(checkpoint_path, buffer=buffer)
         print(f"Checkpoint saved at episode {ep}: {checkpoint_path}")

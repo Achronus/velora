@@ -12,6 +12,7 @@ from velora.callbacks import TrainCallback, TrainState
 from velora.gym import add_core_env_wrappers
 from velora.metrics.tracker import MetricsTracker, TrainMetrics
 from velora.models.base import RLAgent
+from velora.models.config import RLAgentConfig, TorchConfig, TrainConfig
 from velora.models.lnn.ncp import LiquidNCPNetwork
 from velora.noise import OUNoise
 from velora.utils.torch import soft_update
@@ -202,6 +203,10 @@ class LiquidDDPG(RLAgent):
         self.buffer = ReplayBuffer(capacity=buffer_size, device=device)
         self.noise = OUNoise(action_dim, device=device)
 
+        # Config parameters set during training
+        self.env: str | None = None
+        self.train_params: TrainConfig | None = None
+
     def _update_target_networks(self, tau: float) -> None:
         """
         Helper method. Performs a soft update on the target networks.
@@ -283,6 +288,31 @@ class LiquidDDPG(RLAgent):
 
         return critic_loss, actor_loss
 
+    def config(self) -> RLAgentConfig:
+        """
+        Creates a config model for the agent.
+
+        Returns:
+            config (RLAgentConfig): a config model with agent details.
+        """
+        return RLAgentConfig(
+            agent=self.__class__.__name__,
+            state_dim=self.state_dim,
+            n_neurons=self.n_neurons,
+            action_dim=self.action_dim,
+            env=self.env,
+            model_type="actor-critic",
+            target_networks=True,
+            action_noise="OUNoise",
+            buffer=self.buffer.config,
+            torch=TorchConfig(
+                device=str(self.device),
+                optimizer=self.actor_optim.__class__.__name__,
+                loss=self.loss.__class__.__name__,
+            ),
+            train_params=self.train_params,
+        )
+
     @override
     def train(
         self,
@@ -326,9 +356,24 @@ class LiquidDDPG(RLAgent):
 
         env = add_core_env_wrappers(env, self.device)
 
+        # Set training parameters
+        self.env = env.spec.name  # Store env name
+        self.train_params = TrainConfig(
+            batch_size=batch_size,
+            n_episodes=n_episodes,
+            max_steps=max_steps,
+            window_size=window_size,
+            gamma=gamma,
+            tau=tau,
+            noise_scale=noise_scale,
+            callbacks=[cb.__class__.__name__ for cb in callbacks]
+            if callbacks
+            else None,
+        )
+
         callbacks = callbacks or []
         training_started = False
-        training_state = TrainState(total_episodes=n_episodes)
+        training_state = TrainState(env=env.spec.name, total_episodes=n_episodes)
         tracker = MetricsTracker(n_episodes, window_size)
 
         print(f"{batch_size=}, getting buffer samples.")
@@ -439,7 +484,9 @@ class LiquidDDPG(RLAgent):
 
     def save(self, filepath: str | Path, *, buffer: bool = False) -> None:
         """
-        Saves the current model state into a file and optionally the buffer.
+        Saves the current model state into a file, plus a separate `config.json`
+        file detailing the core details for the training session, and optionally
+        the training buffer.
 
         Parameters:
             filepath (str | Path): the location to store the model state
@@ -462,7 +509,20 @@ class LiquidDDPG(RLAgent):
             "actor_optim": self.actor_optim.state_dict(),
             "critic_optim": self.critic_optim.state_dict(),
         }
+
+        if save_path.exists():
+            raise FileExistsError(
+                f"Items already exist in the '{save_path.parent}' directory! Either change the 'filepath' or delete the folders contents."
+            )
+
         torch.save(checkpoint, save_path)
+
+        config_path = Path(save_path.parent, "model_config.json")
+        if not config_path.exists():
+            config = self.config()
+
+            with open(config_path, "w") as f:
+                f.write(config.model_dump_json(indent=2, exclude_none=True))
 
         if buffer:
             buffer_path = self.buffer.create_filepath(save_path)
