@@ -27,7 +27,8 @@ RUN pip install pydantic==2.10.5 \
     gymnasium[mujoco]==1.0 \
     pyyaml==6.0.2 \
     types-pyyaml==6.0 \
-    wandb==0.19.6
+    wandb==0.19.6 \
+    matplotlib==3.10.1
 
 # Install CPU-only PyTorch
 RUN pip install torch==2.6.0 torchvision==0.21.0 --index-url "https://download.pytorch.org/whl/cpu"
