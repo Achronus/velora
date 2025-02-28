@@ -2,7 +2,7 @@
 
 ???+ api "API Docs"
 
-    [`velora.models.LiquidDDPG`](../reference/models/ddpg.md#velora.models.ddpg.LiquidDDPG)
+    [`velora.models.LiquidDDPG`](../../reference/models/ddpg.md#velora.models.ddpg.LiquidDDPG)
 
 Our first algorithm focuses on [Deep Deterministic Policy Gradients [:material-arrow-right-bottom:]](https://arxiv.org/abs/1509.02971) (DDPGs).
 
@@ -38,7 +38,7 @@ This will create an instance of the model with the following default parameters:
 
 You can customize them freely using the required parameter name.
 
-We strongly recommend that use the [`set_seed`](../tutorial/utils.md#setting-a-seed) and [`set_device`](../tutorial/utils.md#setting-a-device) utility methods before initializing the model to help with result reproducibility and faster training times:
+We strongly recommend that use the [`set_seed`](../../tutorial/utils.md#setting-a-seed) and [`set_device`](../../tutorial/utils.md#setting-a-device) utility methods before initializing the model to help with result reproducibility and faster training times:
 
 ```python
 from velora.models import LiquidDDPG
@@ -56,7 +56,7 @@ This code should work 'as is'.
 
 ???+ api "API Docs"
 
-    [`velora.models.LiquidDDPG.train(env, batch_size)`](../reference/models/ddpg.md#velora.models.ddpg.LiquidDDPG.train)
+    [`velora.models.LiquidDDPG.train(env, batch_size)`](../../reference/models/ddpg.md#velora.models.ddpg.LiquidDDPG.train)
 
 Training the model is equally as simple! 😊
 
@@ -97,7 +97,7 @@ This will return a `List[float]` rewards for every episode. We'll be changing th
 
 ???+ api "API Docs"
 
-    [`velora.models.LiquidDDPG.predict(state, hidden)`](../reference/models/ddpg.md#velora.models.ddpg.LiquidDDPG.predict)
+    [`velora.models.LiquidDDPG.predict(state, hidden)`](../../reference/models/ddpg.md#velora.models.ddpg.LiquidDDPG.predict)
 
 To make a new prediction, we need to pass in a environment `state` and a `hidden` state.
 
@@ -113,9 +113,9 @@ If it's a one time prediction, `hidden=None` is perfect, but you'll likely be us
 
 ???+ Warning "Preparing the Environment"
 
-    [Gymnasium [:material-arrow-right-bottom:]](https://gymnasium.farama.org/) environments are known to use `numpy` arrays for it's `state` spaces. Our algorithms require `torch.Tensors` so you will need to pass the environment through a [NumpyToTorch [:material-arrow-right-bottom:]](https://gymnasium.farama.org/api/wrappers/misc_wrappers/#gymnasium.wrappers.NumpyToTorch) wrapper first.
+    [Gymnasium [:material-arrow-right-bottom:]](https://gymnasium.farama.org/) environments are known to use `numpy` arrays for it's `state` spaces. Velora agents require `torch.Tensors` so you will need to pass the environment through a [NumpyToTorch [:material-arrow-right-bottom:]](https://gymnasium.farama.org/api/wrappers/misc_wrappers/#gymnasium.wrappers.NumpyToTorch) wrapper first.
 
-    To make things easier, we strongly recommend you use the [`velora.gym.add_core_env_wrappers`](../tutorial/gym.md#core-wrappers) method instead. You'll see this in the example shortly.
+    To make things easier, we strongly recommend you use the [`velora.gym.add_core_env_wrappers`](../../tutorial/gym.md#core-wrappers) method instead.
 
 Here's an example for usage in Notebooks ([Jupyter [:material-arrow-right-bottom:]](https://jupyter.org/) | [Google Colab [:material-arrow-right-bottom:]](https://colab.google/)):
 
@@ -163,4 +163,4 @@ This code should work 'as is'.
 
 ---
 
-Next, we'll look at how to `save` and `load` models. See you there! 👋
+Next, we'll dive into the utility methods for `Gymnasium` 👋.

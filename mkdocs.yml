@@ -49,8 +49,12 @@ nav:
   - Learn:
       - User Guide - Tutorials:
           - User Guide - Tutorials: learn/tutorial/index.md
-          - DDPG: learn/tutorial/ddpg.md
+          - Agent Basics: learn/tutorial/agent.md
+          - Callbacks: learn/tutorial/callback.md
           - Saving & Loading Models: learn/tutorial/save.md
+          - Agents:
+              - Agents: learn/tutorial/agents/index.md
+              - DDPG: learn/tutorial/agents/ddpg.md
           - Gymnasium: learn/tutorial/gym.md
           - Utilities: learn/tutorial/utils.md
       - Customization:
@@ -67,10 +71,13 @@ nav:
           - API Reference: learn/reference/index.md
           - models: 
             - lnn: learn/reference/models/lnn.md
+            - base: learn/reference/models/base.md
             - ddpg: learn/reference/models/ddpg.md
             - activation: learn/reference/models/activation.md
             - backbone: learn/reference/models/backbone.md
           - buffer: learn/reference/buffer.md
+          - callbacks: learn/reference/callbacks.md
+          - metrics: learn/reference/metrics.md
           - gymnasium: learn/reference/gym.md
           - noise: learn/reference/noise.md
           - utils: learn/reference/utils.md

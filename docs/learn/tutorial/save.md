@@ -6,7 +6,7 @@ Both are really easy to do with our API and work identically for all agents.
 
 Simply, select an agent you want to train, save it with it's instance `save` method and then `load` it the agent class method.
 
-For our example, we'll use [`LiquidDDPG`](../tutorial/ddpg.md).
+For our example, we'll use [`LiquidDDPG`](../tutorial/agents/ddpg.md).
 
 ## Saving a Model
 
@@ -104,4 +104,4 @@ Core components to consider and include:
 
 ---
 
-Next, we'll dive into the utility methods for `Gymnasium` 👋.
+Next, we'll start looking at each agent individually, starting with `DDPG`! 🚀

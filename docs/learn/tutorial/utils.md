@@ -147,7 +147,7 @@ Like [`to_tensor`](#item-list-to-tensor), we use `dtype=torch.float32` and `devi
 
     [`velora.utils.soft_update(source, target, tau)`](../reference/utils.md#velora.utils.torch.soft_update)
 
-Some algorithms, like [`DDPG`](../tutorial/ddpg.md), perform soft target parameter updates using a hyperparameter $\tau$.
+Some algorithms, like [`DDPG`](../tutorial/agents/ddpg.md), perform soft target parameter updates using a hyperparameter $\tau$.
 
 This method performs that exact process. Given a `source` network, `target` network, and soft update factor `tau`, we iterate through our parameters and perform a soft update:
 

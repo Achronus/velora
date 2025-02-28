@@ -2,7 +2,7 @@
 
 ???+ abstract "Documentation"
 
-    > [User Guide - Tutorials: DDPG](../../tutorial/ddpg.md)
+    > [User Guide - Tutorials: DDPG](../../tutorial/agents/ddpg.md)
 
 A Liquid [Deep Deterministic Policy Gradient [:material-arrow-right-bottom:]](https://arxiv.org/abs/1509.02971) (DDPG) agent.
 
