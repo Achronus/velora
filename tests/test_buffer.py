@@ -7,6 +7,7 @@ from pathlib import Path
 import torch
 
 from velora.buffer import Experience, BatchExperience, ReplayBuffer, RolloutBuffer
+from velora.models.config import BufferConfig
 
 
 class TestExperience:
@@ -78,9 +79,7 @@ class TestReplayBuffer:
         )
 
     @pytest.fixture
-    def filled_buffer(
-        self, replay_buffer: ReplayBuffer, sample_experience: Experience
-    ) -> ReplayBuffer:
+    def filled_buffer(self, replay_buffer: ReplayBuffer) -> ReplayBuffer:
         """Fixture that returns a replay buffer with 10 experiences."""
         for i in range(10):
             replay_buffer.push(
@@ -98,6 +97,10 @@ class TestReplayBuffer:
         assert replay_buffer.capacity == 100
         assert isinstance(replay_buffer.buffer, deque)
         assert len(replay_buffer.buffer) == 0
+
+    def test_config(self, replay_buffer: ReplayBuffer):
+        config = replay_buffer.config
+        assert config == BufferConfig(type="ReplayBuffer", capacity=100)
 
     def test_push_experience(
         self, replay_buffer: ReplayBuffer, sample_experience: Experience
@@ -258,9 +261,7 @@ class TestRolloutBuffer:
         )
 
     @pytest.fixture
-    def filled_buffer(
-        self, rollout_buffer: RolloutBuffer, sample_experience: Experience
-    ) -> RolloutBuffer:
+    def filled_buffer(self, rollout_buffer: RolloutBuffer) -> RolloutBuffer:
         """Fixture that returns a filled rollout buffer with 3 experiences."""
         for i in range(3):
             rollout_buffer.push(
@@ -278,6 +279,10 @@ class TestRolloutBuffer:
         assert rollout_buffer.capacity == 5
         assert isinstance(rollout_buffer.buffer, deque)
         assert len(rollout_buffer.buffer) == 0
+
+    def test_config(self, rollout_buffer: RolloutBuffer):
+        config = rollout_buffer.config
+        assert config == BufferConfig(type="RolloutBuffer", capacity=5)
 
     def test_push_experience(
         self, rollout_buffer: RolloutBuffer, sample_experience: Experience

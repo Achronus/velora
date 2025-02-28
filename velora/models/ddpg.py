@@ -366,9 +366,9 @@ class LiquidDDPG(RLAgent):
             gamma=gamma,
             tau=tau,
             noise_scale=noise_scale,
-            callbacks=[cb.__class__.__name__ for cb in callbacks]
-            if callbacks
-            else None,
+            callbacks=(
+                [cb.__class__.__name__ for cb in callbacks] if callbacks else None
+            ),
         )
 
         callbacks = callbacks or []

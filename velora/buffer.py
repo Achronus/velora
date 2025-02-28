@@ -12,7 +12,6 @@ from velora.models.base import RLAgent
 from velora.models.config import BufferConfig
 from velora.utils.torch import stack_tensor, to_tensor
 
-
 StateDictKeys = Literal["buffer", "capacity", "device"]
 BufferKeys = Literal["states", "actions", "rewards", "next_states", "dones"]
 

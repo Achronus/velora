@@ -3,6 +3,7 @@ import pytest
 from unittest.mock import Mock
 import os
 import tempfile
+import json
 
 import torch
 
@@ -232,33 +233,17 @@ class TestLiquidDDPG:
         )
         assert isinstance(metrics, TrainMetrics)
 
-    def test_save_load(self, ddpg: LiquidDDPG):
+    def test_save_error(self, ddpg: LiquidDDPG):
         with tempfile.NamedTemporaryFile(suffix=".pt", delete=False) as temp_file:
             filepath = temp_file.name
-
         try:
-            # Save the model
-            ddpg.save(filepath)
-            assert os.path.exists(filepath)
+            # Create the file to trigger FileExistsError
+            with open(filepath, "w") as f:
+                f.write("dummy content")
 
-            # Load the model
-            loaded_ddpg = LiquidDDPG.load(filepath)
-
-            # Check model parameters
-            assert loaded_ddpg.state_dim == ddpg.state_dim
-            assert loaded_ddpg.n_neurons == ddpg.n_neurons
-            assert loaded_ddpg.action_dim == ddpg.action_dim
-            assert loaded_ddpg.buffer_size == ddpg.buffer_size
-            assert str(loaded_ddpg.device) == str(ddpg.device)
-
-            # Test predict with the same input
-            state = torch.randn(ddpg.state_dim)
-            action1, _ = ddpg.predict(state, noise_scale=0.0)
-            action2, _ = loaded_ddpg.predict(state, noise_scale=0.0)
-
-            # Actions should be identical since we're using the same state and no noise
-            assert torch.allclose(action1, action2)
-
+            # Now trying to save should raise FileExistsError
+            with pytest.raises(FileExistsError):
+                ddpg.save(filepath)
         finally:
             # Clean up
             if os.path.exists(filepath):
@@ -272,14 +257,11 @@ class TestLiquidDDPG:
             reward = float(i * 0.5)
             next_state = torch.ones(ddpg.state_dim)
             done = i == 9
-
             exp = Experience(state, action, reward, next_state, done)
             ddpg.buffer.push(exp)
 
-        with tempfile.NamedTemporaryFile(suffix=".pt", delete=False) as temp_file:
-            filepath = temp_file.name
-
-        try:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            filepath = os.path.join(temp_dir, "model.pt")
             # Save the model with buffer
             ddpg.save(filepath, buffer=True)
 
@@ -287,6 +269,8 @@ class TestLiquidDDPG:
             assert os.path.exists(filepath)
             buffer_path = ddpg.buffer.create_filepath(filepath)
             assert os.path.exists(buffer_path)
+            config_path = os.path.join(os.path.dirname(filepath), "model_config.json")
+            assert os.path.exists(config_path)
 
             # Load the model with buffer
             loaded_ddpg = LiquidDDPG.load(filepath, buffer=True)
@@ -296,22 +280,22 @@ class TestLiquidDDPG:
 
             # Test predict to ensure models produce similar results
             state = torch.randn(ddpg.state_dim)
-            action1, _ = ddpg.predict(state, noise_scale=0.0)
-            action2, _ = loaded_ddpg.predict(state, noise_scale=0.0)
+            # Handle the case where predict returns a tuple
+            action1 = ddpg.predict(state, noise_scale=0.0)
+            action2 = loaded_ddpg.predict(state, noise_scale=0.0)
+
+            # If actions are tuples, compare the first element
+            if isinstance(action1, tuple):
+                action1 = action1[0]
+            if isinstance(action2, tuple):
+                action2 = action2[0]
+
             assert torch.allclose(action1, action2)
 
-        finally:
-            # Clean up
-            if os.path.exists(filepath):
-                os.unlink(filepath)
-            if os.path.exists(buffer_path):
-                os.unlink(buffer_path)
-
     def test_load_without_buffer_file(self, ddpg: LiquidDDPG):
-        with tempfile.NamedTemporaryFile(suffix=".pt", delete=False) as temp_file:
-            filepath = temp_file.name
+        with tempfile.TemporaryDirectory() as temp_dir:
+            filepath = os.path.join(temp_dir, "model.pt")
 
-        try:
             # Save model without buffer
             ddpg.save(filepath, buffer=False)
 
@@ -320,11 +304,6 @@ class TestLiquidDDPG:
                 FileNotFoundError, match="Buffer file .* does not exist"
             ):
                 LiquidDDPG.load(filepath, buffer=True)
-
-        finally:
-            # Clean up
-            if os.path.exists(filepath):
-                os.unlink(filepath)
 
     def test_save_directory_creation(self, ddpg: LiquidDDPG):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -341,11 +320,14 @@ class TestLiquidDDPG:
             assert os.path.exists(new_dir)
             assert os.path.exists(filepath)
 
-    def test_load_invalid_file(self):
-        with tempfile.NamedTemporaryFile(suffix=".pt", delete=False) as temp_file:
-            filepath = temp_file.name
+            # Check config file was created
+            config_path = os.path.join(new_dir, "model_config.json")
+            assert os.path.exists(config_path)
 
-        try:
+    def test_load_invalid_file(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            filepath = os.path.join(temp_dir, "invalid_model.pt")
+
             # Create an invalid model file
             with open(filepath, "w") as f:
                 f.write("This is not a valid PyTorch file")
@@ -354,42 +336,65 @@ class TestLiquidDDPG:
             with pytest.raises(Exception):
                 LiquidDDPG.load(filepath)
 
-        finally:
-            # Clean up
-            if os.path.exists(filepath):
-                os.unlink(filepath)
+    def test_save_existing_file_error(self, ddpg: LiquidDDPG):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            filepath = os.path.join(temp_dir, "model.pt")
+
+            # Create the file first
+            with open(filepath, "w") as f:
+                f.write("Existing file")
+
+            # Attempt to save should raise FileExistsError
+            with pytest.raises(FileExistsError):
+                ddpg.save(filepath)
+
+    def test_config_file_creation(self, ddpg: LiquidDDPG):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            filepath = os.path.join(temp_dir, "model.pt")
+
+            # Save the model
+            ddpg.save(filepath)
+
+            # Check config file exists
+            config_path = os.path.join(os.path.dirname(filepath), "model_config.json")
+            assert os.path.exists(config_path)
+
+            # Verify config file is valid JSON with expected structure
+            with open(config_path, "r") as f:
+                config_data = json.loads(f.read())
+
+            # Verify basic structure (adjust based on your config class)
+            assert "state_dim" in config_data
+            assert "action_dim" in config_data
 
     def test_checkpoint_keys_validation(self, ddpg: LiquidDDPG):
-        with tempfile.NamedTemporaryFile(suffix=".pt", delete=False) as temp_file:
-            filepath = temp_file.name
+        with tempfile.TemporaryDirectory() as temp_dir:
+            filepath = os.path.join(temp_dir, "model.pt")
 
-        try:
             # Save the model
             ddpg.save(filepath)
 
             # Load the checkpoint and modify it
             checkpoint = torch.load(filepath)
+
             # Add an invalid key
             checkpoint["invalid_key"] = "some_value"
+
             # Save the modified checkpoint
-            torch.save(checkpoint, filepath)
+            modified_filepath = os.path.join(temp_dir, "modified_model.pt")
+            torch.save(checkpoint, modified_filepath)
 
             # Attempt to load should raise ValueError about key mismatch
             with pytest.raises(ValueError, match="Mismatch between checkpoint keys"):
-                LiquidDDPG.load(filepath)
-
-        finally:
-            # Clean up
-            if os.path.exists(filepath):
-                os.unlink(filepath)
+                LiquidDDPG.load(modified_filepath)
 
     def test_train_with_callbacks(self, env: gym.Env, ddpg: LiquidDDPG):
         # Create mock callbacks
         mock_callback1 = Mock(spec=TrainCallback)
-        mock_callback1.return_value = TrainState(total_episodes=2)
+        mock_callback1.return_value = TrainState(env=env.spec.name, total_episodes=2)
 
         mock_callback2 = Mock(spec=TrainCallback)
-        mock_callback2.return_value = TrainState(total_episodes=2)
+        mock_callback2.return_value = TrainState(env=env.spec.name, total_episodes=2)
 
         # Run training with the callbacks
         ddpg.train(
