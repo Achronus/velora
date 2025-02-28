@@ -36,7 +36,7 @@ class TrainState:
         self,
         *,
         status: StatusLiteral | None = None,
-        ep: int | None = None,
+        current_ep: int | None = None,
         avg_reward: float | None = None,
     ) -> None:
         """
@@ -52,7 +52,7 @@ class TrainState:
         avg_reward (float, optional): the episodes average reward value
         """
         self.status = status if status else self.status
-        self.current_ep = ep if ep else self.current_ep
+        self.current_ep = current_ep if current_ep else self.current_ep
         self.avg_reward = avg_reward if avg_reward else self.avg_reward
 
 

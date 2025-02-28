@@ -47,7 +47,7 @@ class TestTrainState:
         assert state.avg_reward == 0  # Unchanged
 
         # Update just episode
-        state.update(ep=5)
+        state.update(current_ep=5)
         assert state.env == "test"  # Unchanged
         assert state.status == "step"  # Unchanged
         assert state.current_ep == 5
@@ -61,7 +61,7 @@ class TestTrainState:
         assert state.avg_reward == 10.5
 
         # Update all values
-        state.update(status="complete", ep=10, avg_reward=20.0)
+        state.update(status="complete", current_ep=10, avg_reward=20.0)
         assert state.env == "test"  # Unchanged
         assert state.status == "complete"
         assert state.current_ep == 10

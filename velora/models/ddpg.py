@@ -8,12 +8,13 @@ import torch.nn as nn
 import torch.optim as optim
 
 from velora.buffer import BatchExperience, Experience, ReplayBuffer
-from velora.callbacks import TrainCallback, TrainState
+from velora.callbacks import TrainCallback
 from velora.gym import add_core_env_wrappers
 from velora.metrics.tracker import MetricsTracker, TrainMetrics
 from velora.models.base import RLAgent
 from velora.models.config import ModelDetails, RLAgentConfig, TorchConfig, TrainConfig
 from velora.models.lnn.ncp import LiquidNCPNetwork
+from velora.models.train import StateHandler
 from velora.noise import OUNoise
 from velora.utils.torch import soft_update
 
@@ -204,7 +205,7 @@ class LiquidDDPG(RLAgent):
         self.noise = OUNoise(action_dim, device=device)
 
         # Config parameters set during training
-        self.env: str | None = None
+        self.env_name: str | None = None
         self.train_params: TrainConfig | None = None
 
         # Additional config details
@@ -310,7 +311,7 @@ class LiquidDDPG(RLAgent):
         """
         return RLAgentConfig(
             agent=self.__class__.__name__,
-            env=self.env,
+            env=self.env_name,
             model_details=self.model_details,
             buffer=self.buffer.config,
             torch=self.torch_config,
@@ -361,7 +362,7 @@ class LiquidDDPG(RLAgent):
         env = add_core_env_wrappers(env, self.device)
 
         # Set training parameters
-        self.env = env.spec.name  # Store env name
+        self.env_name = env.spec.name
         self.train_params = TrainConfig(
             callbacks=(
                 [cb.__class__.__name__ for cb in callbacks] if callbacks else None
@@ -369,9 +370,12 @@ class LiquidDDPG(RLAgent):
             **{k: v for k, v in locals().items() if k != "callbacks"},
         )
 
-        callbacks = callbacks or []
-        training_state = TrainState(env=env.spec.name, total_episodes=n_episodes)
         tracker = MetricsTracker(n_episodes, window_size)
+        handler = StateHandler(
+            env_name=self.env_name,
+            n_episodes=n_episodes,
+            callbacks=callbacks or [],
+        )
 
         self.buffer.warm(self, env, batch_size)
 
@@ -379,13 +383,13 @@ class LiquidDDPG(RLAgent):
             current_ep = i_ep + 1
             state, _ = env.reset()
 
-            actor_hidden = None
+            hidden = None
             episode_reward = 0
 
             for _ in range(max_steps):
-                action, actor_hidden = self.predict(
+                action, hidden = self.predict(
                     state,
-                    actor_hidden,
+                    hidden,
                     noise_scale=noise_scale,
                 )
                 next_state, reward, terminated, truncated, info = env.step(action)
@@ -404,12 +408,8 @@ class LiquidDDPG(RLAgent):
                         "actor_losses": actor_loss,
                     }
                 )
-                training_state.update(status="step")
 
-                # Call step callbacks
-                for cb in callbacks:
-                    training_state = cb(training_state)
-
+                handler.step()
                 state = next_state
 
                 if done:
@@ -417,28 +417,15 @@ class LiquidDDPG(RLAgent):
                     tracker.log({"ep_rewards": episode_reward})
                     break
 
-            training_state.update(
-                status="episode",
-                ep=current_ep,
-                avg_reward=tracker.avg_reward(),
-            )
+            handler.episode(current_ep, tracker.avg_reward())
 
-            # Call episode callbacks
-            for cb in callbacks:
-                training_state = cb(training_state)
-
-            if current_ep % window_size == 0 or training_state.stop_training:
+            if current_ep % window_size == 0 or handler.stop():
                 tracker.print(current_ep)
 
-            if training_state.stop_training:
+            if handler.stop():
                 break
 
-        # Call complete callbacks
-        for cb in callbacks:
-            training_state.status = "complete"
-            training_state = cb(training_state)
-
-        env.close()
+        handler.complete()
         return tracker.storage
 
     @override
