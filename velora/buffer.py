@@ -5,9 +5,13 @@ from dataclasses import astuple, dataclass
 from pathlib import Path
 from typing import Any, Deque, Dict, List, Literal, Self, Tuple, get_args, override
 
+import gymnasium as gym
 import torch
 
+from velora.models.base import RLAgent
+from velora.models.config import BufferConfig
 from velora.utils.torch import stack_tensor, to_tensor
+
 
 StateDictKeys = Literal["buffer", "capacity", "device"]
 BufferKeys = Literal["states", "actions", "rewards", "next_states", "dones"]
@@ -266,6 +270,16 @@ class ReplayBuffer(BufferBase):
         """
         super().__init__(capacity, device=device)
 
+    @property
+    def config(self) -> BufferConfig:
+        """
+        Creates a buffer config model.
+
+        Returns:
+            config (BufferConfig): a config model with buffer details.
+        """
+        return BufferConfig(type="ReplayBuffer", capacity=self.capacity)
+
     @override
     def sample(self, batch_size: int) -> BatchExperience:
         """
@@ -287,6 +301,34 @@ class ReplayBuffer(BufferBase):
         batch: List[Experience] = random.sample(self.buffer, batch_size)
         return self._batch(batch)
 
+    def warm(self, agent: RLAgent, env: gym.Env, n_samples: int) -> None:
+        """
+        Warms the buffer to fill it to a number of samples by generating them
+        from an agent using an environment.
+
+        Parameters:
+            agent (RLAgent): the agent to generate samples with
+            env (gym.Env): the environment generate samples from
+            n_samples (int): the maximum number of samples to generate
+        """
+        print(f"Warming buffer with {n_samples=}...", end=" ")
+        hidden = None
+        state, _ = env.reset()
+
+        while not len(self.buffer) >= n_samples:
+            action, hidden = agent.predict(state, hidden)
+            next_state, reward, terminated, truncated, _ = env.step(action)
+            done = terminated or truncated
+
+            self.push(Experience(state, action.item(), reward, next_state, done))
+
+            state = next_state
+
+            if done:
+                state, _ = env.reset()
+
+        print("Complete.\nTraining started.")
+
 
 class RolloutBuffer(BufferBase):
     """
@@ -303,6 +345,16 @@ class RolloutBuffer(BufferBase):
             device (torch.device, optional): the device to perform computations on
         """
         super().__init__(capacity, device=device)
+
+    @property
+    def config(self) -> BufferConfig:
+        """
+        Creates a buffer config model.
+
+        Returns:
+            config (BufferConfig): a config model with buffer details.
+        """
+        return BufferConfig(type="RolloutBuffer", capacity=self.capacity)
 
     @override
     def push(self, exp: Experience) -> None:

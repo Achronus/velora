@@ -372,11 +372,11 @@ class LiquidDDPG(RLAgent):
         )
 
         callbacks = callbacks or []
-        training_started = False
         training_state = TrainState(env=env.spec.name, total_episodes=n_episodes)
         tracker = MetricsTracker(n_episodes, window_size)
 
-        print(f"{batch_size=}, getting buffer samples.")
+        self.buffer.warm(self, env, batch_size)
+
         for i_ep in range(n_episodes):
             current_ep = i_ep + 1
             state, _ = env.reset()
@@ -397,25 +397,20 @@ class LiquidDDPG(RLAgent):
                     Experience(state, action.item(), reward, next_state, done),
                 )
 
-                if len(self.buffer) >= batch_size:
-                    if not training_started:
-                        print("Buffer warmed. Starting training...")
-                        training_started = True
+                critic_loss, actor_loss = self._train_step(batch_size, gamma)
+                self._update_target_networks(tau)
 
-                    critic_loss, actor_loss = self._train_step(batch_size, gamma)
-                    self._update_target_networks(tau)
+                tracker.log(
+                    {
+                        "critic_losses": critic_loss,
+                        "actor_losses": actor_loss,
+                    }
+                )
+                training_state.update(status="step")
 
-                    tracker.log(
-                        {
-                            "critic_losses": critic_loss,
-                            "actor_losses": actor_loss,
-                        }
-                    )
-                    training_state.update(status="step")
-
-                    # Call step callbacks
-                    for cb in callbacks:
-                        training_state = cb(training_state)
+                # Call step callbacks
+                for cb in callbacks:
+                    training_state = cb(training_state)
 
                 state = next_state
 
@@ -424,22 +419,21 @@ class LiquidDDPG(RLAgent):
                     tracker.log({"ep_rewards": episode_reward})
                     break
 
-            if training_started:
-                training_state.update(
-                    status="episode",
-                    ep=current_ep,
-                    avg_reward=tracker.avg_reward(),
-                )
+            training_state.update(
+                status="episode",
+                ep=current_ep,
+                avg_reward=tracker.avg_reward(),
+            )
 
-                # Call episode callbacks
-                for cb in callbacks:
-                    training_state = cb(training_state)
+            # Call episode callbacks
+            for cb in callbacks:
+                training_state = cb(training_state)
 
-                if current_ep % window_size == 0 or training_state.stop_training:
-                    tracker.print(current_ep)
+            if current_ep % window_size == 0 or training_state.stop_training:
+                tracker.print(current_ep)
 
-                if training_state.stop_training:
-                    break
+            if training_state.stop_training:
+                break
 
         # Call complete callbacks
         for cb in callbacks:
