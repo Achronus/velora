@@ -5,8 +5,9 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from velora.callbacks import TrainState, EarlyStopping, SaveCheckpoints
+from velora.callbacks import EarlyStopping, SaveCheckpoints
 from velora.models.base import RLAgent
+from velora.state import TrainState
 
 
 class TestTrainState:
@@ -15,7 +16,7 @@ class TestTrainState:
         state = TrainState(env="test", total_episodes=100)
         assert state.env == "test"
         assert state.total_episodes == 100
-        assert state.status == "episode"
+        assert state.status == "start"
         assert state.current_ep == 0
         assert state.avg_reward == 0
         assert state.stop_training is False
@@ -208,14 +209,14 @@ class TestSaveCheckpoints:
         # Default initialization
         callback = SaveCheckpoints(mock_agent, "model_dir")
         assert callback.agent is mock_agent
-        assert callback.filepath == Path("checkpoints", "model_dir")
+        assert callback.filepath == Path("checkpoints", "model_dir", "saves")
         assert callback.frequency == 100
         assert callback.buffer is False
 
         # Custom initialization
         callback = SaveCheckpoints(mock_agent, "custom", frequency=50, buffer=True)
         assert callback.agent is mock_agent
-        assert callback.filepath == Path("checkpoints", "custom")
+        assert callback.filepath == Path("checkpoints", "custom", "saves")
         assert callback.frequency == 50
         assert callback.buffer is True
 

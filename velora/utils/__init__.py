@@ -1,3 +1,4 @@
+from velora.utils.capture import record_last_episode
 from velora.utils.core import set_device, set_seed
 from velora.utils.torch import (
     active_parameters,
@@ -17,4 +18,5 @@ __all__ = [
     "hard_update",
     "total_parameters",
     "active_parameters",
+    "record_last_episode",
 ]

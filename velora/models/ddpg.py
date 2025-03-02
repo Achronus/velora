@@ -174,11 +174,12 @@ class LiquidDDPG(RLAgent):
             critic_lr (float, optional): the critic optimizer learning rate
             device (torch.device, optional): the device to perform computations on
         """
+        super().__init__(device)
+
         self.state_dim = state_dim
         self.n_neurons = n_neurons
         self.action_dim = action_dim
         self.buffer_size = buffer_size
-        self.device = device
 
         self.actor = DDPGActor(
             self.state_dim,
@@ -359,8 +360,6 @@ class LiquidDDPG(RLAgent):
                 f"Invalid '{env.action_space=}'. Must be 'gym.spaces.Box'."
             )
 
-        env = add_core_env_wrappers(env, self.device)
-
         # Set training parameters
         self.env_name = env.spec.name
         self.train_params = TrainConfig(
@@ -377,7 +376,10 @@ class LiquidDDPG(RLAgent):
             callbacks=callbacks or [],
         )
 
-        self.buffer.warm(self, env, batch_size)
+        env = handler.start(env)
+        env = add_core_env_wrappers(env, self.device)
+
+        self.buffer.warm(self, env.spec.id, batch_size)
 
         for i_ep in range(n_episodes):
             current_ep = i_ep + 1
@@ -386,7 +388,7 @@ class LiquidDDPG(RLAgent):
             hidden = None
             episode_reward = 0
 
-            for _ in range(max_steps):
+            for i_step in range(max_steps):
                 action, hidden = self.predict(
                     state,
                     hidden,
@@ -409,7 +411,7 @@ class LiquidDDPG(RLAgent):
                     }
                 )
 
-                handler.step()
+                handler.step(i_step)
                 state = next_state
 
                 if done:
@@ -426,6 +428,9 @@ class LiquidDDPG(RLAgent):
                 break
 
         handler.complete()
+        env.close()
+
+        handler.record_last(self, env.spec.id)
         return tracker.storage
 
     @override
@@ -491,7 +496,7 @@ class LiquidDDPG(RLAgent):
 
         if save_path.exists():
             raise FileExistsError(
-                f"Items already exist in the '{save_path.parent}' directory! Either change the 'filepath' or delete the folders contents."
+                f"Checkpoints already exist in the '{save_path.parent}' directory! Either change the 'filepath' or delete the folders contents."
             )
 
         torch.save(checkpoint, save_path)

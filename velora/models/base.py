@@ -13,6 +13,13 @@ class RLAgent:
     Provides a blueprint describing the core methods that agents *must* have.
     """
 
+    def __init__(self, device: torch.device | None) -> None:
+        """
+        Parameters:
+            device (torch.device, optional): the device to perform computations on
+        """
+        self.device = device
+
     @abstractmethod
     def train(
         self,

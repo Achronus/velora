@@ -8,6 +8,7 @@ from typing import Any, Deque, Dict, List, Literal, Self, Tuple, get_args, overr
 import gymnasium as gym
 import torch
 
+from velora.gym.wrap import add_core_env_wrappers
 from velora.models.base import RLAgent
 from velora.models.config import BufferConfig
 from velora.utils.torch import stack_tensor, to_tensor
@@ -300,17 +301,20 @@ class ReplayBuffer(BufferBase):
         batch: List[Experience] = random.sample(self.buffer, batch_size)
         return self._batch(batch)
 
-    def warm(self, agent: RLAgent, env: gym.Env, n_samples: int) -> None:
+    def warm(self, agent: RLAgent, env_name: str, n_samples: int) -> None:
         """
         Warms the buffer to fill it to a number of samples by generating them
-        from an agent using an environment.
+        from an agent using a copy of the environment.
 
         Parameters:
             agent (RLAgent): the agent to generate samples with
-            env (gym.Env): the environment generate samples from
+            env_name (str): the name of environment to generate samples from
             n_samples (int): the maximum number of samples to generate
         """
-        print(f"Warming buffer with {n_samples=}...", end=" ")
+        env = gym.make(env_name)
+        env = add_core_env_wrappers(env, agent.device)
+
+        print(f"\nWarming buffer with {n_samples=}...", end=" ")
         hidden = None
         state, _ = env.reset()
 
@@ -326,6 +330,7 @@ class ReplayBuffer(BufferBase):
             if done:
                 state, _ = env.reset()
 
+        env.close()
         print("Complete.\nTraining started.")
 
 

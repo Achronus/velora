@@ -27,7 +27,7 @@ class TestWrapGymEnv:
 
             wrapped_env = wrap_gym_env("CartPole-v1", [])
 
-            mock_make.assert_called_once_with("CartPole-v1")
+            mock_make.assert_called_once_with("CartPole-v1", render_mode="rgb_array")
             assert wrapped_env == mock_env
 
     def test_wrap_env_with_wrappers(self, mock_env):

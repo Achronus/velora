@@ -12,8 +12,9 @@ import gymnasium as gym
 from velora.buffer import Experience
 from velora.metrics.tracker import TrainMetrics
 from velora.models import LiquidNCPNetwork
-from velora.callbacks import TrainCallback, TrainState
+from velora.callbacks import TrainCallback
 from velora.models.ddpg import DDPGActor, DDPGCritic, LiquidDDPG
+from velora.state import TrainState
 
 
 NetworkParamsType = Dict[

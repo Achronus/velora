@@ -1,59 +1,9 @@
 from abc import abstractmethod
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, override
+from typing import get_args, override
 
 from velora.models.base import RLAgent
-
-StatusLiteral = Literal["episode", "step", "complete"]
-
-
-@dataclass
-class TrainState:
-    """
-    A storage container for the current state of model training.
-
-    Parameters:
-        env (str): the name of the environment to train on
-        total_episodes (int): total number of training episodes
-        status (Literal["episode", "step", "complete"], optional): the current stage of training.
-
-            - `episode` - inside the episode loop.
-            - `step` - inside the training loop.
-            - `complete` - completed training.
-        current_ep (int, optional): the current episode index
-        avg_reward (float, optional): the episodes average reward value
-    """
-
-    env: str
-    total_episodes: int
-    status: StatusLiteral = "episode"
-    current_ep: int = 0
-    avg_reward: float = 0
-    stop_training: bool = False
-
-    def update(
-        self,
-        *,
-        status: StatusLiteral | None = None,
-        current_ep: int | None = None,
-        avg_reward: float | None = None,
-    ) -> None:
-        """
-        Updates the training state. When any input is `None`, uses existing value.
-
-        Parameters:
-            status (Literal["episode", "step", "complete"], optional): the current stage of training.
-
-                - `episode` - inside the episode loop.
-                - `step` - inside the training loop.
-                - `complete` - completed training.
-        current_ep (int, optional): the current episode index
-        avg_reward (float, optional): the episodes average reward value
-        """
-        self.status = status if status else self.status
-        self.current_ep = current_ep if current_ep else self.current_ep
-        self.avg_reward = avg_reward if avg_reward else self.avg_reward
+from velora.state import RecordMethodLiteral, RecordState, TrainState
 
 
 class TrainCallback:
@@ -66,17 +16,26 @@ class TrainCallback:
         pass  # pragma: no cover
 
     @abstractmethod
-    def __call__(self, *args, **kwargs) -> TrainState:
+    def __call__(self, state: TrainState) -> TrainState:
+        """
+        The callback function that gets called during training.
+
+        Parameters:
+            state (TrainState): the current training state
+
+        Returns:
+            state (TrainState): the current training state.
+        """
         pass  # pragma: no cover
 
 
 class EarlyStopping(TrainCallback):
     """
-    A context manager that applies early stopping to the training process.
+    A callback that applies early stopping to the training process.
     """
 
     @override
-    def __init__(self, target: float, patience: int = 3) -> None:
+    def __init__(self, target: float, *, patience: int = 3) -> None:
         """
         Parameters:
             target (float): average reward target to achieve based on a models
@@ -89,17 +48,11 @@ class EarlyStopping(TrainCallback):
 
         self.count = 0
 
-    @override
+        print(
+            f"'{self.__class__.__name__}' enabled with reward_{target=} and {patience=}."
+        )
+
     def __call__(self, state: TrainState) -> TrainState:
-        """
-        The callback function that gets called during training.
-
-        Parameters:
-            state (TrainState): the current training state
-
-        Returns:
-            state (TrainState): the current training state or an updated one if patience achieved.
-        """
         if state.stop_training:
             return state
 
@@ -123,7 +76,7 @@ class EarlyStopping(TrainCallback):
 
 class SaveCheckpoints(TrainCallback):
     """
-    A context manager that applies model state saving checkpoints to the training process.
+    A callback that applies model state saving checkpoints to the training process.
     """
 
     @override
@@ -138,28 +91,26 @@ class SaveCheckpoints(TrainCallback):
         """
         Parameters:
             agent (RLAgent): the agent to use
-            dirname (str): the model directory name to save checkpoints
-                Automatically created inside `checkpoints` directory.
+            dirname (str): the model directory name to save checkpoints.
+                Automatically created inside `checkpoints` directory as
+                `checkpoints/<dirname>/saves`.
+
+                Compliments `TrainCallback.RecordVideos` callback.
+
             frequency (int, optional): save frequency (in episodes)
             buffer (bool, optional): whether to save the final buffer state
         """
         self.agent = agent
-        self.filepath = Path("checkpoints", dirname)
+        self.filepath = Path("checkpoints", dirname, "saves")
         self.frequency = frequency
         self.buffer = buffer
 
-    @override
+        print(
+            f"'{self.__class__.__name__}' enabled with ep_{frequency=} and {buffer=}."
+        )
+
     def __call__(self, state: TrainState) -> TrainState:
-        """
-        The callback function that gets called during training.
-
-        Parameters:
-            state (TrainState): the current training state
-
-        Returns:
-            state (TrainState): the current training state.
-        """
-        # Only perform checkpoint operations on episode events
+        # Only perform checkpoint operations on episode and complete events
         if state.status != "episode" and state.status != "complete":
             return state
 
@@ -206,3 +157,65 @@ class SaveCheckpoints(TrainCallback):
 
         if buffer:
             print(f"Buffer saved at: {buffer_path}")
+
+
+class RecordVideos(TrainCallback):
+    """
+    A callback to enable intermittent environment video recording to visualize
+    the agent training progress.
+
+    Requires environment with `render_mode="rgb_array"`.
+    """
+
+    @override
+    def __init__(
+        self,
+        method: RecordMethodLiteral,
+        dirname: str,
+        *,
+        frequency: int = 100,
+    ) -> None:
+        """
+        Parameters:
+            method (Literal["episode", "step"]): the recording method.
+                When `episode` records episodically. When `step` records during
+                training steps.
+            dirname (str): the model directory name to store the videos.
+                Automatically created in `checkpoints` directory as
+                `checkpoints/<dirname>/videos`.
+
+                Compliments `TrainCallback.SaveCheckpoints` callback.
+
+            frequency (int, optional): the `episode` or `step` record frequency
+        """
+        if method not in get_args(RecordMethodLiteral):
+            raise ValueError(
+                f"'{method=}' is not supported. Choices: '{get_args(RecordMethodLiteral)}'"
+            )
+
+        self.method = method
+        self.dirpath = Path("checkpoints", dirname, "videos")
+
+        def trigger(t: int) -> bool:
+            # Skip first item
+            if t == 0:
+                return False
+
+            return t % frequency == 0
+
+        self.details = RecordState(
+            dirpath=self.dirpath,
+            method=method,
+            episode_trigger=trigger if method == "episode" else None,
+            step_trigger=trigger if method == "step" else None,
+        )
+
+        print(f"'{self.__class__.__name__}' enabled with {str(method)}_{frequency=}.")
+
+    def __call__(self, state: TrainState) -> TrainState:
+        # 'start': Set the recording state
+        if state.status == "start":
+            state.record_state = self.details
+
+        # Ignore other events
+        return state
