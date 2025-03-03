@@ -1,10 +1,20 @@
 # Getting Started
 
-To get started, simply install it through [pip [:material-arrow-right-bottom:]](https://pypi.org/project/velora/):
+To get started, simply install it through [pip [:material-arrow-right-bottom:]](https://pypi.org/) using one of the options below.
+
+For [PyTorch [:material-arrow-right-bottom:]](https://pytorch.org/get-started/locally/) with CUDA (recommended):
+
+```bash
+pip install torch torchvision velora --extra-index-url https://download.pytorch.org/whl/cu124
+```
+
+Or, for [PyTorch [:material-arrow-right-bottom:]](https://pytorch.org/get-started/locally/) with CPU only:
 
 ```bash
 pip install velora
 ```
+
+## Example Usage
 
 Here's a simple example:
 

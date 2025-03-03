@@ -1,4 +1,4 @@
-![Logo](https://github.com/Achronus/velora/blob/main/docs/assets/imgs/main.jpg)
+![Logo](https://raw.githubusercontent.com/Achronus/velora/main/docs/assets/imgs/main.jpg)
 
 [![codecov](https://codecov.io/gh/Achronus/velora/graph/badge.svg?token=OF7WP5Q9PT)](https://codecov.io/gh/Achronus/velora)
 ![Python Version](https://img.shields.io/pypi/pyversions/velora)
@@ -27,11 +27,27 @@ Velora offers Liquidfied PyTorch-based implementations of RL algorithms, designe
 
 In other frameworks, we've seen a trend of heavy abstraction in favour of minimal lines of code. Our approach aims to offer a best of both worlds, abstracting code away but making the details explainable on the backend, while giving you the freedom to customize as needed.
 
-To get started, simply install it through [pip](https://pypi.org/):
+## Installation
+
+To get started, simply install it through [pip](https://pypi.org/) using one of the options below.
+
+### GPU Enabled
+
+For [PyTorch](https://pytorch.org/get-started/locally/) with CUDA (recommended):
+
+```bash
+pip install torch torchvision velora --extra-index-url https://download.pytorch.org/whl/cu124
+```
+
+### CPU Only
+
+Or, for [PyTorch](https://pytorch.org/get-started/locally/) with CPU only:
 
 ```bash
 pip install velora
 ```
+
+## Example Usage
 
 Here's a simple example that should work 'as is':
 
