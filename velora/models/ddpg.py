@@ -7,9 +7,10 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
-from velora.buffer import BatchExperience, Experience, ReplayBuffer
+from velora.buffer.experience import BatchExperience, Experience
+from velora.buffer.replay import ReplayBuffer
 from velora.callbacks import TrainCallback
-from velora.gym import add_core_env_wrappers
+from velora.gym.wrap import add_core_env_wrappers
 from velora.metrics.tracker import MetricsTracker, TrainMetrics
 from velora.models.base import RLAgent
 from velora.models.config import ModelDetails, RLAgentConfig, TorchConfig, TrainConfig
@@ -380,6 +381,7 @@ class LiquidDDPG(RLAgent):
         env = add_core_env_wrappers(env, self.device)
 
         self.buffer.warm(self, env.spec.id, batch_size)
+        print("Training started.")
 
         for i_ep in range(n_episodes):
             current_ep = i_ep + 1

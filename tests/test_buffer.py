@@ -6,7 +6,9 @@ from pathlib import Path
 
 import torch
 
-from velora.buffer import Experience, BatchExperience, ReplayBuffer, RolloutBuffer
+from velora.buffer.experience import BatchExperience, Experience
+from velora.buffer.replay import ReplayBuffer
+from velora.buffer.rollout import RolloutBuffer
 from velora.models.config import BufferConfig
 
 

@@ -9,7 +9,7 @@ import torch
 
 import gymnasium as gym
 
-from velora.buffer import Experience
+from velora.buffer.experience import Experience
 from velora.metrics.tracker import TrainMetrics
 from velora.models import LiquidNCPNetwork
 from velora.callbacks import TrainCallback
