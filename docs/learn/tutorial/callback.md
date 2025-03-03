@@ -66,6 +66,7 @@ There are a number of `callbacks` available. Here's an exhaustive list of them:
 
 - [`EarlyStopping`](#early-stopping) - stops the training process when the average reward `target` is reached multiple times in a row based on the `patience` value.
 - [`SaveCheckpoints`](#model-checkpoints) - saves the model state during the training process based on a `frequency`.
+- [`RecordVideos`](#recording-videos) - adds video recording to the agents training process.
 
 ## Early Stopping
 
@@ -98,7 +99,9 @@ We can do this with the `SaveCheckpoints` callback. It requires two parameters:
 - `agent` - the model used during training.
 - `dirname` - the directory name to store the model checkpoints in the `checkpoints` directory.
 
-For example, if we want to train a `DDPG` model and store its checkpoints in `checkpoints/ddpg` we'd use the following code:
+Checkpoints are automatically added to a `checkpoints` directory inside a `<dirname>/saves` folder. This design choice compliments the [`RecordVideos`](#recording-videos) callback to help keep the experiments tidy.
+
+For example, if we want to train a `DDPG` model and store its checkpoints in a model directory called `ddpg` we'd use the following code:
 
 ```python
 from velora.callbacks import SaveCheckpoints
@@ -133,13 +136,60 @@ You can customize these freely using the required parameter name.
 
 When `buffer=True` only the final checkpoint state's `buffer` is saved. We'll discuss more about this in the [Saving and Loading Models](../tutorial/save.md) section.
 
+## Recording Videos
+
+???+ api "API Docs"
+
+    [`velora.callbacks.RecordVideos(method, dirname)`](../reference/callbacks.md#velora.callbacks.RecordVideos)
+
+Sometimes it's useful to see how the agent is performing while it is training. The best way to do this is visually, by watching the agent interact with its environment.
+
+Normally, you would use [Gymnasium's RecordVideo [:material-arrow-right-bottom:]](https://gymnasium.farama.org/api/wrappers/misc_wrappers/#gymnasium.wrappers.RecordVideo) wrapper for this, but instead, we recommend you use the `RecordVideos` callback.
+
+It uses the same approach as the wrapper but integrates seamlessly with other callbacks and adds a minor expansion - it *always* records the final training episode.
+
+It takes in two parameters:
+
+- `method` - the recording method. Either: `episodes` or `steps`.
+- `dirname` - the model directory name to store the videos. E.g., `ddpg`.
+
+Videos are automatically added to a `checkpoints` directory inside a `<dirname>/videos` folder. This design choice compliments the [`SaveCheckpoints`](#model-checkpoints) callback to help keep the experiments tidy.
+
+```python
+from velora.callbacks import EarlyStopping, SaveCheckpoints, RecordVideos
+from velora.models import LiquidDDPG
+
+# Solo
+callbacks = [
+    RecordVideos("episode", "ddpg"),
+]
+
+
+# With other callbacks
+model = LiquidDDPG(4, 10, 1)
+CP_DIR = "ddpg"
+FREQ = 5
+
+callbacks = [
+    SaveCheckpoints(model, CP_DIR, frequency=FREQ, buffer=True),
+    EarlyStopping(target=15.),
+    RecordVideos("episode", CP_DIR, frequency=FREQ),
+]
+```
+
+`frequency` is an optional parameter. If not set, it will default to `100`.
+
 ## Analytics
 
 !!! construction "Coming Soon"
+<!-- 
+???+ api "API Docs"
 
-## Recording Episodes
+    [`velora.callbacks.SaveCheckpoints(agent, dirname)`](../reference/callbacks.md#velora.callbacks.SaveCheckpoints)
 
-!!! construction "Coming Soon"
+```bash
+pip install velora[analytics]
+``` -->
 
 ---
 

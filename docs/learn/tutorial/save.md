@@ -26,7 +26,7 @@ env = gym.make("InvertedPendulum-v5")
 model = LiquidDDPG(4, 10, 1, device=device)
 metrics = model.train(env, 128, n_episodes=100)
 
-model.save('checkpoints/ddpg/InvertedPendulum_final.pt')
+model.save('checkpoints/ddpg/saves/InvertedPendulum_final.pt')
 ```
 
 This code should work 'as is'.
@@ -36,16 +36,16 @@ The only thing we need to do is give it a `filepath`. The complete model state w
 By default, we don't save the buffers state. However, if you want to, simply add `buffer=True` and it will store the buffer in a separate file.
 
 ```python
-model.save('checkpoints/ddpg/InvertedPendulum_final.pt', buffer=True)
+model.save('checkpoints/ddpg/saves/InvertedPendulum_final.pt', buffer=True)
 ```
 
 The buffer name will be identical to the filename, with a `.buffer` added between the filename and extension. So, with our previous example, the buffer file would save to:
 
-> `checkpoints/ddpg/InvertedPendulum_final.buffer.pt`
+> `checkpoints/ddpg/saves/InvertedPendulum_final.buffer.pt`
 
 Similarly, the `model_config.json` would save to:
 
-> `checkpoints/ddpg/model_config.json`
+> `checkpoints/ddpg/saves/model_config.json`
 
 ## Loading a Model
 
@@ -54,7 +54,7 @@ To load a model we use the `load` class method:
 ```python
 from velora.models import LiquidDDPG
 
-model = LiquidDDPG.load('checkpoints/ddpg/InvertedPendulum_final.pt')
+model = LiquidDDPG.load('checkpoints/ddpg/saves/InvertedPendulum_final.pt')
 ```
 
 Like before, the only thing we need to do is give it a `filepath`. The complete model state will then be loaded into a new model instance.
@@ -69,7 +69,7 @@ Again, we don't load the buffers state by default. `buffer=True` will do that.
 
 ```python
 model = LiquidDDPG.load(
-    'checkpoints/ddpg/InvertedPendulum_final.pt',
+    'checkpoints/ddpg/saves/InvertedPendulum_final.pt',
     buffer=True,
 )
 ```

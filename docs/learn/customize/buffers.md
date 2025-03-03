@@ -24,6 +24,10 @@ buffer = ReplayBuffer(capacity=100_000, device=device)
 
 ### Add Items
 
+???+ api "API Docs"
+
+    [`velora.buffer.ReplayBuffer.push(exp)`](../reference/buffer.md#velora.buffer.BufferBase.push)
+
 To add an item, we `push()` a set of `Experience` to it:
 
 ```python
@@ -45,6 +49,10 @@ buffer.push(exp)
 
 ### Get Samples
 
+???+ api "API Docs"
+
+    [`velora.buffer.ReplayBuffer.sample(batch_size)`](../reference/buffer.md#velora.buffer.ReplayBuffer.sample)
+
 We can then `sample()` a batch of experience:
 
 ```python
@@ -56,6 +64,26 @@ This gives us a `BatchExperience` object. Like `Experience` we'll talk about tha
 !!! note
 
     We can only sample from the buffer after we have enough experience. This is dictated by your `batch_size`.
+
+### Warming the Buffer
+
+???+ api "API Docs"
+
+    [`velora.buffer.ReplayBuffer.warm(agent, env_name, n_samples)`](../reference/buffer.md#velora.buffer.ReplayBuffer.warm)
+
+The `ReplayBuffer` needs to have samples in it before we can `sample` from it. We call this the *warming* process.
+
+We have a dedicated method for this called `warm()` that automatically gathers experience up to `n_samples` without effecting your `episode` count during training.
+
+It takes three parameters:
+
+- `agent` - the `RLAgent` instance to generate samples with. E.g., [`LiquidDDPG`]()
+- `env_name` - the [Gymnasium [:material-arrow-right-bottom:]](https://gymnasium.farama.org/) environment name ID (`env.spec.id`). E.g., `InvertedPendulum-v5`.
+- `n_samples` - the number of samples to generate. E.g., the `batch_size`
+
+```python
+buffer.warm(agent, env.spec.id, 128)
+```
 
 ### Check Size
 
@@ -72,25 +100,38 @@ Here's a complete example of the code we've just seen:
 ```python
 from velora.buffer import Experience, ReplayBuffer
 from velora.utils import set_device
+from velora.models.ddpg import LiquidDDPG
 
+import gymnasium as gym
 import torch
 
 device = set_device()
+
+env = gym.make("InvertedPendulum-v5", render_mode="rgb_array")
+
+state_dim = env.observation_space.shape[0]
+action_dim = env.action_space.shape[0]
+
+agent = LiquidDDPG(state_dim, 10, action_dim, device=device)
 buffer = ReplayBuffer(capacity=100_000, device=device)
 
+# Warm with 5 samples
+buffer.warm(agent, env.spec.id, 5)
+
+# Single experience
 exp = Experience(
-    state=torch.zeros((1, 4)),
+    state=torch.zeros(state_dim, device=device),
     action=1.,
     reward=2.,
-    next_state=torch.zeros((1, 4)),
+    next_state=torch.zeros(state_dim, device=device),
     done=False,
 )
-
 buffer.push(exp)
 
-batch = buffer.sample(batch_size=1)
+# Get a batch
+batch = buffer.sample(batch_size=5)
 
-len(buffer)  # 1
+len(buffer)  # 6
 ```
 
 This code should work 'as is'.
@@ -113,7 +154,13 @@ device = set_device()
 buffer = RolloutBuffer(capacity=10, device=device)
 ```
 
-### Add Rollouts
+### Add and Empty Rollouts
+
+???+ api "API Docs"
+
+    [`velora.buffer.RolloutBuffer.push(exp)`](../reference/buffer.md#velora.buffer.RolloutBuffer.push)
+
+    [`velora.buffer.RolloutBuffer.empty()`](../reference/buffer.md#velora.buffer.RolloutBuffer.empty)
 
 To add an item, we `push()` a set of `Experience` to it:
 
@@ -139,6 +186,10 @@ buffer.empty()
 ```
 
 ### Get All Samples
+
+???+ api "API Docs"
+
+    [`velora.buffer.RolloutBuffer.sample()`](../reference/buffer.md#velora.buffer.RolloutBuffer.sample)
 
 We can get the complete experience from the rollout buffer using the `sample()` method:
 
@@ -192,6 +243,12 @@ len(buffer)  # 0
 This code should work 'as is'.
 
 ## Saving and Loading Buffers
+
+???+ api "API Docs"
+
+    [`velora.buffer.BufferBase.save(filepath)`](../reference/buffer.md#velora.buffer.BufferBase.save)
+
+    [`velora.buffer.BufferBase.load(filepath)`](../reference/buffer.md#velora.buffer.BufferBase.load)
 
 Sometimes you might want to reuse a buffers state in a different project. Well, now you can!
 

@@ -517,7 +517,7 @@ class LiquidDDPG(RLAgent):
     @classmethod
     def load(cls, filepath: str | Path, *, buffer: bool = False) -> Self:
         """
-        Loads a saved model state with and optionally with a buffer.
+        Loads a saved model state and optionally the training buffer.
 
         Parameters:
             filepath (str | Path): the location for the saved model state

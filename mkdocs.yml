@@ -81,6 +81,7 @@ nav:
           - metrics: learn/reference/metrics.md
           - gymnasium: learn/reference/gym.md
           - noise: learn/reference/noise.md
+          - state: learn/reference/state.md
           - utils: learn/reference/utils.md
           - wiring: learn/reference/wiring.md
   - Help: help.md
