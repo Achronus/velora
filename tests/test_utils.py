@@ -1,3 +1,6 @@
+import os
+from pathlib import Path
+import tempfile
 import pytest
 from unittest.mock import patch
 from typing import Generator, List, Tuple
@@ -6,7 +9,8 @@ import torch
 import torch.nn as nn
 import numpy as np
 
-
+from velora.models.base import RLAgent
+from velora.utils.capture import record_last_episode
 from velora.utils.core import set_seed, set_device
 from velora.utils.torch import to_tensor, stack_tensor, soft_update, hard_update
 
@@ -234,3 +238,99 @@ class TestNetworkUpdates:
 
             with pytest.raises(RuntimeError):
                 hard_update(source_net, target_net)
+
+
+class SimpleTestAgent(RLAgent):
+    """A simple concrete implementation of RLAgent for testing."""
+
+    def __init__(self, device=None):
+        self.device = device or torch.device("cpu")
+
+    def train(
+        self, env, batch_size, n_episodes, max_steps, window_size, *args, **kwargs
+    ):
+        pass
+
+    def predict(self, state, hidden=None, *args, **kwargs):
+        # Simple control strategy for InvertedPendulum
+        action = torch.tensor([0.0])  # Default neutral action
+        if hasattr(state, "ndim") and state.ndim > 0 and len(state) >= 2:
+            # Push in opposite direction of angle
+            angle = state[1].item() if isinstance(state, torch.Tensor) else state[1]
+            action = torch.tensor([-angle * 3.0])  # Simple proportional control
+            # Clip to valid range
+            action = torch.clamp(action, -3.0, 3.0)
+        return action, torch.zeros(1) if hidden is None else hidden
+
+    def save(self, filepath, **kwargs):
+        pass
+
+    @classmethod
+    def load(cls, filepath, **kwargs):
+        return cls()
+
+
+class TestRecordLastEpisode:
+    @pytest.fixture
+    def temp_dir(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            yield tmp_dir
+
+    def test_with_real_env(self, temp_dir):
+        # Create a real agent
+        agent = SimpleTestAgent()
+
+        # Create the checkpoints structure
+        model_dir = "test_dir"
+        videos_dir = Path(temp_dir) / "checkpoints" / model_dir / "videos"
+        videos_dir.mkdir(parents=True, exist_ok=True)
+
+        # Temporarily change the working directory to our temp directory
+        original_dir = os.getcwd()
+        os.chdir(temp_dir)
+
+        try:
+            # Run the record_last_episode function
+            record_last_episode(agent, "InvertedPendulum-v5", model_dir)
+
+            # Verify a video file was created
+            video_files = list(videos_dir.glob("*.mp4"))
+            assert len(video_files) > 0, "No video files were created"
+
+            # Check the video filename follows the expected pattern
+            assert any("InvertedPendulum_final" in f.name for f in video_files), (
+                f"Video files found: {[f.name for f in video_files]}"
+            )
+
+        finally:
+            # Restore the original working directory
+            os.chdir(original_dir)
+
+    def test_warning_suppression(self, temp_dir):
+        # Create a real agent
+        agent = SimpleTestAgent()
+
+        # Create directory structure
+        (Path(temp_dir) / "checkpoints" / "test_dir" / "videos").mkdir(
+            parents=True, exist_ok=True
+        )
+
+        # Change to temp directory
+        original_dir = os.getcwd()
+        os.chdir(temp_dir)
+
+        try:
+            # Patch just the warnings to verify they're being suppressed
+            with (
+                patch("warnings.catch_warnings") as mock_catch_warnings,
+                patch("warnings.simplefilter") as mock_simplefilter,
+            ):
+                # Run function with real environment
+                record_last_episode(agent, "InvertedPendulum-v5", "test_dir")
+
+                # Verify warning handling
+                mock_catch_warnings.assert_called_once()
+                mock_simplefilter.assert_called_once_with("ignore")
+
+        finally:
+            os.chdir(original_dir)

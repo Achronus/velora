@@ -1,9 +1,11 @@
 from typing import Any, Dict, Literal
 import pytest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 import os
 import tempfile
 import json
+import shutil
+from pathlib import Path
 
 import torch
 
@@ -12,9 +14,10 @@ import gymnasium as gym
 from velora.buffer.experience import Experience
 from velora.metrics.tracker import TrainMetrics
 from velora.models import LiquidNCPNetwork
-from velora.callbacks import TrainCallback
+from velora.callbacks import TrainCallback, SaveCheckpoints, EarlyStopping, RecordVideos
 from velora.models.ddpg import DDPGActor, DDPGCritic, LiquidDDPG
-from velora.state import TrainState
+from velora.models.train import StateHandler
+from velora.state import TrainState, RecordState
 
 
 NetworkParamsType = Dict[
@@ -113,7 +116,7 @@ class TestLiquidDDPG:
 
     @pytest.fixture
     def env(self) -> gym.Env:
-        return gym.make("MountainCarContinuous-v0")
+        return gym.make("MountainCarContinuous-v0", render_mode="rgb_array")
 
     def test_init(self, ddpg: LiquidDDPG, ddpg_params: DDPGParamsType):
         assert isinstance(ddpg.actor, DDPGActor)
@@ -431,3 +434,78 @@ class TestLiquidDDPG:
         # Verify training stopped early
         # We expect fewer than 5 episodes of rewards to be recorded
         assert len(metrics.ep_rewards) < 5
+
+    def test_multiple_callbacks(self, ddpg: LiquidDDPG, env: gym.Env):
+        # Set up test constants
+        CP_DIR = "ddpg"
+        FREQ = 5
+        TARGET_REWARD = 15.0
+        BATCH_SIZE = 32
+        N_EPISODES = 2  # Minimal episodes for faster testing
+        MAX_STEPS = 5  # Minimal steps for faster testing
+
+        # Define checkpoint directory paths
+        checkpoint_dir = Path("checkpoints", CP_DIR)
+
+        try:
+            # Clean up any existing test directories
+            if checkpoint_dir.exists():
+                shutil.rmtree(checkpoint_dir)
+
+            # Create callbacks just like in the example
+            callbacks = [
+                SaveCheckpoints(ddpg, CP_DIR, frequency=FREQ, buffer=True),
+                EarlyStopping(target=TARGET_REWARD),
+                RecordVideos("episode", CP_DIR, frequency=FREQ),
+            ]
+
+            # Mock functions to avoid actual file operations
+            with (
+                patch.object(SaveCheckpoints, "save_checkpoint"),
+                patch("gymnasium.wrappers.RecordVideo", return_value=env),
+                patch("velora.utils.capture.record_last_episode"),
+            ):
+                # Create and configure a StateHandler directly to verify record_state
+                handler = StateHandler(
+                    env_name=env.spec.name,
+                    n_episodes=N_EPISODES,
+                    callbacks=callbacks,
+                )
+
+                # Run the start event which should set up record_state via RecordVideos
+                _ = handler.start(env)
+
+                # Verify that record_state was set correctly
+                assert handler.state.record_state is not None
+                assert isinstance(handler.state.record_state, RecordState)
+                assert handler.state.record_state.method == "episode"
+                assert CP_DIR in str(handler.state.record_state.dirpath)
+
+                # Run the record_last method which should call record_last_episode
+                handler.record_last(ddpg, env.spec.id)
+
+                # Run minimal training to verify integration
+                metrics = ddpg.train(
+                    env,
+                    batch_size=BATCH_SIZE,
+                    n_episodes=N_EPISODES,
+                    max_steps=MAX_STEPS,
+                    callbacks=callbacks,
+                )
+
+                # Verify metrics object was returned
+                assert isinstance(metrics, TrainMetrics)
+
+                # Verify callbacks were registered in train_params
+                assert ddpg.train_params is not None
+                assert len(ddpg.train_params.callbacks) == 3
+                assert "SaveCheckpoints" in ddpg.train_params.callbacks
+                assert "EarlyStopping" in ddpg.train_params.callbacks
+                assert "RecordVideos" in ddpg.train_params.callbacks
+
+        finally:
+            # Clean up test directories
+            if checkpoint_dir.exists():
+                shutil.rmtree(checkpoint_dir)
+            # Close the environment
+            env.close()

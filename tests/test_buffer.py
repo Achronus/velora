@@ -4,12 +4,14 @@ import tempfile
 from collections import deque
 from pathlib import Path
 
+import gymnasium as gym
 import torch
 
 from velora.buffer.experience import BatchExperience, Experience
 from velora.buffer.replay import ReplayBuffer
 from velora.buffer.rollout import RolloutBuffer
 from velora.models.config import BufferConfig
+from velora.models.ddpg import LiquidDDPG
 
 
 class TestExperience:
@@ -245,6 +247,56 @@ class TestReplayBuffer:
             # Check directory and file were created
             assert os.path.exists(new_dir)
             assert os.path.exists(filepath)
+
+    def test_buffer_warm(self):
+        device = torch.device("cpu")
+        env = gym.make("InvertedPendulum-v5", render_mode="rgb_array")
+
+        state_dim = env.observation_space.shape[0]
+        action_dim = env.action_space.shape[0]
+
+        agent = LiquidDDPG(state_dim, 8, action_dim, device=device)
+        buffer = ReplayBuffer(capacity=100, device=device)
+
+        # Verify initial empty state
+        assert len(buffer) == 0
+
+        # Test warming the buffer
+        n_samples = 15
+        buffer.warm(agent, env.spec.id, n_samples)
+
+        # Verify buffer has been filled with experiences
+        assert len(buffer) == n_samples
+
+        # Add another experience manually
+        exp = Experience(
+            state=torch.zeros(state_dim, device=device),
+            action=0.5,  # Continuous action for DDPG
+            reward=1.0,
+            next_state=torch.zeros(state_dim, device=device),
+            done=False,
+        )
+        buffer.push(exp)
+
+        # Verify buffer length increases
+        assert len(buffer) == n_samples + 1
+
+        # Test sampling from buffer
+        batch = buffer.sample(batch_size=n_samples)
+
+        # Verify batch structure
+        assert hasattr(batch, "states")
+        assert hasattr(batch, "actions")
+        assert hasattr(batch, "rewards")
+        assert hasattr(batch, "next_states")
+        assert hasattr(batch, "dones")
+
+        # Verify batch shapes
+        assert batch.states.shape[0] == n_samples
+        assert batch.actions.shape[0] == n_samples
+        assert batch.rewards.shape[0] == n_samples
+        assert batch.next_states.shape[0] == n_samples
+        assert batch.dones.shape[0] == n_samples
 
 
 class TestRolloutBuffer:

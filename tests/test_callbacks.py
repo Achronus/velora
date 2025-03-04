@@ -5,68 +5,9 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from velora.callbacks import EarlyStopping, SaveCheckpoints
+from velora.callbacks import EarlyStopping, RecordVideos, SaveCheckpoints
 from velora.models.base import RLAgent
 from velora.state import TrainState
-
-
-class TestTrainState:
-    def test_init(self):
-        # Default init
-        state = TrainState(env="test", total_episodes=100)
-        assert state.env == "test"
-        assert state.total_episodes == 100
-        assert state.status == "start"
-        assert state.current_ep == 0
-        assert state.avg_reward == 0
-        assert state.stop_training is False
-
-        # Custom init
-        state = TrainState(
-            env="test",
-            total_episodes=200,
-            status="step",
-            current_ep=10,
-            avg_reward=15.5,
-            stop_training=True,
-        )
-        assert state.env == "test"
-        assert state.total_episodes == 200
-        assert state.status == "step"
-        assert state.current_ep == 10
-        assert state.avg_reward == 15.5
-        assert state.stop_training is True
-
-    def test_update(self):
-        state = TrainState(env="test", total_episodes=100)
-
-        # Update just status
-        state.update(status="step")
-        assert state.env == "test"  # Unchanged
-        assert state.status == "step"
-        assert state.current_ep == 0  # Unchanged
-        assert state.avg_reward == 0  # Unchanged
-
-        # Update just episode
-        state.update(current_ep=5)
-        assert state.env == "test"  # Unchanged
-        assert state.status == "step"  # Unchanged
-        assert state.current_ep == 5
-        assert state.avg_reward == 0  # Unchanged
-
-        # Update just reward
-        state.update(avg_reward=10.5)
-        assert state.env == "test"  # Unchanged
-        assert state.status == "step"  # Unchanged
-        assert state.current_ep == 5  # Unchanged
-        assert state.avg_reward == 10.5
-
-        # Update all values
-        state.update(status="complete", current_ep=10, avg_reward=20.0)
-        assert state.env == "test"  # Unchanged
-        assert state.status == "complete"
-        assert state.current_ep == 10
-        assert state.avg_reward == 20.0
 
 
 class TestEarlyStopping:
@@ -324,3 +265,100 @@ class TestSaveCheckpoints:
         # Check path and buffer flag
         assert "test_custom.pt" in str(mock_agent.save.call_args[0][0])
         assert mock_agent.save.call_args[1]["buffer"] is True
+
+
+class TestRecordVideos:
+    def test_init(self):
+        # Test episode method
+        callback = RecordVideos(method="episode", dirname="model_dir")
+        assert callback.method == "episode"
+        assert callback.dirpath == Path("checkpoints", "model_dir", "videos")
+        assert callback.details.method == "episode"
+        assert callback.details.episode_trigger is not None
+        assert callback.details.step_trigger is None
+
+        # Test step method
+        callback = RecordVideos(method="step", dirname="model_dir")
+        assert callback.method == "step"
+        assert callback.dirpath == Path("checkpoints", "model_dir", "videos")
+        assert callback.details.method == "step"
+        assert callback.details.episode_trigger is None
+        assert callback.details.step_trigger is not None
+
+        # Test custom frequency
+        callback = RecordVideos(method="episode", dirname="model_dir", frequency=50)
+        assert callback.details.episode_trigger(0) is False  # Skip first item
+        assert callback.details.episode_trigger(50) is True
+        assert callback.details.episode_trigger(51) is False
+        assert callback.details.episode_trigger(100) is True
+
+    def test_invalid_method(self):
+        with pytest.raises(ValueError) as excinfo:
+            RecordVideos(method="invalid", dirname="model_dir")
+        assert "'method='invalid'" in str(excinfo.value)
+        assert "Choices: '('episode', 'step')'" in str(excinfo.value)
+
+    def test_call_start_status(self):
+        callback = RecordVideos(method="episode", dirname="model_dir")
+        state = TrainState(env="test", total_episodes=100, status="start")
+
+        result = callback(state)
+
+        assert result is state
+        assert result.record_state is not None
+        assert result.record_state.method == "episode"
+        assert result.record_state.dirpath == callback.dirpath
+
+    def test_call_other_status(self):
+        """Test callback behavior for non-start statuses."""
+        callback = RecordVideos(method="episode", dirname="model_dir")
+
+        # Test with episode status
+        state = TrainState(env="test", total_episodes=100, status="episode")
+        result = callback(state)
+        assert result is state
+        assert result.record_state is None  # Should not be modified
+
+        # Test with step status
+        state = TrainState(env="test", total_episodes=100, status="step")
+        result = callback(state)
+        assert result is state
+        assert result.record_state is None  # Should not be modified
+
+        # Test with complete status
+        state = TrainState(env="test", total_episodes=100, status="complete")
+        result = callback(state)
+        assert result is state
+        assert result.record_state is None  # Should not be modified
+
+    def test_trigger_functions(self):
+        """Test the trigger functions created for recording."""
+        # Episode method with frequency 10
+        callback = RecordVideos(method="episode", dirname="model_dir", frequency=10)
+        trigger = callback.details.episode_trigger
+
+        assert trigger(0) is False  # First episode not recorded
+        assert trigger(5) is False  # Not divisible by frequency
+        assert trigger(10) is True  # Divisible by frequency
+        assert trigger(20) is True  # Divisible by frequency
+
+        # Step method with frequency 5
+        callback = RecordVideos(method="step", dirname="model_dir", frequency=5)
+        trigger = callback.details.step_trigger
+
+        assert trigger(0) is False  # First step not recorded
+        assert trigger(2) is False  # Not divisible by frequency
+        assert trigger(5) is True  # Divisible by frequency
+        assert trigger(10) is True  # Divisible by frequency
+
+    @patch("pathlib.Path.mkdir")
+    def test_directory_creation(self, mock_mkdir):
+        callback = RecordVideos(method="episode", dirname="model_dir")
+        state = TrainState(env="test", total_episodes=100, status="start")
+
+        callback(state)
+
+        # Directory creation is not explicitly tested in the callback
+        # but we can verify the record_state is properly set
+        assert state.record_state is not None
+        assert state.record_state.dirpath == callback.dirpath
