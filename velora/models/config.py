@@ -112,4 +112,4 @@ class RLAgentConfig(BaseModel):
         Returns:
             self (Self): a new config model with the updated values.
         """
-        return self.model_copy({"env": env, "train_params": train_params})
+        return self.model_copy(update={"env": env, "train_params": train_params})
