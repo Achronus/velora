@@ -82,7 +82,6 @@ class SaveCheckpoints(TrainCallback):
     @override
     def __init__(
         self,
-        agent: RLAgent,
         dirname: str,
         *,
         frequency: int = 100,
@@ -90,7 +89,6 @@ class SaveCheckpoints(TrainCallback):
     ) -> None:
         """
         Parameters:
-            agent (RLAgent): the agent to use
             dirname (str): the model directory name to save checkpoints.
                 Automatically created inside `checkpoints` directory as
                 `checkpoints/<dirname>/saves`.
@@ -100,7 +98,6 @@ class SaveCheckpoints(TrainCallback):
             frequency (int, optional): save frequency (in episodes)
             buffer (bool, optional): whether to save the final buffer state
         """
-        self.agent = agent
         self.filepath = Path("checkpoints", dirname, "saves")
         self.frequency = frequency
         self.buffer = buffer
@@ -136,26 +133,33 @@ class SaveCheckpoints(TrainCallback):
             buffer = self.buffer
 
         if should_save:
-            self.save_checkpoint(ep_idx, filename, buffer)
+            self.save_checkpoint(state.agent, ep_idx, filename, buffer)
 
         return state
 
-    def save_checkpoint(self, ep: int, filename: str, buffer: bool) -> None:
+    def save_checkpoint(
+        self,
+        agent: RLAgent,
+        ep: int,
+        filename: str,
+        buffer: bool,
+    ) -> None:
         """
         Saves a checkpoint at a given episode with the given suffix.
 
         Parameters:
+            agent (RLAgent): the agent being trained
             ep (int): the current episode index
             filename (str): the checkpoint filename
             buffer (bool): whether to save the buffer state
         """
         checkpoint_path = Path(self.filepath, f"{filename}.pt")
-        buffer_path = Path(self.filepath, f"{filename}.buffer.pt")
 
-        self.agent.save(checkpoint_path, buffer=buffer)
+        agent.save(checkpoint_path, buffer=buffer)
         print(f"Checkpoint saved at episode {ep}: {checkpoint_path}")
 
         if buffer:
+            buffer_path = Path(self.filepath, f"{filename}.buffer.pt")
             print(f"Buffer saved at: {buffer_path}")
 
 

@@ -90,13 +90,12 @@ By default, the `patience=3` and is the only optional parameter available.
 
 ???+ api "API Docs"
 
-    [`velora.callbacks.SaveCheckpoints(agent, dirname)`](../reference/callbacks.md#velora.callbacks.SaveCheckpoints)
+    [`velora.callbacks.SaveCheckpoints(dirname)`](../reference/callbacks.md#velora.callbacks.SaveCheckpoints)
 
 Sometimes it can be really useful to save the model state intermittently during the training process, especially when you are also using `EarlyStopping`.
 
-We can do this with the `SaveCheckpoints` callback. It requires two parameters:
+We can do this with the `SaveCheckpoints` callback. It requires one parameter:
 
-- `agent` - the model used during training.
 - `dirname` - the directory name to store the model checkpoints in the `checkpoints` directory.
 
 Checkpoints are automatically added to a `checkpoints` directory inside a `<dirname>/saves` folder. This design choice compliments the [`RecordVideos`](#recording-videos) callback to help keep the experiments tidy.
@@ -105,12 +104,9 @@ For example, if we want to train a `DDPG` model and store its checkpoints in a m
 
 ```python
 from velora.callbacks import SaveCheckpoints
-from velora.models import LiquidDDPG
-
-model = LiquidDDPG(4, 10, 1)
 
 callbacks = [
-    SaveCheckpoints(model, "ddpg"),
+    SaveCheckpoints("ddpg"),
 ]
 ```
 
@@ -123,7 +119,7 @@ We limit your control to the directory name to simplify the checkpoint process a
 
 ??? question "Why only the `dirname`?"
 
-    Under the hood, we use the `model.save()` method for storing checkpoints, so each checkpoint folder will also contain a `model_config.json` file containing comprehensive details of the trained agent. 
+    Under the hood, we use the `agent.save()` method for storing checkpoints (more on this later), so each checkpoint folder will also contain a `model_config.json` file containing comprehensive details of the trained agent.
     
     That way, you don't need any complex `dirnames`! 😉
 
@@ -157,25 +153,24 @@ Videos are automatically added to a `checkpoints` directory inside a `<dirname>/
 
 ```python
 from velora.callbacks import EarlyStopping, SaveCheckpoints, RecordVideos
-from velora.models import LiquidDDPG
 
 # Solo
 callbacks = [
     RecordVideos("episode", "ddpg"),
 ]
 
-
 # With other callbacks
-model = LiquidDDPG(4, 10, 1)
 CP_DIR = "ddpg"
 FREQ = 5
 
 callbacks = [
-    SaveCheckpoints(model, CP_DIR, frequency=FREQ, buffer=True),
+    SaveCheckpoints(CP_DIR, frequency=FREQ, buffer=True),
     EarlyStopping(target=15.),
     RecordVideos("episode", CP_DIR, frequency=FREQ),
 ]
 ```
+
+This code should work 'as is'.
 
 `frequency` is an optional parameter. If not set, it will default to `100`.
 

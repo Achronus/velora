@@ -2,6 +2,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, Literal
 
+from velora.models.base import RLAgent
+
 StatusLiteral = Literal["start", "episode", "step", "complete"]
 RecordMethodLiteral = Literal["episode", "step"]
 
@@ -46,6 +48,7 @@ class TrainState:
     A storage container for the current state of model training.
 
     Parameters:
+        agent (RLAgent): the agent being trained
         env (str): the name of the environment to train on
         total_episodes (int): total number of training episodes
         status (Literal["start", "episode", "step", "complete"], optional): the current stage of training.
@@ -62,6 +65,7 @@ class TrainState:
         record_state (RecordState, optional): the video recording state
     """
 
+    agent: RLAgent
     env: str
     total_episodes: int
     status: StatusLiteral = "start"
