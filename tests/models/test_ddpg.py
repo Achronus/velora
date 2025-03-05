@@ -12,11 +12,11 @@ import torch
 import gymnasium as gym
 
 from velora.buffer.experience import Experience
-from velora.metrics.tracker import TrainMetrics
+from velora.training.metrics import TrainMetrics
 from velora.models import LiquidNCPNetwork
 from velora.callbacks import TrainCallback, SaveCheckpoints, EarlyStopping, RecordVideos
 from velora.models.ddpg import DDPGActor, DDPGCritic, LiquidDDPG
-from velora.models.train import StateHandler
+from velora.training.handler import TrainHandler
 from velora.state import TrainState, RecordState
 
 
@@ -395,10 +395,18 @@ class TestLiquidDDPG:
     def test_train_with_callbacks(self, env: gym.Env, ddpg: LiquidDDPG):
         # Create mock callbacks
         mock_callback1 = Mock(spec=TrainCallback)
-        mock_callback1.return_value = TrainState(env=env.spec.name, total_episodes=2)
+        mock_callback1.return_value = TrainState(
+            agent=ddpg,
+            env=env.spec.name,
+            total_episodes=2,
+        )
 
         mock_callback2 = Mock(spec=TrainCallback)
-        mock_callback2.return_value = TrainState(env=env.spec.name, total_episodes=2)
+        mock_callback2.return_value = TrainState(
+            agent=ddpg,
+            env=env.spec.name,
+            total_episodes=2,
+        )
 
         # Run training with the callbacks
         ddpg.train(
@@ -433,7 +441,7 @@ class TestLiquidDDPG:
 
         # Verify training stopped early
         # We expect fewer than 5 episodes of rewards to be recorded
-        assert len(metrics.ep_rewards) < 5
+        assert len(metrics.storage.ep_rewards) < 5
 
     def test_multiple_callbacks(self, ddpg: LiquidDDPG, env: gym.Env):
         # Set up test constants
@@ -454,7 +462,7 @@ class TestLiquidDDPG:
 
             # Create callbacks just like in the example
             callbacks = [
-                SaveCheckpoints(ddpg, CP_DIR, frequency=FREQ, buffer=True),
+                SaveCheckpoints(CP_DIR, frequency=FREQ, buffer=True),
                 EarlyStopping(target=TARGET_REWARD),
                 RecordVideos("episode", CP_DIR, frequency=FREQ),
             ]
@@ -466,14 +474,10 @@ class TestLiquidDDPG:
                 patch("velora.utils.capture.record_last_episode"),
             ):
                 # Create and configure a StateHandler directly to verify record_state
-                handler = StateHandler(
-                    env_name=env.spec.name,
-                    n_episodes=N_EPISODES,
-                    callbacks=callbacks,
-                )
+                handler = TrainHandler(ddpg, env, N_EPISODES, FREQ, callbacks)
 
                 # Run the start event which should set up record_state via RecordVideos
-                _ = handler.start(env)
+                handler.start()
 
                 # Verify that record_state was set correctly
                 assert handler.state.record_state is not None
@@ -482,7 +486,7 @@ class TestLiquidDDPG:
                 assert CP_DIR in str(handler.state.record_state.dirpath)
 
                 # Run the record_last method which should call record_last_episode
-                handler.record_last(ddpg, env.spec.id)
+                handler.record_last_episode()
 
                 # Run minimal training to verify integration
                 metrics = ddpg.train(
@@ -497,11 +501,11 @@ class TestLiquidDDPG:
                 assert isinstance(metrics, TrainMetrics)
 
                 # Verify callbacks were registered in train_params
-                assert ddpg.train_params is not None
-                assert len(ddpg.train_params.callbacks) == 3
-                assert "SaveCheckpoints" in ddpg.train_params.callbacks
-                assert "EarlyStopping" in ddpg.train_params.callbacks
-                assert "RecordVideos" in ddpg.train_params.callbacks
+                assert ddpg.config.train_params is not None
+                assert len(ddpg.config.train_params.callbacks) == 3
+                assert "SaveCheckpoints" in ddpg.config.train_params.callbacks
+                assert "EarlyStopping" in ddpg.config.train_params.callbacks
+                assert "RecordVideos" in ddpg.config.train_params.callbacks
 
         finally:
             # Clean up test directories

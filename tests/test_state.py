@@ -1,13 +1,20 @@
+import pytest
 from pathlib import Path
 from unittest.mock import Mock
 
+from velora.models.base import RLAgent
 from velora.state import TrainState, RecordState
 
 
 class TestTrainState:
-    def test_init(self):
+    @pytest.fixture
+    def mock_agent(self):
+        agent = Mock(spec=RLAgent)
+        return agent
+
+    def test_init(self, mock_agent: RLAgent):
         # Default init
-        state = TrainState(env="test", total_episodes=100)
+        state = TrainState(agent=mock_agent, env="test", total_episodes=100)
         assert state.env == "test"
         assert state.total_episodes == 100
         assert state.status == "start"
@@ -17,6 +24,7 @@ class TestTrainState:
 
         # Custom init
         state = TrainState(
+            agent=mock_agent,
             env="test",
             total_episodes=200,
             status="step",
@@ -31,8 +39,8 @@ class TestTrainState:
         assert state.avg_reward == 15.5
         assert state.stop_training is True
 
-    def test_update(self):
-        state = TrainState(env="test", total_episodes=100)
+    def test_update(self, mock_agent: RLAgent):
+        state = TrainState(agent=mock_agent, env="test", total_episodes=100)
 
         # Update just status
         state.update(status="step")

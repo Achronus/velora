@@ -10,6 +10,12 @@ from velora.models.base import RLAgent
 from velora.state import TrainState
 
 
+@pytest.fixture
+def mock_agent():
+    agent = Mock(spec=RLAgent)
+    return agent
+
+
 class TestEarlyStopping:
     def test_init(self):
         # Default initialization
@@ -24,11 +30,15 @@ class TestEarlyStopping:
         assert callback.patience == 5
         assert callback.count == 0
 
-    def test_below_target(self):
+    def test_below_target(self, mock_agent):
         """Test behavior when average reward is below target."""
         callback = EarlyStopping(target=100.0, patience=3)
         state = TrainState(
-            env="test", total_episodes=100, status="episode", avg_reward=90.0
+            agent=mock_agent,
+            env="test",
+            total_episodes=100,
+            status="episode",
+            avg_reward=90.0,
         )
 
         result = callback(state)
@@ -37,11 +47,15 @@ class TestEarlyStopping:
         assert callback.count == 0
         assert not result.stop_training
 
-    def test_reaching_target_once(self):
+    def test_reaching_target_once(self, mock_agent):
         """Test behavior when target is reached but patience not satisfied."""
         callback = EarlyStopping(target=100.0, patience=3)
         state = TrainState(
-            env="test", total_episodes=100, status="episode", avg_reward=105.0
+            agent=mock_agent,
+            env="test",
+            total_episodes=100,
+            status="episode",
+            avg_reward=105.0,
         )
 
         result = callback(state)
@@ -50,11 +64,15 @@ class TestEarlyStopping:
         assert callback.count == 1
         assert not result.stop_training
 
-    def test_reaching_target_with_patience_met(self):
+    def test_reaching_target_with_patience_met(self, mock_agent):
         """Test behavior when target is reached for patience times."""
         callback = EarlyStopping(target=100.0, patience=3)
         state = TrainState(
-            env="test", total_episodes=100, status="episode", avg_reward=105.0
+            agent=mock_agent,
+            env="test",
+            total_episodes=100,
+            status="episode",
+            avg_reward=105.0,
         )
 
         # First call
@@ -70,10 +88,15 @@ class TestEarlyStopping:
         assert callback.count == 3
         assert result.stop_training
 
-    def test_inconsistent_rewards(self):
+    def test_inconsistent_rewards(self, mock_agent):
         """Test behavior when rewards fluctuate around target."""
         callback = EarlyStopping(target=100.0, patience=2)
-        state = TrainState(env="test", total_episodes=100, status="episode")
+        state = TrainState(
+            agent=mock_agent,
+            env="test",
+            total_episodes=100,
+            status="episode",
+        )
 
         # First call - above target
         state.avg_reward = 110.0
@@ -96,13 +119,17 @@ class TestEarlyStopping:
         assert callback.count == 2
         assert result.stop_training
 
-    def test_non_episode_status(self):
+    def test_non_episode_status(self, mock_agent):
         """Test behavior for non-episode status."""
         callback = EarlyStopping(target=100.0)
 
         # Step status should be ignored
         state = TrainState(
-            env="test", total_episodes=100, status="step", avg_reward=110.0
+            agent=mock_agent,
+            env="test",
+            total_episodes=100,
+            status="step",
+            avg_reward=110.0,
         )
         result = callback(state)
         assert callback.count == 0
@@ -110,16 +137,21 @@ class TestEarlyStopping:
 
         # Complete status should be ignored
         state = TrainState(
-            env="test", total_episodes=100, status="complete", avg_reward=110.0
+            agent=mock_agent,
+            env="test",
+            total_episodes=100,
+            status="complete",
+            avg_reward=110.0,
         )
         result = callback(state)
         assert callback.count == 0
         assert not result.stop_training
 
-    def test_already_stopped(self):
+    def test_already_stopped(self, mock_agent):
         """Test behavior when training is already stopped."""
         callback = EarlyStopping(target=100.0)
         state = TrainState(
+            agent=mock_agent,
             env="test",
             total_episodes=100,
             status="episode",
@@ -136,37 +168,35 @@ class TestEarlyStopping:
 
 class TestSaveCheckpoints:
     @pytest.fixture
-    def mock_agent(self):
-        agent = Mock(spec=RLAgent)
-        agent.save = Mock()
-        return agent
-
-    @pytest.fixture
     def temp_dir(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             yield temp_dir
 
-    def test_init(self, mock_agent):
+    def test_init(self):
         # Default initialization
-        callback = SaveCheckpoints(mock_agent, "model_dir")
-        assert callback.agent is mock_agent
+        callback = SaveCheckpoints("model_dir")
         assert callback.filepath == Path("checkpoints", "model_dir", "saves")
         assert callback.frequency == 100
         assert callback.buffer is False
 
         # Custom initialization
-        callback = SaveCheckpoints(mock_agent, "custom", frequency=50, buffer=True)
-        assert callback.agent is mock_agent
+        callback = SaveCheckpoints("custom", frequency=50, buffer=True)
         assert callback.filepath == Path("checkpoints", "custom", "saves")
         assert callback.frequency == 50
         assert callback.buffer is True
 
     def test_non_episode_status(self, mock_agent):
         """Test behavior for non-episode status that should be ignored."""
-        callback = SaveCheckpoints(mock_agent, "model_dir")
+        callback = SaveCheckpoints("model_dir")
 
         # Create state with step status
-        state = TrainState(env="test", total_episodes=100, status="step", current_ep=10)
+        state = TrainState(
+            agent=mock_agent,
+            env="test",
+            total_episodes=100,
+            status="step",
+            current_ep=10,
+        )
 
         # Create directory patch to verify no directory is created
         with patch.object(Path, "mkdir") as mock_mkdir:
@@ -179,11 +209,15 @@ class TestSaveCheckpoints:
     @patch("pathlib.Path.mkdir")
     def test_save_on_frequency(self, mock_mkdir, mock_agent):
         """Test saving checkpoint at specified frequency."""
-        callback = SaveCheckpoints(mock_agent, "model_dir", frequency=10)
+        callback = SaveCheckpoints("model_dir", frequency=10)
 
         # Episode matches frequency exactly
         state = TrainState(
-            env="test", total_episodes=100, status="episode", current_ep=10
+            agent=mock_agent,
+            env="test",
+            total_episodes=100,
+            status="episode",
+            current_ep=10,
         )
         result = callback(state)
 
@@ -199,11 +233,15 @@ class TestSaveCheckpoints:
     @patch("pathlib.Path.mkdir")
     def test_no_save_between_frequency(self, mock_mkdir, mock_agent):
         """Test no save between frequency intervals."""
-        callback = SaveCheckpoints(mock_agent, "model_dir", frequency=10)
+        callback = SaveCheckpoints("model_dir", frequency=10)
 
         # Episode doesn't match frequency
         state = TrainState(
-            env="test", total_episodes=100, status="episode", current_ep=11
+            agent=mock_agent,
+            env="test",
+            total_episodes=100,
+            status="episode",
+            current_ep=11,
         )
         result = callback(state)
 
@@ -214,11 +252,15 @@ class TestSaveCheckpoints:
     @patch("pathlib.Path.mkdir")
     def test_save_on_complete(self, mock_mkdir, mock_agent):
         """Test save on completion."""
-        callback = SaveCheckpoints(mock_agent, "model_dir", buffer=True)
+        callback = SaveCheckpoints("model_dir", buffer=True)
 
         # Complete status
         state = TrainState(
-            env="test", total_episodes=100, status="complete", current_ep=100
+            agent=mock_agent,
+            env="test",
+            total_episodes=100,
+            status="complete",
+            current_ep=100,
         )
         result = callback(state)
 
@@ -240,13 +282,15 @@ class TestSaveCheckpoints:
         assert not os.path.exists(model_dir)
 
         # Create callback
-        callback = SaveCheckpoints(
-            mock_agent, os.path.join(temp_dir, "checkpoints", "test_model")
-        )
+        callback = SaveCheckpoints(os.path.join(temp_dir, "checkpoints", "test_model"))
 
         # Call with episode status to trigger directory creation
         state = TrainState(
-            env="test", total_episodes=100, status="episode", current_ep=10
+            agent=mock_agent,
+            env="test",
+            total_episodes=100,
+            status="episode",
+            current_ep=10,
         )
         callback(state)
 
@@ -255,11 +299,16 @@ class TestSaveCheckpoints:
 
     def test_save_checkpoint_method(self, mock_agent):
         """Test the save_checkpoint method directly."""
-        callback = SaveCheckpoints(mock_agent, "model_dir")
+        callback = SaveCheckpoints("model_dir")
 
         # Mock the print function to avoid output
         with patch("builtins.print"):
-            callback.save_checkpoint(ep=10, filename="test_custom", buffer=True)
+            callback.save_checkpoint(
+                mock_agent,
+                ep=10,
+                filename="test_custom",
+                buffer=True,
+            )
 
         assert mock_agent.save.call_count == 1
         # Check path and buffer flag
@@ -298,9 +347,14 @@ class TestRecordVideos:
         assert "'method='invalid'" in str(excinfo.value)
         assert "Choices: '('episode', 'step')'" in str(excinfo.value)
 
-    def test_call_start_status(self):
+    def test_call_start_status(self, mock_agent):
         callback = RecordVideos(method="episode", dirname="model_dir")
-        state = TrainState(env="test", total_episodes=100, status="start")
+        state = TrainState(
+            agent=mock_agent,
+            env="test",
+            total_episodes=100,
+            status="start",
+        )
 
         result = callback(state)
 
@@ -309,24 +363,39 @@ class TestRecordVideos:
         assert result.record_state.method == "episode"
         assert result.record_state.dirpath == callback.dirpath
 
-    def test_call_other_status(self):
+    def test_call_other_status(self, mock_agent):
         """Test callback behavior for non-start statuses."""
         callback = RecordVideos(method="episode", dirname="model_dir")
 
         # Test with episode status
-        state = TrainState(env="test", total_episodes=100, status="episode")
+        state = TrainState(
+            agent=mock_agent,
+            env="test",
+            total_episodes=100,
+            status="episode",
+        )
         result = callback(state)
         assert result is state
         assert result.record_state is None  # Should not be modified
 
         # Test with step status
-        state = TrainState(env="test", total_episodes=100, status="step")
+        state = TrainState(
+            agent=mock_agent,
+            env="test",
+            total_episodes=100,
+            status="step",
+        )
         result = callback(state)
         assert result is state
         assert result.record_state is None  # Should not be modified
 
         # Test with complete status
-        state = TrainState(env="test", total_episodes=100, status="complete")
+        state = TrainState(
+            agent=mock_agent,
+            env="test",
+            total_episodes=100,
+            status="complete",
+        )
         result = callback(state)
         assert result is state
         assert result.record_state is None  # Should not be modified
@@ -352,9 +421,14 @@ class TestRecordVideos:
         assert trigger(10) is True  # Divisible by frequency
 
     @patch("pathlib.Path.mkdir")
-    def test_directory_creation(self, mock_mkdir):
+    def test_directory_creation(self, mock_agent):
         callback = RecordVideos(method="episode", dirname="model_dir")
-        state = TrainState(env="test", total_episodes=100, status="start")
+        state = TrainState(
+            agent=mock_agent,
+            env="test",
+            total_episodes=100,
+            status="start",
+        )
 
         callback(state)
 
