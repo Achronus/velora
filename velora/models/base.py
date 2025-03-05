@@ -1,16 +1,19 @@
 from abc import abstractmethod
 from pathlib import Path
-from typing import Any, Self, Tuple
+from typing import Any, Dict, Self, Tuple
 
 import gymnasium as gym
 import torch
 
+from velora.models.config import TrainConfig
+
 
 class RLAgent:
     """
-    An abstract base class for RL agents.
+    A base class for RL agents.
 
-    Provides a blueprint describing the core methods that agents *must* have.
+    Provides a blueprint describing the core methods that agents *must* have and
+    includes useful utility methods.
     """
 
     def __init__(self, device: torch.device | None) -> None:
@@ -47,3 +50,24 @@ class RLAgent:
     @abstractmethod
     def load(cls, filepath: str | Path, *, buffer: bool = False) -> Self:
         pass  # pragma: no cover
+
+    def _set_train_params(self, params: Dict[str, Any]) -> TrainConfig:
+        """
+        Helper method. Sets the `train_params` given a dictionary of training parameters.
+
+        Parameters:
+            params (Dict[str, Any]): a dictionary of training parameters
+
+        Returns:
+            config (TrainConfig): a training config model
+        """
+        return TrainConfig(
+            callbacks=(
+                [cb.__class__.__name__ for cb in params["callbacks"]]
+                if params["callbacks"]
+                else None
+            ),
+            **{
+                k: v for k, v in params.items() if k not in ["self", "env", "callbacks"]
+            },
+        )

@@ -1,4 +1,4 @@
-from typing import List, Literal
+from typing import List, Literal, Self
 
 from pydantic import BaseModel
 
@@ -100,3 +100,16 @@ class RLAgentConfig(BaseModel):
     buffer: BufferConfig
     torch: TorchConfig
     train_params: TrainConfig | None = None
+
+    def update(self, env: str, train_params: TrainConfig) -> Self:
+        """
+        Updates the training details of the model.
+
+        Parameters:
+            env (str): the environment name
+            train_params (TrainConfig): a config containing training parameters
+
+        Returns:
+            self (Self): a new config model with the updated values.
+        """
+        return self.model_copy({"env": env, "train_params": train_params})

@@ -13,7 +13,7 @@ from velora.callbacks import TrainCallback
 from velora.gym.wrap import add_core_env_wrappers
 from velora.metrics.tracker import MetricsTracker, TrainMetrics
 from velora.models.base import RLAgent
-from velora.models.config import ModelDetails, RLAgentConfig, TorchConfig, TrainConfig
+from velora.models.config import ModelDetails, RLAgentConfig, TorchConfig
 from velora.models.lnn.ncp import LiquidNCPNetwork
 from velora.models.train import StateHandler
 from velora.noise import OUNoise
@@ -206,21 +206,21 @@ class LiquidDDPG(RLAgent):
         self.buffer = ReplayBuffer(capacity=buffer_size, device=device)
         self.noise = OUNoise(action_dim, device=device)
 
-        # Config parameters set during training
-        self.env_name: str | None = None
-        self.train_params: TrainConfig | None = None
-
-        # Additional config details
-        self.model_details = ModelDetails(
-            type="actor-critic",
-            target_networks=True,
-            action_noise="OUNoise",
-            **locals(),
-        )
-        self.torch_config = TorchConfig(
-            device=str(self.device),
-            optimizer=optim.__name__,
-            loss=self.loss.__class__.__name__,
+        # Init config details
+        self.config = RLAgentConfig(
+            agent=self.__class__.__name__,
+            model_details=ModelDetails(
+                type="actor-critic",
+                target_networks=True,
+                action_noise="OUNoise",
+                **locals(),
+            ),
+            buffer=self.buffer.config,
+            torch=TorchConfig(
+                device=str(self.device),
+                optimizer=optim.__name__,
+                loss=self.loss.__class__.__name__,
+            ),
         )
 
     def _update_target_networks(self, tau: float) -> None:
@@ -304,22 +304,6 @@ class LiquidDDPG(RLAgent):
 
         return critic_loss, actor_loss
 
-    def config(self) -> RLAgentConfig:
-        """
-        Creates a config model for the agent.
-
-        Returns:
-            config (RLAgentConfig): a config model with agent details.
-        """
-        return RLAgentConfig(
-            agent=self.__class__.__name__,
-            env=self.env_name,
-            model_details=self.model_details,
-            buffer=self.buffer.config,
-            torch=self.torch_config,
-            train_params=self.train_params,
-        )
-
     @override
     def train(
         self,
@@ -361,15 +345,11 @@ class LiquidDDPG(RLAgent):
                 f"Invalid '{env.action_space=}'. Must be 'gym.spaces.Box'."
             )
 
-        # Set training parameters
+        # Add training details to config
         self.env_name = env.spec.name
-        self.train_params = TrainConfig(
-            callbacks=(
-                [cb.__class__.__name__ for cb in callbacks] if callbacks else None
-            ),
-            **{k: v for k, v in locals().items() if k != "callbacks"},
-        )
-
+        self.config = self.config.update(
+            self.env_name,
+            self._set_train_params(locals()),
         tracker = MetricsTracker(n_episodes, window_size)
         handler = StateHandler(
             env_name=self.env_name,
@@ -505,10 +485,8 @@ class LiquidDDPG(RLAgent):
 
         config_path = Path(save_path.parent, "model_config.json")
         if not config_path.exists():
-            config = self.config()
-
             with open(config_path, "w") as f:
-                f.write(config.model_dump_json(indent=2, exclude_none=True))
+                f.write(self.config.model_dump_json(indent=2, exclude_none=True))
 
         if buffer:
             buffer_path = self.buffer.create_filepath(save_path)
