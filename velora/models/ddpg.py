@@ -10,13 +10,12 @@ import torch.optim as optim
 from velora.buffer.experience import BatchExperience, Experience
 from velora.buffer.replay import ReplayBuffer
 from velora.callbacks import TrainCallback
-from velora.gym.wrap import add_core_env_wrappers
-from velora.metrics.tracker import MetricsTracker, TrainMetrics
 from velora.models.base import RLAgent
 from velora.models.config import ModelDetails, RLAgentConfig, TorchConfig
 from velora.models.lnn.ncp import LiquidNCPNetwork
-from velora.models.train import StateHandler
 from velora.noise import OUNoise
+from velora.training.metrics import TrainMetrics
+from velora.training.handler import TrainHandler
 from velora.utils.torch import soft_update
 
 CheckpointLiteral = Literal[
@@ -338,82 +337,78 @@ class LiquidDDPG(RLAgent):
                 average
 
         Returns:
-            metrics (MetricsStore): an object containing episode metrics.
+            metrics (TrainMetrics): an object containing training metrics.
         """
         if not isinstance(env.action_space, gym.spaces.Box):
             raise EnvironmentError(
                 f"Invalid '{env.action_space=}'. Must be 'gym.spaces.Box'."
             )
 
+        metrics = TrainMetrics(window_size, n_episodes)
+
         # Add training details to config
-        self.env_name = env.spec.name
         self.config = self.config.update(
-            self.env_name,
+            env.spec.name,
             self._set_train_params(locals()),
-        tracker = MetricsTracker(n_episodes, window_size)
-        handler = StateHandler(
-            env_name=self.env_name,
-            n_episodes=n_episodes,
-            callbacks=callbacks or [],
         )
 
-        env = handler.start(env)
-        env = add_core_env_wrappers(env, self.device)
-
         self.buffer.warm(self, env.spec.id, batch_size)
-        print("Training started.")
 
-        for i_ep in range(n_episodes):
-            current_ep = i_ep + 1
-            state, _ = env.reset()
+        with TrainHandler(self, env, n_episodes, window_size, callbacks) as handler:
+            for i_ep in range(n_episodes):
+                current_ep = i_ep + 1
+                state, _ = handler.env.reset()
 
-            hidden = None
-            episode_reward = 0
+                hidden = None
+                episode_reward = 0
 
-            for i_step in range(max_steps):
-                action, hidden = self.predict(
-                    state,
-                    hidden,
-                    noise_scale=noise_scale,
-                )
-                next_state, reward, terminated, truncated, info = env.step(action)
-                done = terminated or truncated
+                for i_step in range(max_steps):
+                    action, hidden = self.predict(
+                        state,
+                        hidden,
+                        noise_scale=noise_scale,
+                    )
+                    next_state, reward, terminated, truncated, info = handler.env.step(
+                        action
+                    )
+                    done = terminated or truncated
 
-                self.buffer.push(
-                    Experience(state, action.item(), reward, next_state, done),
-                )
+                    self.buffer.push(
+                        Experience(state, action.item(), reward, next_state, done),
+                    )
 
-                critic_loss, actor_loss = self._train_step(batch_size, gamma)
-                self._update_target_networks(tau)
+                    critic_loss, actor_loss = self._train_step(batch_size, gamma)
+                    self._update_target_networks(tau)
 
-                tracker.log(
-                    {
-                        "critic_losses": critic_loss,
-                        "actor_losses": actor_loss,
-                    }
-                )
+                    metrics.add(
+                        {
+                            "critic_losses": critic_loss,
+                            "actor_losses": actor_loss,
+                        }
+                    )
 
-                handler.step(i_step)
-                state = next_state
+                    handler.step(i_step)
+                    state = next_state
 
-                if done:
-                    episode_reward = info["episode"]["r"].item()
-                    tracker.log({"ep_rewards": episode_reward})
+                    if done:
+                        episode_reward = info["episode"]["r"].item()
+                        metrics.add(
+                            {
+                                "ep_rewards": episode_reward,
+                                "steps_per_episode": i_step + 1,
+                            }
+                        )
+                        break
+
+                handler.episode(current_ep, metrics.avg_reward())
+
+                if current_ep % window_size == 0 or handler.stop():
+                    metrics.info(current_ep)
+
+                if handler.stop():
                     break
 
-            handler.episode(current_ep, tracker.avg_reward())
-
-            if current_ep % window_size == 0 or handler.stop():
-                tracker.print(current_ep)
-
-            if handler.stop():
-                break
-
-        handler.complete()
-        env.close()
-
-        handler.record_last(self, env.spec.id)
-        return tracker.storage
+        return metrics
 
     @override
     def predict(

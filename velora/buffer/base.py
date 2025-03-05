@@ -137,6 +137,9 @@ class BufferBase:
 
         buffer = ReplayBuffer.load('checkpoints/buffer_100_cpu.pt')
         ```
+
+        Returns:
+            buffer (Self): a new buffer filled instance.
         """
         state_dict: Dict[StateDictKeys, Any] = torch.load(filepath)
         device = (
