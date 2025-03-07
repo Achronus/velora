@@ -160,7 +160,3 @@ env.close()
 ```
 
 This code should work 'as is'.
-
----
-
-Next, we'll dive into the utility methods for `Gymnasium` 👋.

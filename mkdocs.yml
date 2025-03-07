@@ -55,6 +55,7 @@ nav:
           - Agents:
               - Agents: learn/tutorial/agents/index.md
               - DDPG: learn/tutorial/agents/ddpg.md
+          - Training Metrics: learn/tutorial/metrics.md
           - Gymnasium: learn/tutorial/gym.md
           - Utilities: learn/tutorial/utils.md
       - Customization:
@@ -78,10 +79,10 @@ nav:
             - lnn: learn/reference/models/lnn.md
           - buffer: learn/reference/buffer.md
           - callbacks: learn/reference/callbacks.md
-          - metrics: learn/reference/metrics.md
           - gymnasium: learn/reference/gym.md
           - noise: learn/reference/noise.md
           - state: learn/reference/state.md
+          - training: learn/reference/training.md
           - utils: learn/reference/utils.md
           - wiring: learn/reference/wiring.md
   - Help: help.md
@@ -132,7 +133,7 @@ plugins:
         python:
           paths: [velora]
           inventories:
-            - url: https://docs.python.org/3/objects.inv
+            - url: https://docs.python.org/3.12/objects.inv
               domains: [std, py]
             - url: https://pytorch.org/docs/stable/objects.inv
             - url: https://docs.pydantic.dev/latest/objects.inv

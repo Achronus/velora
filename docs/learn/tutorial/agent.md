@@ -92,13 +92,18 @@ model = LiquidPPO(4, 10, 1)
 metrics = model.train(env, 128)
 ```
 
-The `train()` method will always return a [`TrainMetrics`](../reference/metrics.md#velora.metrics.TrainMetrics) objects. This contains useful information that can be plotted to visualise the whole training process.
+The `train()` method will always return a [`TrainMetrics`](../reference/training.md#velora.training.TrainMetrics) object. This contains useful information that can be plotted to visualize the whole training process.
 
-This includes:
+It's `storage` attribute includes the following episodic statistics:
 
 - `ep_rewards` - a `List[float]` of episode rewards.
-- `actor_losses` - a `List[float]` of Actor loss values for each training step.
-- `critic_losses` - a `List[float]` of Critic loss values for each training step.
+- `ep_lengths` - a `List[int]` of the number of steps taken per episode.
+- `actor_losses` - a `List[float]` of Actor loss values.
+- `critic_losses` - a `List[float]` of Critic loss values.
+
+How you use them is up to you! We personally use and recommend a cloud-based solution (see the [Analytics Callbacks](../tutorial/callback.md#analytics) section) which uses these metrics automatically.
+
+However, we've included them just in case you want to use your own offline method instead! 😉 We'll talk more about these metrics later in the [Training Metrics](../tutorial/metrics.md) section.
 
 ## Making Predictions
 
