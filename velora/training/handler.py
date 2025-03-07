@@ -63,6 +63,7 @@ class TrainHandler:
         print(
             f"Training started on {self.env.spec.id} for {self.state.total_episodes} episodes."
             f"\nNote: moving averages computed based on window_size={self.window_size}."
+            "\n------------"
         )
         return self
 
@@ -89,7 +90,10 @@ class TrainHandler:
         self.record_last_episode()
 
         self.train_time = ElapsedTime.elapsed(self.start_time)
-        print(f"Training completed after: {self.train_time}.")
+        print(
+            "------------",
+            f"\nTraining completed after: {self.train_time}.",
+        )
 
     def _run_callbacks(self) -> None:
         """Helper method. Runs the callbacks and updates the training state."""

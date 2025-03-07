@@ -1,62 +1,226 @@
+from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Self, get_args
+from typing import Dict, List, Literal, Self, get_args
 
 import numpy as np
 import torch
 
 MetricStateDictKeys = Literal["window_size", "n_episodes", "storage"]
-StorageKeyLiteral = Literal[
-    "ep_rewards",
-    "critic_losses",
-    "actor_losses",
-    "td_errors",
-    "value_estimates",
-    "bellman_residuals",
-    "q_values",
-    "policy_entropy",
-    "steps_per_episode",
-]
+MetricKeys = Literal["ep_rewards", "critic_losses", "actor_losses", "ep_lengths"]
 
-VALID_STORAGE_KEYS = set(get_args(StorageKeyLiteral))
+VALID_METRIC_KEYS = set(get_args(MetricKeys))
 
 
 @dataclass
+class StepStorage:
+    """
+    A storage container for step metrics.
+
+    Useful for calculating the episodic average values to store in `MetricStorage`.
+
+    Attributes:
+        critic_losses (List[float]): a list of agent Critic loss values
+        actor_losses (List[float]): a list of agent Actor loss values
+    """
+
+    critic_losses: List[float] = field(default_factory=list)
+    actor_losses: List[float] = field(default_factory=list)
+
+    def critic_avg(self) -> float:
+        """
+        Computes the critic loss average. Useful for computing episodic averages.
+
+        Returns:
+            avg (float): critic loss step average
+        """
+        if len(self.critic_losses) == 0:
+            return 0
+
+        return np.mean(self.critic_losses).item()
+
+    def actor_avg(self) -> float:
+        """
+        Computes the actor loss average. Useful for computing episodic averages.
+
+        Returns:
+            avg (float): actor loss step average
+        """
+        if len(self.actor_losses) == 0:
+            return 0
+
+        return np.mean(self.actor_losses).item()
+
+    def add(self, items: Dict[Literal["critic_losses", "actor_losses"], float]) -> None:
+        """
+        Stores one or more metrics into storage. Must be single values with
+        their respective keys.
+
+        Parameters:
+            items (Dict[str, float]): a set of key-value pairs for
+                loggable metrics.
+
+                Valid Options -
+
+                - `critic_losses` - agent Critic loss value
+                - `actor_losses` - agent Actor loss value
+        """
+        for key, value in items.items():
+            array: List = getattr(self, key)
+            array.append(value)
+
+    def empty(self) -> None:
+        """Empty storage."""
+        self.critic_losses.clear()
+        self.actor_losses.clear()
+
+
+@dataclass
+class MovingMetric:
+    """
+    Tracks a metric with a moving window for statistics.
+
+    Attributes:
+        values (List[float]): a list of values
+        window (collections.deque): a list of values for the statistics
+        window_size (int): the window size of the moving statistics.
+            Default is `100`
+    """
+
+    values: List[float] = field(default_factory=list)
+    window: deque = field(default_factory=deque)
+    window_size: int = 100
+
+    def add(self, value: float) -> None:
+        """
+        Adds a value and updates the window.
+
+        Parameters:
+            value (float): value to add
+        """
+        self.values.append(value)
+        self.window.append(value)
+
+        if len(self.window) > self.window_size:
+            self.window.popleft()  # Remove oldest value
+
+    def mean(self, values: List[float] | None = None) -> float:
+        """
+        Calculates the mean of values or the current window.
+
+        Parameters:
+            values (List[float], optional): Values to calculate mean for.
+                If `None`, uses the current window
+
+        Returns:
+            avg (float): the calculated mean.
+        """
+        values = values if values is not None else self.window
+        return np.mean(values).item() if values else 0.0
+
+    def std(self, values: List[float] | None = None) -> float:
+        """
+        Calculates the standard deviation of values or the current window.
+
+        Parameters:
+            values (List[float], optional): Values to calculate standard deviation
+                for. If `None`, uses the current window
+
+        Returns:
+            std (float): the calculated standard deviation.
+        """
+        values = values if values is not None else self.window
+        return np.std(values).item() if len(values) > 1 else 0.0
+
+    def __len__(self) -> int:
+        """Returns the number of items in the values array."""
+        return len(self.values)
+
+
+@dataclass
+class SimpleMetricStorage:
+    """
+    A simple storage container for episodic metrics.
+
+    Attributes:
+        ep_rewards (List[float]): episode rewards
+        ep_lengths (List[int]): episode lengths
+        critic_losses (List[float]): Critic losses
+        actor_losses (List[float]): Actor losses
+    """
+
+    ep_rewards: List[float] = field(default_factory=list)
+    ep_lengths: List[int] = field(default_factory=list)
+    critic_losses: List[float] = field(default_factory=list)
+    actor_losses: List[float] = field(default_factory=list)
+
+    @classmethod
+    def load(cls, filepath: str | Path) -> Self:
+        """
+        Loads a saved metric state.
+
+        Parameters:
+            filepath (str | Path): the location of the saved state
+        """
+        load_path = Path(filepath)
+        checkpoint: Dict[MetricKeys, List[float | int]] = torch.load(load_path)
+
+        return cls(**checkpoint)
+
+
 class MetricStorage:
     """
     A storage container for episodic metrics.
 
-    Attributes:
-        ep_rewards (List[float], optional): a list of episode rewards
-        critic_losses (List[float], optional): a list of agent Critic loss values
-        actor_losses (List[float], optional): a list of agent Actor loss values
-        td_errors (List[float]): a list of temporal difference errors
-        value_estimates (List[float]): a list of value function estimates
-        bellman_residuals (List[float]): a list of bellman equation residuals
-        q_values (List[float]): a list of Q-value estimates
-        policy_entropy (List[float]): a list of policy entropy values
-        steps_per_episode (List[int]): a list for the number of steps taken in each
-            episode
+    Parameters:
+        window_size (int): moving average window size
     """
 
-    ep_rewards: List[float] = field(default_factory=list)
-    critic_losses: List[float] = field(default_factory=list)
-    actor_losses: List[float] = field(default_factory=list)
-    td_errors: List[float] = field(default_factory=list)
-    value_estimates: List[float] = field(default_factory=list)
-    bellman_residuals: List[float] = field(default_factory=list)
-    q_values: List[float] = field(default_factory=list)
-    policy_entropy: List[float] = field(default_factory=list)
-    steps_per_episode: List[int] = field(default_factory=list)
+    def __init__(self, window_size: int) -> None:
+        self._ep_rewards = MovingMetric(window_size=window_size)
+        self._ep_lengths = MovingMetric(window_size=window_size)
+        self._critic_losses = MovingMetric(window_size=window_size)
+        self._actor_losses = MovingMetric(window_size=window_size)
 
-    def state_dict(self) -> Dict[StorageKeyLiteral, List[float | int]]:
+        self._current_losses = StepStorage()
+
+    @property
+    def ep_rewards(self) -> MovingMetric:
+        """A storage container for episode rewards with a moving average window."""
+        return self._ep_rewards
+
+    @property
+    def ep_lengths(self) -> MovingMetric:
+        """A storage container for episode lengths with a moving average window."""
+        return self._ep_lengths
+
+    @property
+    def critic_losses(self) -> MovingMetric:
+        """A storage container for Critic losses with a moving average window."""
+        return self._critic_losses
+
+    @property
+    def actor_losses(self) -> MovingMetric:
+        """A storage container for Actor losses with a moving average window."""
+        return self._actor_losses
+
+    def save_state(self) -> Dict[MetricKeys, List[float | int]]:
         """
-        Return a dictionary containing the storage contents.
+        Return a dictionary containing the episode storage contents.
+
+        Includes the values for:
+        `[ep_rewards, ep_lengths, critic_losses, actor_losses]`.
+
+        Can be loaded back into a `velora.training.SimpleMetricStorage` object.
 
         Returns:
-            state_dict (Dict[StorageKeyLiteral, List[float | int]]): a dictionary containing the current state of the storage.
+            state_dict (Dict[str, List[float | int]): a dictionary containing the current state of the storage.
         """
-        return self.__dict__
+        return {
+            k.lstrip("_"): v.values
+            for k, v in self.__dict__.items()
+            if isinstance(v, MovingMetric)
+        }
 
 
 class TrainMetrics:
@@ -73,7 +237,12 @@ class TrainMetrics:
         self.window_size = window_size
         self.n_episodes = n_episodes
 
-        self._storage = MetricStorage()
+        self._storage = MetricStorage(window_size)
+
+    @property
+    def n_stored(self) -> int:
+        """Gets the number of stored values."""
+        return len(self._storage.ep_rewards)
 
     @property
     def storage(self) -> MetricStorage:
@@ -85,48 +254,46 @@ class TrainMetrics:
         """
         return self._storage
 
-    def add(self, items: Dict[StorageKeyLiteral, float | int]) -> None:
+    def add_step(self, critic: float, actor: float) -> None:
         """
-        Stores one or more metrics into storage. Must be single values with their respective
-        keys.
+        Stores a critic and actor loss value for the current timestep.
 
         Parameters:
-            items (Dict[str, float | int]): a set of key-value pairs for
-                loggable metrics.
-
-                Valid Options -
-
-                - `ep_rewards` - the episode reward after agent takes an action (`float`)
-                - `critic_losses` - agent Critic loss value (`float`)
-                - `actor_losses` - agent Actor loss value (`float`)
-                - `td_errors` - temporal difference error (`float`)
-                - `value_estimates` - value function estimate (`float`)
-                - `bellman_residuals` - bellman equation residual (`float`)
-                - `q_values` - Q-value estimate (`float`)
-                - `policy_entropy` - policy entropy value (`float`)
-                - `steps_per_episode` - number of steps taken in an episode (`int`)
+            critic (float): critic step loss
+            actor (float): actor step loss
         """
-        invalid_keys = set(items.keys()) - VALID_STORAGE_KEYS
-        if invalid_keys:
-            raise ValueError(
-                f"Invalid log keys: {invalid_keys}. Valid keys: {VALID_STORAGE_KEYS}"
-            )
+        self._storage._current_losses.add(
+            {"critic_losses": critic, "actor_losses": actor}
+        )
 
-        for key, value in items.items():
-            array: List = getattr(self._storage, key)
-            array.append(value)
+    def add_episode(self, reward: float, n_steps: int) -> None:
+        """
+        Add episode metrics and reset step accumulators.
+
+        Parameters:
+            reward (float): episode reward
+            n_steps (int): number of steps after episode done
+        """
+        self._storage._ep_rewards.add(reward)
+        self._storage._ep_lengths.add(n_steps)
+
+        # Add episode losses
+        actor_loss = self._storage._current_losses.actor_avg()
+        critic_loss = self._storage._current_losses.critic_avg()
+        self._storage._actor_losses.add(actor_loss)
+        self._storage._critic_losses.add(critic_loss)
+
+        # Reset step storage
+        self._storage._current_losses.empty()
 
     def avg_reward(self) -> float:
         """
-        Computes reward moving average based on the window size.
+        Calculates the average episodic reward.
 
         Returns:
-            reward (float): the average reward.
+            avg (float): the average reward.
         """
-        if len(self._storage.ep_rewards) >= self.window_size:
-            return np.mean(self._storage.ep_rewards[-self.window_size :])
-
-        return 0
+        return self._storage._ep_rewards.mean()
 
     def info(self, current_ep: int) -> None:
         """
@@ -136,8 +303,8 @@ class TrainMetrics:
             current_ep (int): the current episode index
         """
         avg_reward = self.avg_reward()
-        avg_critic_loss = np.mean(self._storage.critic_losses)
-        avg_actor_loss = np.mean(self._storage.actor_losses)
+        avg_critic_loss = self._storage._critic_losses.mean()
+        avg_actor_loss = self._storage._actor_losses.mean()
 
         print(
             f"Episode: {current_ep}/{self.n_episodes}, "
@@ -146,74 +313,18 @@ class TrainMetrics:
             f"Actor Loss: {avg_actor_loss:.2f}"
         )
 
-    def new_ws(self, value: int) -> None:
-        """
-        Sets a new `window_size` based on the given `value`.
-
-        Parameters:
-            value (int): a new window size
-        """
-        self.window_size = value
-
-    def state_dict(self) -> Dict[MetricStateDictKeys, Any]:
-        """
-        Return a dictionary containing the metrics contents. Includes:
-
-        - `window_size` - the current window size
-        - `n_episodes` - the total number of training episodes
-        - `storage` - the stored metrics state dict
-
-        Returns:
-            state_dict (Dict[MetricStateDictKeys, Any): a dictionary containing the current state of the metrics object.
-        """
-        return {
-            "window_size": self.window_size,
-            "n_episodes": self.n_episodes,
-            "storage": self.storage.state_dict(),
-        }
-
     def save(self, filepath: str | Path) -> None:
         """
-        Saves the metrics state to a file.
+        Saves the metric storage values to a file.
+
+        Saved state can only be loaded using
+        `velora.training.SimpleMetricStorage.load()`.
 
         Parameters:
-            filepath (str | Path): where to save the metric state
+            filepath (str | Path): where to save the metrics
         """
         save_path = Path(filepath)
         save_path.parent.mkdir(parents=True, exist_ok=True)
 
-        state_dict = self.state_dict()
+        state_dict = self._storage.save_state()
         torch.save(state_dict, save_path)
-
-    @classmethod
-    def load(cls, filepath: str | Path) -> Self:
-        """
-        Restores the training metrics from a saved state.
-
-        Parameters:
-            filepath (str | Path): metrics state file location
-
-        Returns:
-            metrics (Self): a new metric filled instance.
-        """
-        state_dict: Dict[MetricStateDictKeys, Any] = torch.load(filepath)
-
-        metrics = cls(state_dict["window_size"], state_dict["n_episodes"])
-        metrics._storage = MetricStorage(**state_dict["storage"])
-        return metrics
-
-    @staticmethod
-    def create_filepath(filepath: str | Path) -> Path:
-        """
-        Updates a given `filepath` and converts it into a `metric` friendly one.
-
-        Parameters:
-            filepath (str | Path): a filepath to convert
-
-        Returns:
-            path (Path): a metric friendly filepath in the form `<filepath>.metrics.<filepath_ext>`.
-        """
-        path = Path(filepath)
-        extension = path.name.split(".")[-1]
-        buffer_name = path.name.replace(extension, f"metrics.{extension}")
-        return path.with_name(buffer_name)

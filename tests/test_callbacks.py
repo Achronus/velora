@@ -1,4 +1,5 @@
 import os
+import shutil
 import tempfile
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -314,6 +315,21 @@ class TestSaveCheckpoints:
         # Check path and buffer flag
         assert "test_custom.pt" in str(mock_agent.save.call_args[0][0])
         assert mock_agent.save.call_args[1]["buffer"] is True
+
+    def test_dirname_exists_error(self):
+        dirname = "test_model_dir"
+        save_path = Path("checkpoints", dirname, "saves")
+
+        try:
+            save_path.mkdir(parents=True, exist_ok=True)
+
+            with pytest.raises(FileExistsError):
+                SaveCheckpoints(dirname)
+
+        finally:
+            # Clean up
+            if os.path.exists(save_path.parent):
+                shutil.rmtree(save_path.parent)
 
 
 class TestRecordVideos:

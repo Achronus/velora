@@ -102,6 +102,11 @@ class SaveCheckpoints(TrainCallback):
         self.frequency = frequency
         self.buffer = buffer
 
+        if self.filepath.exists():
+            raise FileExistsError(
+                f"Items already exist in the '{self.filepath.parent}' directory! Either change the 'dirname' or delete the folders contents."
+            )
+
         print(
             f"'{self.__class__.__name__}' enabled with ep_{frequency=} and {buffer=}."
         )

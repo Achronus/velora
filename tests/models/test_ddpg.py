@@ -441,7 +441,7 @@ class TestLiquidDDPG:
 
         # Verify training stopped early
         # We expect fewer than 5 episodes of rewards to be recorded
-        assert len(metrics.storage.ep_rewards) < 5
+        assert metrics.n_stored < metrics.n_episodes
 
     def test_multiple_callbacks(self, ddpg: LiquidDDPG, env: gym.Env):
         # Set up test constants

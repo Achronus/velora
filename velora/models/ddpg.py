@@ -357,10 +357,9 @@ class LiquidDDPG(RLAgent):
         with TrainHandler(self, env, n_episodes, window_size, callbacks) as handler:
             for i_ep in range(n_episodes):
                 current_ep = i_ep + 1
-                state, _ = handler.env.reset()
-
                 hidden = None
-                episode_reward = 0
+
+                state, _ = handler.env.reset()
 
                 for i_step in range(max_steps):
                     action, hidden = self.predict(
@@ -380,23 +379,14 @@ class LiquidDDPG(RLAgent):
                     critic_loss, actor_loss = self._train_step(batch_size, gamma)
                     self._update_target_networks(tau)
 
-                    metrics.add(
-                        {
-                            "critic_losses": critic_loss,
-                            "actor_losses": actor_loss,
-                        }
-                    )
-
+                    metrics.add_step(critic_loss, actor_loss)
                     handler.step(i_step)
                     state = next_state
 
                     if done:
-                        episode_reward = info["episode"]["r"].item()
-                        metrics.add(
-                            {
-                                "ep_rewards": episode_reward,
-                                "steps_per_episode": i_step + 1,
-                            }
+                        metrics.add_episode(
+                            info["episode"]["r"].item(),
+                            info["episode"]["l"].item(),
                         )
                         break
 
@@ -457,6 +447,11 @@ class LiquidDDPG(RLAgent):
         save_path = Path(filepath)
         save_path.parent.mkdir(parents=True, exist_ok=True)
 
+        if save_path.exists():
+            raise FileExistsError(
+                f"Checkpoints already exist in the '{save_path.parent}' directory! Either change the 'filepath' or delete the folders contents."
+            )
+
         checkpoint: Dict[CheckpointLiteral, Any] = {
             "state_dim": self.state_dim,
             "n_neurons": self.n_neurons,
@@ -470,11 +465,6 @@ class LiquidDDPG(RLAgent):
             "actor_optim": self.actor_optim.state_dict(),
             "critic_optim": self.critic_optim.state_dict(),
         }
-
-        if save_path.exists():
-            raise FileExistsError(
-                f"Checkpoints already exist in the '{save_path.parent}' directory! Either change the 'filepath' or delete the folders contents."
-            )
 
         torch.save(checkpoint, save_path)
 
