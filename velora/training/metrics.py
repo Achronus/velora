@@ -81,17 +81,17 @@ class MovingMetric:
     Tracks a metric with a moving window for statistics.
 
     Attributes:
-        values (List[float]): a list of values
+        values (List[float | int]): a list of values
         window (collections.deque): a list of values for the statistics
         window_size (int): the window size of the moving statistics.
             Default is `100`
     """
 
-    values: List[float] = field(default_factory=list)
+    values: List[float | int] = field(default_factory=list)
     window: deque = field(default_factory=deque)
     window_size: int = 100
 
-    def add(self, value: float) -> None:
+    def add(self, value: float | int) -> None:
         """
         Adds a value and updates the window.
 
@@ -161,6 +161,9 @@ class SimpleMetricStorage:
 
         Parameters:
             filepath (str | Path): the location of the saved state
+
+        Returns:
+            metrics (SimpleMetricStorage): a new storage container with the saved state.
         """
         load_path = Path(filepath)
         checkpoint: Dict[MetricKeys, List[float | int]] = torch.load(load_path)
@@ -186,22 +189,42 @@ class MetricStorage:
 
     @property
     def ep_rewards(self) -> MovingMetric:
-        """A storage container for episode rewards with a moving average window."""
+        """
+        A storage container for episode rewards with a moving average window.
+
+        Returns:
+            rewards (MovingMetric): episode rewards moving metric container.
+        """
         return self._ep_rewards
 
     @property
     def ep_lengths(self) -> MovingMetric:
-        """A storage container for episode lengths with a moving average window."""
+        """
+        A storage container for episode lengths with a moving average window.
+
+        Returns:
+            lengths (MovingMetric): episode lengths moving metric container.
+        """
         return self._ep_lengths
 
     @property
     def critic_losses(self) -> MovingMetric:
-        """A storage container for Critic losses with a moving average window."""
+        """
+        A storage container for Critic losses with a moving average window.
+
+        Returns:
+            losses (MovingMetric): episode Critic losses moving metric container.
+        """
         return self._critic_losses
 
     @property
     def actor_losses(self) -> MovingMetric:
-        """A storage container for Actor losses with a moving average window."""
+        """
+        A storage container for Actor losses with a moving average window.
+
+        Returns:
+            losses (MovingMetric): episode Actor losses moving metric container.
+        """
         return self._actor_losses
 
     def save_state(self) -> Dict[MetricKeys, List[float | int]]:
@@ -222,6 +245,16 @@ class MetricStorage:
             if isinstance(v, MovingMetric)
         }
 
+    def __repr__(self) -> str:
+        return (
+            f"{self.__class__.__name__}("
+            f"ep_rewards={len(self._ep_rewards)}, "
+            f"ep_lengths={len(self._ep_lengths)}, "
+            f"critic_losses={len(self._ep_lengths)}, "
+            f"actor_losses={len(self._ep_lengths)}"
+            ")"
+        )
+
 
 class TrainMetrics:
     """
@@ -241,7 +274,12 @@ class TrainMetrics:
 
     @property
     def n_stored(self) -> int:
-        """Gets the number of stored values."""
+        """
+        Gets the number of stored values.
+
+        Returns:
+            stored (int): the total number of stored episode values.
+        """
         return len(self._storage.ep_rewards)
 
     @property
@@ -253,6 +291,46 @@ class TrainMetrics:
             metrics (MetricStorage): a container with results calculated during training.
         """
         return self._storage
+
+    @property
+    def ep_rewards(self) -> List[float]:
+        """
+        Training episode reward values.
+
+        Returns:
+            rewards (List[float]): a list of episode rewards.
+        """
+        return self.storage.ep_rewards.values
+
+    @property
+    def ep_lengths(self) -> List[int]:
+        """
+        Training episode timestep sizes.
+
+        Returns:
+            lengths (List[int]): a list of episode lengths.
+        """
+        return self.storage.ep_lengths.values
+
+    @property
+    def critic_losses(self) -> List[float]:
+        """
+        Training episode Critic losses.
+
+        Returns:
+            losses (List[float]): a list of Critic losses.
+        """
+        return self.storage.critic_losses.values
+
+    @property
+    def actor_losses(self) -> List[float]:
+        """
+        Training episode Actor losses.
+
+        Returns:
+            losses (List[float]): a list of Actor losses.
+        """
+        return self.storage.actor_losses.values
 
     def add_step(self, critic: float, actor: float) -> None:
         """
@@ -328,3 +406,12 @@ class TrainMetrics:
 
         state_dict = self._storage.save_state()
         torch.save(state_dict, save_path)
+
+    def __repr__(self) -> str:
+        return (
+            f"{self.__class__.__name__}("
+            f"window_size={self.window_size}, "
+            f"n_episodes={self.n_episodes}, "
+            f"n_stored={self.n_stored}"
+            ")"
+        )

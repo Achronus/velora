@@ -186,6 +186,12 @@ class TestMetricStorage:
         assert state_dict["critic_losses"] == [0.1, 0.2]
         assert state_dict["actor_losses"] == [0.3, 0.4]
 
+    def test_repr(self, storage: MetricStorage):
+        assert (
+            repr(storage)
+            == "MetricStorage(ep_rewards=0, ep_lengths=0, critic_losses=0, actor_losses=0)"
+        )
+
 
 class TestTrainMetrics:
     @pytest.fixture
@@ -268,3 +274,14 @@ class TestTrainMetrics:
         assert data["ep_lengths"] == [10, 20]
         assert data["critic_losses"] == [0.1, 0.2]
         assert data["actor_losses"] == [0.3, 0.4]
+
+    def test_attributes(self, metrics: TrainMetrics):
+        assert metrics.ep_rewards is metrics.storage.ep_rewards.values
+        assert metrics.ep_lengths is metrics.storage.ep_lengths.values
+        assert metrics.critic_losses is metrics.storage.critic_losses.values
+        assert metrics.actor_losses is metrics.storage.actor_losses.values
+
+    def test_repr(self, metrics: TrainMetrics):
+        assert (
+            repr(metrics) == "TrainMetrics(window_size=50, n_episodes=100, n_stored=0)"
+        )
