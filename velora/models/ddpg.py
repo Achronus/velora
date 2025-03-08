@@ -14,8 +14,8 @@ from velora.models.base import RLAgent
 from velora.models.config import ModelDetails, RLAgentConfig, TorchConfig
 from velora.models.lnn.ncp import LiquidNCPNetwork
 from velora.noise import OUNoise
-from velora.training.metrics import TrainMetrics
 from velora.training.handler import TrainHandler
+from velora.training.metrics import TrainMetrics
 from velora.utils.torch import soft_update
 
 CheckpointLiteral = Literal[
@@ -344,8 +344,6 @@ class LiquidDDPG(RLAgent):
                 f"Invalid '{env.action_space=}'. Must be 'gym.spaces.Box'."
             )
 
-        metrics = TrainMetrics(window_size, n_episodes)
-
         # Add training details to config
         self.config = self.config.update(
             env.spec.name,
@@ -353,6 +351,7 @@ class LiquidDDPG(RLAgent):
         )
 
         self.buffer.warm(self, env.spec.id, batch_size)
+        metrics: TrainMetrics | None = None  # Updated at training end
 
         with TrainHandler(self, env, n_episodes, window_size, callbacks) as handler:
             for i_ep in range(n_episodes):
@@ -379,24 +378,27 @@ class LiquidDDPG(RLAgent):
                     critic_loss, actor_loss = self._train_step(batch_size, gamma)
                     self._update_target_networks(tau)
 
-                    metrics.add_step(critic_loss, actor_loss)
+                    handler.metrics.add_step(critic_loss, actor_loss)
                     handler.step(i_step)
                     state = next_state
 
                     if done:
-                        metrics.add_episode(
+                        handler.metrics.add_episode(
                             info["episode"]["r"].item(),
                             info["episode"]["l"].item(),
                         )
                         break
 
-                handler.episode(current_ep, metrics.avg_reward())
+                handler.episode(current_ep)
 
                 if current_ep % window_size == 0 or handler.stop():
-                    metrics.info(current_ep)
+                    handler.metrics.info(current_ep)
 
                 if handler.stop():
                     break
+
+            # Store metrics for return
+            metrics = handler.metrics
 
         return metrics
 

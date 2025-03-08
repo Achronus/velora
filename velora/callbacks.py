@@ -62,7 +62,7 @@ class EarlyStopping(TrainCallback):
             return state
 
         if state.status == "episode":
-            reward = state.avg_reward
+            reward = state.metrics.avg_reward()
 
             if reward >= self.target:
                 self.count += 1

@@ -11,6 +11,7 @@ from velora.gym.wrap import add_core_env_wrappers
 from velora.models.base import RLAgent
 from velora.state import TrainState
 from velora.time import ElapsedTime
+from velora.training.metrics import TrainMetrics
 from velora.utils.capture import record_last_episode
 
 
@@ -45,10 +46,21 @@ class TrainHandler:
             agent=agent,
             env=env,
             total_episodes=n_episodes,
+            metrics=TrainMetrics(window_size, n_episodes),
         )
 
         self.start_time = 0.0
         self.train_time: ElapsedTime | None = None
+
+    @property
+    def metrics(self) -> TrainMetrics:
+        """
+        Training metric class instance.
+
+        Returns:
+            metrics (TrainMetrics): current training metric state.
+        """
+        return self.state.metrics
 
     def __enter__(self) -> Self:
         """
@@ -112,23 +124,23 @@ class TrainHandler:
         self.env = self.state.env
 
     def step(self, current_step: int) -> None:
-        """Performs `step` callback event."""
+        """
+        Performs `step` callback event.
+
+        Parameters:
+            current_step (int): the current training timestep index
+        """
         self.state.update(status="step", current_step=current_step)
         self._run_callbacks()
 
-    def episode(self, current_ep: int, avg_reward: float) -> None:
+    def episode(self, current_ep: int) -> None:
         """
         Performs `episode` callback event.
 
         Parameters:
-            current_ep (int): the current episode index
-            avg_reward (float): the episodes average reward
+            current_ep (int): the current training episode index
         """
-        self.state.update(
-            status="episode",
-            current_ep=current_ep,
-            avg_reward=avg_reward,
-        )
+        self.state.update(status="episode", current_ep=current_ep)
         self._run_callbacks()
 
     def complete(self) -> None:

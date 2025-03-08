@@ -56,6 +56,8 @@ class TrainState:
         agent (RLAgent): the agent being trained
         env (gymnasium.Env): the environment used for training
         total_episodes (int): total number of training episodes
+        metrics (TrainMetrics): a training metrics class instance for agent
+            performance tracking
         status (Literal["start", "episode", "step", "complete"], optional): the current stage of training.
 
             - `start` - before training starts.
@@ -65,7 +67,6 @@ class TrainState:
 
         current_ep (int, optional): the current episode index
         current_step (int, optional): the current training timestep
-        avg_reward (float, optional): the episodes average reward value
         stop_training (bool, optional): a flag to declare training termination
         record_state (RecordState, optional): the video recording state
     """
@@ -77,7 +78,6 @@ class TrainState:
     status: StatusLiteral = "start"
     current_ep: int = 0
     current_step: int = 0
-    avg_reward: float = 0
     stop_training: bool = False
     record_state: RecordState | None = None
 
@@ -87,7 +87,6 @@ class TrainState:
         status: StatusLiteral | None = None,
         current_ep: int | None = None,
         current_step: int | None = None,
-        avg_reward: float | None = None,
     ) -> None:
         """
         Updates the training state. When any input is `None`, uses existing value.
@@ -100,11 +99,10 @@ class TrainState:
                 - `step` - inside the training loop.
                 - `complete` - completed training.
 
-        current_ep (int, optional): the current episode index
-        current_step (int, optional): the current training timestep
-        avg_reward (float, optional): the episodes average reward value
+            current_ep (int, optional): the current episode index
+            current_step (int, optional): the current training timestep
         """
         self.status = status if status else self.status
         self.current_ep = current_ep if current_ep else self.current_ep
         self.current_step = current_step if current_step else self.current_step
-        self.avg_reward = avg_reward if avg_reward else self.avg_reward
+
