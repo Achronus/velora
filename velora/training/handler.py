@@ -41,7 +41,7 @@ class TrainHandler:
 
         self.state = TrainState(
             agent=agent,
-            env=env.spec.name,
+            env=env,
             total_episodes=n_episodes,
         )
 
@@ -106,13 +106,8 @@ class TrainHandler:
         """
         self._run_callbacks()
 
-        # Wrap environment if record video callback
-        if self.state.record_state:
-            self.env = gym.wrappers.RecordVideo(
-                self.env,
-                name_prefix=self.state.env,
-                **self.state.record_state.to_wrapper(),
-            )
+        # Update environment with callback wrappers
+        self.env = self.state.env
 
     def step(self, current_step: int) -> None:
         """Performs `step` callback event."""

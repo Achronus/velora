@@ -2,6 +2,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, Literal
 
+import gymnasium as gym
+
 from velora.models.base import RLAgent
 
 StatusLiteral = Literal["start", "episode", "step", "complete"]
@@ -49,7 +51,7 @@ class TrainState:
 
     Parameters:
         agent (RLAgent): the agent being trained
-        env (str): the name of the environment to train on
+        env (gymnasium.Env): the environment used for training
         total_episodes (int): total number of training episodes
         status (Literal["start", "episode", "step", "complete"], optional): the current stage of training.
 
@@ -66,7 +68,7 @@ class TrainState:
     """
 
     agent: RLAgent
-    env: str
+    env: gym.Env
     total_episodes: int
     status: StatusLiteral = "start"
     current_ep: int = 0

@@ -2,6 +2,8 @@ from abc import abstractmethod
 from pathlib import Path
 from typing import get_args, override
 
+import gymnasium as gym
+
 from velora.models.base import RLAgent
 from velora.state import RecordMethodLiteral, RecordState, TrainState
 
@@ -122,7 +124,7 @@ class SaveCheckpoints(TrainCallback):
         ep_idx = state.current_ep
 
         should_save = False
-        filename = f"{state.env}_"
+        filename = f"{state.env.spec.name}_"
         buffer = False
 
         # Save checkpoint at specified frequency
@@ -226,5 +228,12 @@ class RecordVideos(TrainCallback):
         if state.status == "start":
             state.record_state = self.details
 
+            state.env = gym.wrappers.RecordVideo(
+                state.env,
+                name_prefix=state.env.spec.name,
+                **state.record_state.to_wrapper(),
+            )
+
         # Ignore other events
         return state
+
