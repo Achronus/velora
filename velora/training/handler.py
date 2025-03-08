@@ -1,10 +1,12 @@
 import time
 from types import TracebackType
-from typing import List, Self, Type
+from typing import TYPE_CHECKING, List, Self, Type
 
 import gymnasium as gym
 
-from velora.callbacks import TrainCallback
+if TYPE_CHECKING:
+    from velora.callbacks import TrainCallback
+
 from velora.gym.wrap import add_core_env_wrappers
 from velora.models.base import RLAgent
 from velora.state import TrainState
@@ -23,7 +25,7 @@ class TrainHandler:
         env: gym.Env,
         n_episodes: int,
         window_size: int,
-        callbacks: List[TrainCallback] | None,
+        callbacks: List["TrainCallback"] | None,
     ) -> None:
         """
         Parameters:
@@ -144,7 +146,9 @@ class TrainHandler:
         return self.state.stop_training
 
     def record_last_episode(self) -> None:
-        """If recording videos enabled, captures a recording of the last episode."""
+        """
+        If recording videos enabled, captures a recording of the last episode.
+        """
         if self.state.record_state is not None:
             dirname = self.state.record_state.dirpath.parent.name
             record_last_episode(self.agent, self.env.spec.id, dirname)

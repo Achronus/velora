@@ -1,11 +1,11 @@
+from velora.training.handler import TrainHandler
 from velora.training.metrics import (
-    StepStorage,
+    MetricStorage,
     MovingMetric,
     SimpleMetricStorage,
-    MetricStorage,
+    StepStorage,
     TrainMetrics,
 )
-from velora.training.handler import TrainHandler
 
 __all__ = [
     "StepStorage",

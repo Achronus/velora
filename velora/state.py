@@ -1,8 +1,11 @@
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, Literal
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Literal
 
 import gymnasium as gym
+
+if TYPE_CHECKING:
+    from velora.training.metrics import TrainMetrics
 
 from velora.models.base import RLAgent
 
@@ -70,6 +73,7 @@ class TrainState:
     agent: RLAgent
     env: gym.Env
     total_episodes: int
+    metrics: "TrainMetrics"
     status: StatusLiteral = "start"
     current_ep: int = 0
     current_step: int = 0

@@ -1,11 +1,14 @@
 from abc import abstractmethod
 from pathlib import Path
-from typing import get_args, override
+from typing import TYPE_CHECKING, List, get_args, override
 
 import gymnasium as gym
 
+if TYPE_CHECKING:
+    from velora.state import TrainState
+
 from velora.models.base import RLAgent
-from velora.state import RecordMethodLiteral, RecordState, TrainState
+from velora.state import RecordMethodLiteral, RecordState
 
 
 class TrainCallback:
@@ -18,7 +21,7 @@ class TrainCallback:
         pass  # pragma: no cover
 
     @abstractmethod
-    def __call__(self, state: TrainState) -> TrainState:
+    def __call__(self, state: "TrainState") -> "TrainState":
         """
         The callback function that gets called during training.
 
@@ -54,7 +57,7 @@ class EarlyStopping(TrainCallback):
             f"'{self.__class__.__name__}' enabled with reward_{target=} and {patience=}."
         )
 
-    def __call__(self, state: TrainState) -> TrainState:
+    def __call__(self, state: "TrainState") -> "TrainState":
         if state.stop_training:
             return state
 
@@ -113,7 +116,7 @@ class SaveCheckpoints(TrainCallback):
             f"'{self.__class__.__name__}' enabled with ep_{frequency=} and {buffer=}."
         )
 
-    def __call__(self, state: TrainState) -> TrainState:
+    def __call__(self, state: "TrainState") -> "TrainState":
         # Only perform checkpoint operations on episode and complete events
         if state.status != "episode" and state.status != "complete":
             return state
@@ -223,7 +226,7 @@ class RecordVideos(TrainCallback):
 
         print(f"'{self.__class__.__name__}' enabled with {str(method)}_{frequency=}.")
 
-    def __call__(self, state: TrainState) -> TrainState:
+    def __call__(self, state: "TrainState") -> "TrainState":
         # 'start': Set the recording state
         if state.status == "start":
             state.record_state = self.details

@@ -258,7 +258,8 @@ class MetricStorage:
 
 class TrainMetrics:
     """
-    A utility class for working with training metrics.
+    A utility class for working with and storing training metrics for monitoring
+    an agents training performance.
     """
 
     def __init__(self, window_size: int, n_episodes: int) -> None:
