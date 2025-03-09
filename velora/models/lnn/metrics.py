@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, Dict, List
 from pydantic import BaseModel
 
 if TYPE_CHECKING:
-    from velora.models.lnn.ncp import LiquidNCPNetwork
+    from velora.models.lnn.ncp import LiquidNCPNetwork  # pragma: no cover
 
 from velora.models.lnn.sparse import SparseLinear
 
@@ -29,7 +29,7 @@ class GradientMetric:
 
 class NCPGradientMetrics(BaseModel):
     """
-    Gradient metric storage for the NCP Network.
+    Gradient norm and ratio storage for the NCP Network.
 
     Attributes:
         grad_norm: the raw magnitude (length) of the gradient vector.

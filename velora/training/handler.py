@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, List, Self, Type
 import gymnasium as gym
 
 if TYPE_CHECKING:
-    from velora.callbacks import TrainCallback
+    from velora.callbacks import TrainCallback  # pragma: no cover
 
 from velora.gym.wrap import add_core_env_wrappers
 from velora.models.base import RLAgent

@@ -397,15 +397,17 @@ class TestLiquidDDPG:
         mock_callback1 = Mock(spec=TrainCallback)
         mock_callback1.return_value = TrainState(
             agent=ddpg,
-            env=env.spec.name,
+            env=env,
             total_episodes=2,
+            metrics=TrainMetrics(10, 2),
         )
 
         mock_callback2 = Mock(spec=TrainCallback)
         mock_callback2.return_value = TrainState(
             agent=ddpg,
-            env=env.spec.name,
+            env=env,
             total_episodes=2,
+            metrics=TrainMetrics(10, 2),
         )
 
         # Run training with the callbacks

@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, List, Literal
 import gymnasium as gym
 
 if TYPE_CHECKING:
-    from velora.training.metrics import TrainMetrics
+    from velora.training.metrics import TrainMetrics  # pragma: no cover
 
 from velora.models.base import RLAgent
 

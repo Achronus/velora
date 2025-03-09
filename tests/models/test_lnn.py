@@ -12,6 +12,7 @@ from velora.models.lnn import (
     SparseLinear,
     SparseParameter,
 )
+from velora.models.lnn.metrics import GradientMetric, NCPGradientMetrics
 from velora.utils.core import set_seed
 from velora.wiring import Wiring
 
@@ -547,3 +548,45 @@ class TestSparseLinear:
         layer_no_bias = SparseLinear(in_features, out_features, mask, bias=False)
         repr_str = layer_no_bias.extra_repr()
         assert "bias=False" in repr_str
+
+
+class TestNCPGradientMetrics:
+    def test_to_dict(self):
+        metrics = NCPGradientMetrics(
+            grad_norm=GradientMetric(
+                inter=0.25,
+                command=0.5,
+                motor=0.75,
+                overall=0.5,
+            ),
+            grad_ratio=GradientMetric(
+                inter=0.1,
+                command=0.2,
+                motor=0.3,
+                overall=0.2,
+            ),
+        )
+
+        # First prefix
+        actor_dict = metrics.to_dict("actor")
+
+        assert len(actor_dict) == 8, "Dictionary should contain 8 entries"
+
+        assert actor_dict["actor.grad_norm.inter"] == 0.25
+        assert actor_dict["actor.grad_norm.command"] == 0.5
+        assert actor_dict["actor.grad_norm.motor"] == 0.75
+        assert actor_dict["actor.grad_norm.overall"] == 0.5
+
+        assert actor_dict["actor.grad_ratio.inter"] == 0.1
+        assert actor_dict["actor.grad_ratio.command"] == 0.2
+        assert actor_dict["actor.grad_ratio.motor"] == 0.3
+        assert actor_dict["actor.grad_ratio.overall"] == 0.2
+
+        # Second prefix
+        critic_dict = metrics.to_dict("critic")
+
+        assert "critic.grad_norm.inter" in critic_dict
+        assert "critic.grad_ratio.overall" in critic_dict
+
+        assert critic_dict["critic.grad_norm.inter"] == metrics.grad_norm.inter
+        assert critic_dict["critic.grad_ratio.overall"] == metrics.grad_ratio.overall

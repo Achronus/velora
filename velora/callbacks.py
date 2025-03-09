@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, List, get_args, override
 import gymnasium as gym
 
 if TYPE_CHECKING:
-    from velora.state import TrainState
+    from velora.state import TrainState  # pragma: no cover
 
 from velora.models.base import RLAgent
 from velora.state import RecordMethodLiteral, RecordState

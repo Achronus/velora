@@ -4,6 +4,9 @@ from unittest.mock import Mock
 
 from velora.models.base import RLAgent
 from velora.state import TrainState, RecordState
+from velora.training.metrics import TrainMetrics
+
+import gymnasium as gym
 
 
 class TestTrainState:
@@ -14,61 +17,71 @@ class TestTrainState:
 
     def test_init(self, mock_agent: RLAgent):
         # Default init
-        state = TrainState(agent=mock_agent, env="test", total_episodes=100)
-        assert state.env == "test"
+        state = TrainState(
+            agent=mock_agent,
+            env=gym.make("InvertedPendulum-v5"),
+            total_episodes=100,
+            metrics=TrainMetrics(10, 100),
+        )
+        assert isinstance(state.env, gym.Env)
         assert state.total_episodes == 100
         assert state.status == "start"
         assert state.current_ep == 0
-        assert state.avg_reward == 0
         assert state.stop_training is False
 
         # Custom init
         state = TrainState(
             agent=mock_agent,
-            env="test",
+            env=gym.make("InvertedPendulum-v5"),
             total_episodes=200,
+            metrics=TrainMetrics(50, 200),
             status="step",
+            current_step=10,
             current_ep=10,
-            avg_reward=15.5,
             stop_training=True,
         )
-        assert state.env == "test"
+        assert isinstance(state.env, gym.Env)
         assert state.total_episodes == 200
         assert state.status == "step"
+        assert state.current_step == 10
         assert state.current_ep == 10
-        assert state.avg_reward == 15.5
         assert state.stop_training is True
 
     def test_update(self, mock_agent: RLAgent):
-        state = TrainState(agent=mock_agent, env="test", total_episodes=100)
+        state = TrainState(
+            agent=mock_agent,
+            env=gym.make("InvertedPendulum-v5"),
+            total_episodes=100,
+            metrics=TrainMetrics(5, 100),
+        )
 
         # Update just status
         state.update(status="step")
-        assert state.env == "test"  # Unchanged
+        assert isinstance(state.env, gym.Env)  # Unchanged
         assert state.status == "step"
         assert state.current_ep == 0  # Unchanged
-        assert state.avg_reward == 0  # Unchanged
+        assert state.current_step == 0  # Unchanged
 
         # Update just episode
         state.update(current_ep=5)
-        assert state.env == "test"  # Unchanged
+        assert isinstance(state.env, gym.Env)  # Unchanged
         assert state.status == "step"  # Unchanged
         assert state.current_ep == 5
-        assert state.avg_reward == 0  # Unchanged
+        assert state.current_step == 0  # Unchanged
 
-        # Update just reward
-        state.update(avg_reward=10.5)
-        assert state.env == "test"  # Unchanged
+        # Update just step
+        state.update(current_step=10)
+        assert isinstance(state.env, gym.Env)  # Unchanged
         assert state.status == "step"  # Unchanged
         assert state.current_ep == 5  # Unchanged
-        assert state.avg_reward == 10.5
+        assert state.current_step == 10
 
         # Update all values
-        state.update(status="complete", current_ep=10, avg_reward=20.0)
-        assert state.env == "test"  # Unchanged
+        state.update(status="complete", current_ep=10)
+        assert isinstance(state.env, gym.Env)  # Unchanged
         assert state.status == "complete"
         assert state.current_ep == 10
-        assert state.avg_reward == 20.0
+        assert state.current_step == 10  # Unchanged
 
 
 class TestRecordState:
