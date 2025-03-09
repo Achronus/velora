@@ -67,7 +67,7 @@ metrics = model.train(env, batch_size, n_episodes=300)
 
 This code should work 'as is'.
 
-Currently, the framework only supports [Gymnasium [:material-arrow-right-bottom:]](https://gymnasium.farama.org/) environments and will likely stay that way.
+Currently, the framework only supports [Gymnasium [:material-arrow-right-bottom:]](https://gymnasium.farama.org/) environments and is planned to expand to [PettingZoo [:material-arrow-right-bottom:]](https://pettingzoo.farama.org/index.html) for Multi-agent (MARL) tasks.
 
 ## API Structure
 
@@ -79,6 +79,7 @@ The primary building blocks you'll use regularly.
 
 ```python
 from velora.models import [algorithm]
+from velora.callbacks import [callback]
 ```
 
 ### Extras

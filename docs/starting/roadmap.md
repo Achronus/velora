@@ -55,7 +55,7 @@ Remaining items needed to push out of the beta version.
 
     ---
 
-    - [ ] Agent performance tracking
+    - [ ] Agent performance tracking (offline & online)
     - [x] Early stopping and checkpoint save system
     - [x] Recording episode performance
     - [ ] DDPG agent examples and benchmarks
@@ -64,7 +64,7 @@ Remaining items needed to push out of the beta version.
 
 ## Road to 1.0 Release
 
-These are items that go beyond the beta release (still including them) that are mandatory for the framework to reach a `1.0` release.
+These are items that go beyond the beta release (building on them) that are mandatory for the framework to reach a `1.0` release.
 
 <div class="grid cards" markdown>
 
@@ -90,9 +90,27 @@ These are items that go beyond the beta release (still including them) that are 
 
 </div>
 
+<div class="grid cards" markdown>
+
+- :simple-framework: Simulation Environments
+
+    ---
+
+    - [x] [Gymnasium](https://gymnasium.farama.org/)
+    - [ ] [PettingZoo](https://pettingzoo.farama.org/index.html)
+    - [ ] [CybORG](https://github.com/cage-challenge/CybORG)
+
+</div>
+
 ## 1.0 and Beyond
 
 These are extra items that we are considering for the framework beyond `1.0` release.
+
+???+ note
+
+    These are only a select few. There are so many more items still to consider! 
+    
+    We haven't finished reviewing [OpenAI's Spinning-up papers list [:material-arrow-right-bottom:]](https://spinningup.openai.com/en/latest/spinningup/keypapers.html#a-intrinsic-motivation) yet! 😉
 
 <div class="grid cards" markdown>
 
@@ -119,12 +137,6 @@ These are extra items that we are considering for the framework beyond `1.0` rel
     - [ ] [Goal Oriented Forward-Backward](https://arxiv.org/abs/2103.07945) - 2021
 
 </div>
-
-There are many more items to consider on the [OpenAI Spinning-up papers list [:material-arrow-right-bottom:]](https://spinningup.openai.com/en/latest/spinningup/keypapers.html#a-intrinsic-motivation) too that we plan to review in the future.
-
-## Integrations
-
-These are topics to consider for examples and integrations with Velora.
 
 <div class="grid cards" markdown>
 
