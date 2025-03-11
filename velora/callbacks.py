@@ -185,22 +185,22 @@ class RecordVideos(TrainCallback):
     @override
     def __init__(
         self,
-        method: RecordMethodLiteral,
         dirname: str,
         *,
+        method: RecordMethodLiteral = "episode",
         frequency: int = 100,
     ) -> None:
         """
         Parameters:
-            method (Literal["episode", "step"]): the recording method.
-                When `episode` records episodically. When `step` records during
-                training steps.
             dirname (str): the model directory name to store the videos.
                 Automatically created in `checkpoints` directory as
                 `checkpoints/<dirname>/videos`.
 
                 Compliments `TrainCallback.SaveCheckpoints` callback.
 
+            method (Literal["episode", "step"], optional): the recording method.
+                When `episode` records episodically. When `step` records during
+                training steps.
             frequency (int, optional): the `episode` or `step` record frequency
         """
         if method not in get_args(RecordMethodLiteral):
