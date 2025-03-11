@@ -1,3 +1,4 @@
+import os
 from abc import abstractmethod
 from pathlib import Path
 from typing import TYPE_CHECKING, List, get_args, override
@@ -8,7 +9,7 @@ if TYPE_CHECKING:
     from velora.state import TrainState  # pragma: no cover
 
 from velora.models.base import RLAgent
-from velora.state import RecordMethodLiteral, RecordState
+from velora.state import AnalyticsState, RecordMethodLiteral, RecordState
 
 
 class TrainCallback:
@@ -245,3 +246,123 @@ class RecordVideos(TrainCallback):
         # Ignore other events
         return state
 
+
+class CometAnalytics(TrainCallback):
+    """
+    A callback that enables [`comet-ml`](https://www.comet.com/site/) cloud-based
+    analytics tracking.
+
+    Requires Comet ML API key set using the `COMET_API_KEY` environment variable.
+
+    Features:
+
+    - Upload agent configuration objects
+    - Track model weights (actor/critic)
+    - Tracks episodic training metrics
+    - Uploads video recordings (if `RecordVideos` callback applied)
+    """
+
+    @override
+    def __init__(
+        self,
+        project_name: str,
+        experiment_name: str | None = None,
+        *,
+        tags: List[str] | None = None,
+    ) -> None:
+        """
+        Parameters:
+            project_name (str): the name of the Comet ML project to add this
+                experiment to
+            experiment_name (str, optional): the name of this experiment run.
+                If `None`, automatically creates the name using the format
+                `<agent_classname>_<env_name>_<n_episodes>ep`
+            tags (List[str], optional): a list of tags associated with the
+                experiment. If `None` adds the `agent_classname` and `env_name`
+                by default
+        """
+        try:
+            from comet_ml import Experiment
+        except ImportError:
+            raise ImportError(
+                "Failed to load the 'comet_ml' package. Have you installed it using 'pip install velora[comet]'?"
+            )
+
+        api_key = os.getenv("COMET_API_KEY", None)
+        if api_key is None or api_key == "":
+            raise ValueError(
+                "Missing 'api_key'! Store it as a 'COMET_API_KEY' environment variable."
+            )
+
+        self.experiment: Experiment | None = None
+        self.state = AnalyticsState(
+            project_name=project_name,
+            experiment_name=experiment_name,
+            tags=tags,
+        )
+
+        experiment_name = experiment_name if experiment_name else "auto"
+        print(
+            f"'{self.__class__.__name__}' enabled with {project_name=} and {experiment_name=}."
+        )
+
+    def __call__(self, state: "TrainState") -> "TrainState":
+        # Setup experiment
+        if state.status == "start":
+            # Update comet training state
+            state.analytics_state = self.state
+            state.analytics_update()
+
+            self.init_experiment(state)
+
+            # Log config
+            self.experiment.log_parameters(state.agent.config.model_dump())
+
+        # Send episodic metrics
+        if state.status == "episode":
+            reward_low, reward_high = state.metrics.storage.ep_rewards.std_bands()
+
+            self.experiment.log_metrics(
+                {
+                    "ep_reward": state.metrics.storage.ep_rewards.latest,
+                    "ep_length": state.metrics.storage.ep_lengths.latest,
+                    "ep_reward_moving_avg": state.metrics.reward_moving_avg(),
+                    "ep_reward_moving_upper": reward_high,
+                    "ep_reward_moving_lower": reward_low,
+                    "actor_loss": state.metrics.storage.actor_losses.latest,
+                    "critic_loss": state.metrics.storage.critic_losses.latest,
+                },
+                epoch=state.current_ep,
+            )
+
+        # Finalize training
+        if state.status == "complete":
+            # Log video recordings
+            if state.record_state is not None:
+                for video in state.record_state.dirpath.iterdir():
+                    self.experiment.log_video(str(video), format="mp4")
+
+            self.experiment.end()
+
+        return state
+
+    def init_experiment(self, state: "TrainState") -> None:
+        """Setups up a comet experiment and stores it locally.
+
+        Parameters:
+            state (TrainState): the current training state
+        """
+        from comet_ml import Experiment
+
+        self.experiment = Experiment(
+            api_key=os.getenv("COMET_API_KEY", None),
+            project_name=state.analytics_state.project_name,
+            auto_param_logging=False,
+            auto_metric_logging=False,
+            auto_output_logging=False,
+            log_graph=False,
+            display_summary_level=0,
+        )
+
+        self.experiment.set_name(state.analytics_state.experiment_name)
+        self.experiment.add_tags(state.analytics_state.tags)

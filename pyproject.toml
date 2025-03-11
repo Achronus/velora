@@ -15,7 +15,7 @@ documentation = "https://velora.achronus.dev"
 issues = "https://github.com/Achronus/velora/issues"
 
 [project.optional-dependencies]
-analytics = ["comet-ml>=3.49.3,<4.0.0"]
+comet = ["comet-ml>=3.49.3,<4.0.0"]
 
 [tool.poetry]
 classifiers = [
@@ -68,7 +68,7 @@ flake8-docstrings = "^1.7.0"
 git-cliff = "^2.8.0"
 
 
-[tool.poetry.group.analytics.dependencies]
+[tool.poetry.group.comet.dependencies]
 comet-ml = ">=3.49.3,<4.0.0"
 
 

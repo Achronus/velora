@@ -48,6 +48,23 @@ class RecordState:
 
 
 @dataclass
+class AnalyticsState:
+    """
+    A storage container for the details of a [Comet](https://www.comet.com/) or
+    [Weights and Biases](https://wandb.ai/) analytics experiment.
+
+    Parameters:
+        project_name (str): the name of the project to add this experiment to
+        experiment_name (str, optional): the name of the experiment
+        tags (List[str], optional): a list of tags associated with the experiment
+    """
+
+    project_name: str
+    experiment_name: str | None = None
+    tags: List[str] | None = None
+
+
+@dataclass
 class TrainState:
     """
     A storage container for the current state of model training.
@@ -69,6 +86,7 @@ class TrainState:
         current_step (int, optional): the current training timestep
         stop_training (bool, optional): a flag to declare training termination
         record_state (RecordState, optional): the video recording state
+        analytics_state (AnalyticsState, optional): the analytics state
     """
 
     agent: RLAgent
@@ -80,6 +98,7 @@ class TrainState:
     current_step: int = 0
     stop_training: bool = False
     record_state: RecordState | None = None
+    analytics_state: AnalyticsState | None = None
 
     def update(
         self,
@@ -106,3 +125,23 @@ class TrainState:
         self.current_ep = current_ep if current_ep else self.current_ep
         self.current_step = current_step if current_step else self.current_step
 
+    def analytics_update(self) -> None:
+        """
+        Updates the analytics state details that are `None` dynamically, using
+        the current training state.
+        """
+        agent_name = self.agent.__class__.__name__
+        env_name = self.env.spec.name
+
+        new_state = self.analytics_state
+
+        new_state.experiment_name = (
+            new_state.experiment_name
+            if new_state.experiment_name
+            else f"{agent_name}_{env_name}_{self.total_episodes}ep"
+        )
+
+        new_state.tags = new_state.tags if new_state.tags else [agent_name, env_name]
+
+        # Update state
+        self.analytics_state = new_state
