@@ -98,10 +98,9 @@ class TrainHandler:
             exc_tb (TracebackType, optional): the traceback object, if an exception
                 occurred. `None` otherwise
         """
+        self.record_last_episode()
         self.complete()
         self.env.close()
-
-        self.record_last_episode()
 
         self.train_time = ElapsedTime.elapsed(self.start_time)
         print(
@@ -163,4 +162,5 @@ class TrainHandler:
         """
         if self.state.record_state is not None:
             dirname = self.state.record_state.dirpath.parent.name
+            print()
             record_last_episode(self.agent, self.env.spec.id, dirname)

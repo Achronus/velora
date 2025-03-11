@@ -239,7 +239,7 @@ class TestTrainMetrics:
 
     def test_avg_reward(self, metrics: TrainMetrics):
         metrics._storage._ep_rewards.window = deque([1.0, 2.0, 3.0])
-        assert metrics.avg_reward() == 2.0
+        assert metrics.reward_moving_avg() == 2.0
 
     def test_info(self, capsys, metrics: TrainMetrics):
         metrics._storage._ep_rewards.window = deque([1.0, 2.0, 3.0])

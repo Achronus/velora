@@ -62,7 +62,7 @@ class EarlyStopping(TrainCallback):
             return state
 
         if state.status == "episode":
-            reward = state.metrics.avg_reward()
+            reward = state.metrics.reward_moving_avg()
 
             if reward >= self.target:
                 self.count += 1
@@ -209,6 +209,11 @@ class RecordVideos(TrainCallback):
 
         self.method = method
         self.dirpath = Path("checkpoints", dirname, "videos")
+
+        if self.dirpath.exists():
+            raise FileExistsError(
+                f"Files already exist in the '{self.dirpath.parent}' directory! Either change the 'dirname' or delete/move the folder and its contents."
+            )
 
         def trigger(t: int) -> bool:
             # Skip first item

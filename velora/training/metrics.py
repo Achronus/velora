@@ -1,7 +1,7 @@
 from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Literal, Self, get_args
+from typing import Dict, List, Literal, Self, Tuple, get_args
 
 import numpy as np
 import torch
@@ -91,6 +91,11 @@ class MovingMetric:
     window: deque = field(default_factory=deque)
     window_size: int = 100
 
+    @property
+    def latest(self) -> float | int:
+        """Gets the latest value."""
+        return self.values[-1]
+
     def add(self, value: float | int) -> None:
         """
         Adds a value and updates the window.
@@ -131,6 +136,26 @@ class MovingMetric:
         """
         values = values if values is not None else self.window
         return np.std(values).item() if len(values) > 1 else 0.0
+
+    def std_bands(self, values: List[float] | None = None) -> Tuple[float, float]:
+        """
+        Calculates the standard deviation upper and lower bounds of values or
+        the current window.
+
+        Parameters:
+            values (List[float], optional): Values to calculate standard deviation
+                for. If `None`, uses the current window
+
+        Returns:
+            low,high (Tuple[float,float]): the lower and upper bounds.
+        """
+        mean = self.mean(values)
+        std = self.std(values)
+
+        high = mean + std
+        low = max(0, mean - std)
+
+        return low, high
 
     def __len__(self) -> int:
         """Returns the number of items in the values array."""
@@ -365,12 +390,12 @@ class TrainMetrics:
         # Reset step storage
         self._storage._current_losses.empty()
 
-    def avg_reward(self) -> float:
+    def reward_moving_avg(self) -> float:
         """
-        Calculates the average episodic reward.
+        Calculates the average moving reward.
 
         Returns:
-            avg (float): the average reward.
+            avg (float): the average moving reward.
         """
         return self._storage._ep_rewards.mean()
 
@@ -381,7 +406,7 @@ class TrainMetrics:
         Parameters:
             current_ep (int): the current episode index
         """
-        avg_reward = self.avg_reward()
+        avg_reward = self.reward_moving_avg()
         avg_critic_loss = self._storage._critic_losses.mean()
         avg_actor_loss = self._storage._actor_losses.mean()
 

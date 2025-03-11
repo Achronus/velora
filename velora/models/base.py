@@ -5,7 +5,7 @@ from typing import Any, Dict, Self, Tuple
 import gymnasium as gym
 import torch
 
-from velora.models.config import TrainConfig
+from velora.models.config import RLAgentConfig, TrainConfig
 
 
 class RLAgent:
@@ -22,6 +22,7 @@ class RLAgent:
             device (torch.device, optional): the device to perform computations on
         """
         self.device = device
+        self.config: RLAgentConfig | None = None
 
     @abstractmethod
     def train(

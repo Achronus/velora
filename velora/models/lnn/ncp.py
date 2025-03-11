@@ -5,7 +5,6 @@ import torch
 import torch.nn as nn
 
 from velora.models.lnn.cell import NCPLiquidCell
-from velora.models.lnn.metrics import NCPGradientMetrics, NCPGradientUtils
 from velora.utils.torch import active_parameters, total_parameters
 from velora.wiring import Wiring
 
@@ -116,18 +115,6 @@ class LiquidNCPNetwork(nn.Module):
             count (int): the active parameter count.
         """
         return self._active_params
-
-    def gradient_avgs(self) -> NCPGradientMetrics:
-        """
-        Computes the networks gradient norms and ratios.
-
-        Useful for identifying vanishing/exploding gradients.
-
-        Returns:
-            grads (NCPGradientMetrics): a gradient metrics model with `grad_norm` and `grad_ratio` dataclasses.
-        """
-        utils = NCPGradientUtils(self)
-        return utils.compute()
 
     def _ncp_forward(
         self, x: torch.Tensor, hidden: torch.Tensor

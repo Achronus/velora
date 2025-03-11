@@ -312,7 +312,7 @@ class LiquidDDPG(RLAgent):
         n_episodes: int = 1000,
         callbacks: List[TrainCallback] | None = None,
         max_steps: int = 1000,
-        noise_scale: float = 0.1,
+        noise_scale: float = 0.3,
         gamma: float = 0.99,
         tau: float = 0.005,
         window_size: int = 100,
@@ -408,7 +408,7 @@ class LiquidDDPG(RLAgent):
         state: torch.Tensor,
         hidden: torch.Tensor = None,
         *,
-        noise_scale: float = 0.1,
+        noise_scale: float = 0.3,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Makes an action prediction using the Actor network with exploration noise.
