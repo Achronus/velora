@@ -11,7 +11,7 @@ pip install torch torchvision velora --extra-index-url https://download.pytorch.
 Or, for [PyTorch [:material-arrow-right-bottom:]](https://pytorch.org/get-started/locally/) with CPU only:
 
 ```bash
-pip install velora
+pip install torch torchvision velora
 ```
 
 ## Example Usage
