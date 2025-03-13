@@ -80,7 +80,7 @@ class ReplayBuffer(BufferBase):
             next_state, reward, terminated, truncated, _ = env.step(action)
             done = terminated or truncated
 
-            self.push(Experience(state, action.item(), reward, next_state, done))
+            self.push(Experience(state, action, reward, next_state, done))
 
             state = next_state
 

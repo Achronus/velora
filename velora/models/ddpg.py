@@ -372,7 +372,7 @@ class LiquidDDPG(RLAgent):
                     done = terminated or truncated
 
                     self.buffer.push(
-                        Experience(state, action.item(), reward, next_state, done),
+                        Experience(state, action, reward, next_state, done),
                     )
 
                     critic_loss, actor_loss = self._train_step(batch_size, gamma)

@@ -11,7 +11,7 @@ class Experience:
 
     Parameters:
         state (torch.Tensor): an environment observation
-        action (float): agent action taken in the state
+        action (torch.Tensor): agent actions taken in the state
         reward (float): reward obtained for taking the action
         next_state (torch.Tensor): a newly generated environment observation
             after performing the action
@@ -19,7 +19,7 @@ class Experience:
     """
 
     state: torch.Tensor
-    action: float
+    action: torch.Tensor
     reward: float
     next_state: torch.Tensor
     done: bool

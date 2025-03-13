@@ -44,7 +44,7 @@ class BufferBase:
 
         return BatchExperience(
             states=stack_tensor(states, device=self.device),
-            actions=to_tensor(actions, device=self.device).unsqueeze(1),
+            actions=stack_tensor(actions, device=self.device),
             rewards=to_tensor(rewards, device=self.device).unsqueeze(1),
             next_states=stack_tensor(next_states, device=self.device),
             dones=to_tensor(dones, device=self.device).unsqueeze(1),
