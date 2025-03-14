@@ -166,6 +166,8 @@ cython_debug/
 /examples/*videos/
 /examples/*logs/
 /examples/checkpoints*
+/examples/*viz/
 /old
 /_build
 CHANGELOG.md
+metrics.db

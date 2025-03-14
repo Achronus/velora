@@ -1,15 +1,18 @@
+import json
 from collections import deque
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Dict, List, Literal, Self, Tuple, get_args
+from typing import TYPE_CHECKING, Dict, List, Literal
+
+from velora.metrics.db import get_current_episode
+
+if TYPE_CHECKING:
+    from velora.models.config import RLAgentConfig  # pragma: no cover
 
 import numpy as np
 import torch
+from sqlmodel import Session
 
-MetricStateDictKeys = Literal["window_size", "n_episodes", "storage"]
-MetricKeys = Literal["ep_rewards", "critic_losses", "actor_losses", "ep_lengths"]
-
-VALID_METRIC_KEYS = set(get_args(MetricKeys))
+from velora.metrics.models import Episode, Experiment, Step
 
 
 @dataclass
@@ -137,148 +140,9 @@ class MovingMetric:
         values = values if values is not None else self.window
         return np.std(values).item() if len(values) > 1 else 0.0
 
-    def std_bands(self, values: List[float] | None = None) -> Tuple[float, float]:
-        """
-        Calculates the standard deviation upper and lower bounds of values or
-        the current window.
-
-        Parameters:
-            values (List[float], optional): Values to calculate standard deviation
-                for. If `None`, uses the current window
-
-        Returns:
-            low,high (Tuple[float,float]): the lower and upper bounds.
-        """
-        mean = self.mean(values)
-        std = self.std(values)
-
-        high = mean + std
-        low = max(0, mean - std)
-
-        return low, high
-
     def __len__(self) -> int:
         """Returns the number of items in the values array."""
         return len(self.values)
-
-
-@dataclass
-class SimpleMetricStorage:
-    """
-    A simple storage container for episodic metrics.
-
-    Attributes:
-        ep_rewards (List[float]): episode rewards
-        ep_lengths (List[int]): episode lengths
-        critic_losses (List[float]): Critic losses
-        actor_losses (List[float]): Actor losses
-    """
-
-    ep_rewards: List[float] = field(default_factory=list)
-    ep_lengths: List[int] = field(default_factory=list)
-    critic_losses: List[float] = field(default_factory=list)
-    actor_losses: List[float] = field(default_factory=list)
-
-    @classmethod
-    def load(cls, filepath: str | Path) -> Self:
-        """
-        Loads a saved metric state.
-
-        Parameters:
-            filepath (str | Path): the location of the saved state
-
-        Returns:
-            metrics (SimpleMetricStorage): a new storage container with the saved state.
-        """
-        load_path = Path(filepath)
-        checkpoint: Dict[MetricKeys, List[float | int]] = torch.load(load_path)
-
-        return cls(**checkpoint)
-
-
-class MetricStorage:
-    """
-    A storage container for episodic metrics.
-
-    Parameters:
-        window_size (int): moving average window size
-    """
-
-    def __init__(self, window_size: int) -> None:
-        self._ep_rewards = MovingMetric(window_size=window_size)
-        self._ep_lengths = MovingMetric(window_size=window_size)
-        self._critic_losses = MovingMetric(window_size=window_size)
-        self._actor_losses = MovingMetric(window_size=window_size)
-
-        self._current_losses = StepStorage()
-
-    @property
-    def ep_rewards(self) -> MovingMetric:
-        """
-        A storage container for episode rewards with a moving average window.
-
-        Returns:
-            rewards (MovingMetric): episode rewards moving metric container.
-        """
-        return self._ep_rewards
-
-    @property
-    def ep_lengths(self) -> MovingMetric:
-        """
-        A storage container for episode lengths with a moving average window.
-
-        Returns:
-            lengths (MovingMetric): episode lengths moving metric container.
-        """
-        return self._ep_lengths
-
-    @property
-    def critic_losses(self) -> MovingMetric:
-        """
-        A storage container for Critic losses with a moving average window.
-
-        Returns:
-            losses (MovingMetric): episode Critic losses moving metric container.
-        """
-        return self._critic_losses
-
-    @property
-    def actor_losses(self) -> MovingMetric:
-        """
-        A storage container for Actor losses with a moving average window.
-
-        Returns:
-            losses (MovingMetric): episode Actor losses moving metric container.
-        """
-        return self._actor_losses
-
-    def save_state(self) -> Dict[MetricKeys, List[float | int]]:
-        """
-        Return a dictionary containing the episode storage contents.
-
-        Includes the values for:
-        `[ep_rewards, ep_lengths, critic_losses, actor_losses]`.
-
-        Can be loaded back into a `velora.training.SimpleMetricStorage` object.
-
-        Returns:
-            state_dict (Dict[str, List[float | int]): a dictionary containing the current state of the storage.
-        """
-        return {
-            k.lstrip("_"): v.values
-            for k, v in self.__dict__.items()
-            if isinstance(v, MovingMetric)
-        }
-
-    def __repr__(self) -> str:
-        return (
-            f"{self.__class__.__name__}("
-            f"ep_rewards={len(self._ep_rewards)}, "
-            f"ep_lengths={len(self._ep_lengths)}, "
-            f"critic_losses={len(self._ep_lengths)}, "
-            f"actor_losses={len(self._ep_lengths)}"
-            ")"
-        )
 
 
 class TrainMetrics:
@@ -287,108 +151,121 @@ class TrainMetrics:
     an agents training performance.
     """
 
-    def __init__(self, window_size: int, n_episodes: int) -> None:
+    def __init__(self, session: Session, window_size: int, n_episodes: int) -> None:
         """
         Parameters:
+            session (sqlmodel.Session): current metric database session
             window_size (int): moving average window size
             n_episodes (int): total number of training episodes
         """
+        self.session = session
         self.window_size = window_size
         self.n_episodes = n_episodes
 
-        self._storage = MetricStorage(window_size)
+        self._ep_rewards = MovingMetric(window_size=window_size)
+        self._current_losses = StepStorage()
 
-    @property
-    def n_stored(self) -> int:
-        """
-        Gets the number of stored values.
+        self.experiment_id: int | None = None
 
-        Returns:
-            stored (int): the total number of stored episode values.
+    def start_experiment(self, config: "RLAgentConfig") -> None:
         """
-        return len(self._storage.ep_rewards)
-
-    @property
-    def storage(self) -> MetricStorage:
-        """
-        Gets the metric storage container.
-
-        Returns:
-            metrics (MetricStorage): a container with results calculated during training.
-        """
-        return self._storage
-
-    @property
-    def ep_rewards(self) -> List[float]:
-        """
-        Training episode reward values.
-
-        Returns:
-            rewards (List[float]): a list of episode rewards.
-        """
-        return self.storage.ep_rewards.values
-
-    @property
-    def ep_lengths(self) -> List[int]:
-        """
-        Training episode timestep sizes.
-
-        Returns:
-            lengths (List[int]): a list of episode lengths.
-        """
-        return self.storage.ep_lengths.values
-
-    @property
-    def critic_losses(self) -> List[float]:
-        """
-        Training episode Critic losses.
-
-        Returns:
-            losses (List[float]): a list of Critic losses.
-        """
-        return self.storage.critic_losses.values
-
-    @property
-    def actor_losses(self) -> List[float]:
-        """
-        Training episode Actor losses.
-
-        Returns:
-            losses (List[float]): a list of Actor losses.
-        """
-        return self.storage.actor_losses.values
-
-    def add_step(self, critic: float, actor: float) -> None:
-        """
-        Stores a critic and actor loss value for the current timestep.
+        Confirms the start of a metric experiment by adding it to the database and
+        storing its unique ID locally.
 
         Parameters:
-            critic (float): critic step loss
-            actor (float): actor step loss
+            agent (str): the name of the agent
+            env (str): the name of the environment
         """
-        self._storage._current_losses.add(
-            {"critic_losses": critic, "actor_losses": actor}
+        exp = Experiment(
+            agent=config.agent,
+            env=config.env,
+            config=config.model_dump_json(),
         )
 
-    def add_episode(self, reward: float, n_steps: int) -> None:
+        self.session.add(exp)
+        self.session.commit()
+
+        self.session.refresh(exp)
+        self.experiment_id = exp.id
+
+    def add_step(
+        self,
+        ep_idx: int,
+        step_idx: int,
+        critic: float,
+        actor: float,
+        action: torch.Tensor,
+        action_threshold: float,
+    ) -> None:
         """
-        Add episode metrics and reset step accumulators.
+        Add timesteps metrics to the metric database.
 
         Parameters:
+            ep_idx (int): the current episode index
+            step_idx (int): the current timestep index
+            critic (float): critic step loss
+            actor (float): actor step loss
+            action (torch.Tensor): the agent action for this timestep
+            action_threshold (float): explore-exploit action threshold
+                (e.g., noise scale)
+        """
+        self._exp_created_check()
+
+        # is_explore = bool((action.mean().abs() >= action_threshold).item())
+
+        step = Step(
+            experiment_id=self.experiment_id,
+            episode_id=ep_idx,
+            step_num=step_idx,
+            action=json.dumps(action.tolist()),
+            actor_loss=actor,
+            critic_loss=critic,
+            # is_exploration=is_explore,
+        )
+        self.session.add(step)
+        self.session.commit()
+
+        self._current_losses.add(
+            {
+                "critic_losses": critic,
+                "actor_losses": actor,
+            }
+        )
+
+    def add_episode(self, ep_idx: int, reward: float, n_steps: int) -> None:
+        """
+        Add episode metrics to the metric database and reset step accumulators.
+
+        Parameters:
+            ep_idx (int): the current episode index
             reward (float): episode reward
             n_steps (int): number of steps after episode done
         """
-        self._storage._ep_rewards.add(reward)
-        self._storage._ep_lengths.add(n_steps)
+        self._exp_created_check()
 
-        # Add episode losses
-        actor_loss = self._storage._current_losses.actor_avg()
-        critic_loss = self._storage._current_losses.critic_avg()
-        self._storage._actor_losses.add(actor_loss)
-        self._storage._critic_losses.add(critic_loss)
+        self._ep_rewards.add(reward)
+
+        actor_loss = self._current_losses.actor_avg()
+        critic_loss = self._current_losses.critic_avg()
+
+        moving_avg = self.reward_moving_avg()
+        moving_std = self.reward_moving_std()
+
+        ep = Episode(
+            experiment_id=self.experiment_id,
+            episode_num=ep_idx,
+            reward=reward,
+            length=n_steps,
+            reward_moving_avg=moving_avg,
+            reward_moving_std=moving_std,
+            actor_loss=actor_loss,
+            critic_loss=critic_loss,
+        )
+        self.session.add(ep)
+        self.session.commit()
 
         # Reset step storage
-        self._storage._current_losses.empty()
+        self._current_losses.empty()
 
     def reward_moving_avg(self) -> float:
         """
@@ -397,7 +274,16 @@ class TrainMetrics:
         Returns:
             avg (float): the average moving reward.
         """
-        return self._storage._ep_rewards.mean()
+        return self._ep_rewards.mean()
+
+    def reward_moving_std(self) -> float:
+        """
+        Calculates the average reward moving standard deviation.
+
+        Returns:
+            avg (float): the average moving standard deviation.
+        """
+        return self._ep_rewards.std()
 
     def info(self, current_ep: int) -> None:
         """
@@ -406,38 +292,24 @@ class TrainMetrics:
         Parameters:
             current_ep (int): the current episode index
         """
-        avg_reward = self.reward_moving_avg()
-        avg_critic_loss = self._storage._critic_losses.mean()
-        avg_actor_loss = self._storage._actor_losses.mean()
+        results = get_current_episode(self.session, self.experiment_id, current_ep)
 
-        print(
-            f"Episode: {current_ep}/{self.n_episodes}, "
-            f"Avg Reward: {avg_reward:.2f}, "
-            f"Critic Loss: {avg_critic_loss:.2f}, "
-            f"Actor Loss: {avg_actor_loss:.2f}"
-        )
+        for ep in results:
+            print(
+                f"Episode: {current_ep}/{self.n_episodes}, "
+                f"Avg Reward: {ep.reward_moving_avg:.2f}, "
+                f"Critic Loss: {ep.critic_loss:.2f}, "
+                f"Actor Loss: {ep.actor_loss:.2f}"
+            )
 
-    def save(self, filepath: str | Path) -> None:
+    def _exp_created_check(self) -> None:
         """
-        Saves the metric storage values to a file.
+        Helper method. Performs error handling for checking if an experiment
+        has been created first.
 
-        Saved state can only be loaded using
-        `velora.training.SimpleMetricStorage.load()`.
-
-        Parameters:
-            filepath (str | Path): where to save the metrics
+        Used in `add_step` and `add_episode`.
         """
-        save_path = Path(filepath)
-        save_path.parent.mkdir(parents=True, exist_ok=True)
-
-        state_dict = self._storage.save_state()
-        torch.save(state_dict, save_path)
-
-    def __repr__(self) -> str:
-        return (
-            f"{self.__class__.__name__}("
-            f"window_size={self.window_size}, "
-            f"n_episodes={self.n_episodes}, "
-            f"n_stored={self.n_stored}"
-            ")"
-        )
+        if not self.experiment_id:
+            raise RuntimeError(
+                "An experiment must be created first!\nCreate one with the '<TrainHandler_instance>.metrics.add_experiment()' method."
+            )

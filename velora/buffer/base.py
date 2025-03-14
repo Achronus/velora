@@ -87,7 +87,7 @@ class BufferBase:
 
             serialized_buffer: Dict[BufferKeys, List[Any]] = {
                 "states": stack_tensor(states).cpu().tolist(),
-                "actions": to_tensor(actions).cpu().tolist(),
+                "actions": stack_tensor(actions).cpu().tolist(),
                 "rewards": to_tensor(rewards).cpu().tolist(),
                 "next_states": stack_tensor(next_states).cpu().tolist(),
                 "dones": to_tensor(dones).cpu().tolist(),
@@ -166,7 +166,7 @@ class BufferBase:
             buffer.push(
                 Experience(
                     state=to_tensor(state, device=device),
-                    action=action,
+                    action=to_tensor(action, device=device),
                     reward=reward,
                     next_state=to_tensor(next_state, device=device),
                     done=done,

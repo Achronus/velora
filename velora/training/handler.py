@@ -3,11 +3,13 @@ from types import TracebackType
 from typing import TYPE_CHECKING, List, Self, Type
 
 import gymnasium as gym
+from sqlmodel import Session
 
 if TYPE_CHECKING:
     from velora.callbacks import TrainCallback  # pragma: no cover
 
 from velora.gym.wrap import add_core_env_wrappers
+from velora.metrics.db import get_db_engine
 from velora.models.base import RLAgent
 from velora.state import TrainState
 from velora.time import ElapsedTime
@@ -40,17 +42,17 @@ class TrainHandler:
         self.agent = agent
         self.env = env
         self.window_size = window_size
+        self.n_episodes = n_episodes
         self.callbacks = callbacks or []
 
-        self.state = TrainState(
-            agent=agent,
-            env=env,
-            total_episodes=n_episodes,
-            metrics=TrainMetrics(window_size, n_episodes),
-        )
+        self.state: TrainState | None = None
 
         self.start_time = 0.0
         self.train_time: ElapsedTime | None = None
+
+        self.engine = get_db_engine()
+        self.session: Session | None = None
+        self._metrics: TrainMetrics | None = None
 
     @property
     def metrics(self) -> TrainMetrics:
@@ -60,7 +62,7 @@ class TrainHandler:
         Returns:
             metrics (TrainMetrics): current training metric state.
         """
-        return self.state.metrics
+        return self._metrics
 
     def __enter__(self) -> Self:
         """
@@ -69,6 +71,21 @@ class TrainHandler:
         Returns:
             self (Self): the initialized context.
         """
+        self.session = Session(self.engine)
+        self._metrics = TrainMetrics(
+            self.session,
+            self.window_size,
+            self.n_episodes,
+        )
+        self._metrics.start_experiment(self.agent.config)
+
+        self.state = TrainState(
+            agent=self.agent,
+            env=self.env,
+            session=self.session,
+            total_episodes=self.n_episodes,
+            experiment_id=self._metrics.experiment_id,
+        )
         self.start_time = time.time()
 
         self.start()
@@ -99,8 +116,12 @@ class TrainHandler:
                 occurred. `None` otherwise
         """
         self.record_last_episode()
+        self.save_plots()
+
         self.complete()
+
         self.env.close()
+        self.session.close()
 
         self.train_time = ElapsedTime.elapsed(self.start_time)
         print(

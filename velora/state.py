@@ -1,11 +1,9 @@
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Literal
+from typing import Any, Callable, Dict, List, Literal
 
 import gymnasium as gym
-
-if TYPE_CHECKING:
-    from velora.training.metrics import TrainMetrics  # pragma: no cover
+from sqlmodel import Session
 
 from velora.models.base import RLAgent
 
@@ -72,9 +70,9 @@ class TrainState:
     Parameters:
         agent (RLAgent): the agent being trained
         env (gymnasium.Env): the environment used for training
+        session (sqlmodel.Session): the current metric database session
+        experiment_id (int): the current experiment's unique ID
         total_episodes (int): total number of training episodes
-        metrics (TrainMetrics): a training metrics class instance for agent
-            performance tracking
         status (Literal["start", "episode", "step", "complete"], optional): the current stage of training.
 
             - `start` - before training starts.
@@ -91,8 +89,9 @@ class TrainState:
 
     agent: RLAgent
     env: gym.Env
+    session: Session
+    experiment_id: int
     total_episodes: int
-    metrics: "TrainMetrics"
     status: StatusLiteral = "start"
     current_ep: int = 0
     current_step: int = 0

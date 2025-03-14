@@ -8,6 +8,7 @@ import gymnasium as gym
 if TYPE_CHECKING:
     from velora.state import TrainState  # pragma: no cover
 
+from velora.metrics.db import get_current_episode
 from velora.models.base import RLAgent
 from velora.state import AnalyticsState, RecordMethodLiteral, RecordState
 
@@ -63,7 +64,14 @@ class EarlyStopping(TrainCallback):
             return state
 
         if state.status == "episode":
-            reward = state.metrics.reward_moving_avg()
+            results = get_current_episode(
+                state.session,
+                state.experiment_id,
+                state.current_ep,
+            )
+
+            for episode in results:
+                reward = episode.reward_moving_avg
 
             if reward >= self.target:
                 self.count += 1
@@ -320,20 +328,28 @@ class CometAnalytics(TrainCallback):
 
         # Send episodic metrics
         if state.status == "episode":
-            reward_low, reward_high = state.metrics.storage.ep_rewards.std_bands()
-
-            self.experiment.log_metrics(
-                {
-                    "ep_reward": state.metrics.storage.ep_rewards.latest,
-                    "ep_length": state.metrics.storage.ep_lengths.latest,
-                    "ep_reward_moving_avg": state.metrics.reward_moving_avg(),
-                    "ep_reward_moving_upper": reward_high,
-                    "ep_reward_moving_lower": reward_low,
-                    "actor_loss": state.metrics.storage.actor_losses.latest,
-                    "critic_loss": state.metrics.storage.critic_losses.latest,
-                },
-                epoch=state.current_ep,
+            results = get_current_episode(
+                state.session,
+                state.experiment_id,
+                state.current_ep,
             )
+
+            for episode in results:
+                reward_low = episode.reward_moving_avg - episode.reward_moving_std
+                reward_high = episode.reward_moving_avg + episode.reward_moving_std
+
+                self.experiment.log_metrics(
+                    {
+                        "ep_reward": episode.reward,
+                        "ep_length": episode.length,
+                        "ep_reward_moving_avg": episode.reward_moving_avg,
+                        "ep_reward_moving_upper": reward_high,
+                        "ep_reward_moving_lower": reward_low,
+                        "ep_actor_loss": episode.actor_loss,
+                        "ep_critic_loss": episode.critic_loss,
+                    },
+                    epoch=state.current_ep,
+                )
 
         # Finalize training
         if state.status == "complete":

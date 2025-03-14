@@ -316,7 +316,7 @@ class LiquidDDPG(RLAgent):
         gamma: float = 0.99,
         tau: float = 0.005,
         window_size: int = 100,
-    ) -> TrainMetrics:
+    ) -> None:
         """
         Trains the agent on a Gymnasium environment using a `ReplayBuffer`.
 
@@ -335,9 +335,6 @@ class LiquidDDPG(RLAgent):
             window_size (int, optional): controls the episode rate for displaying
                 information to the console and for calculating the reward moving
                 average
-
-        Returns:
-            metrics (TrainMetrics): an object containing training metrics.
         """
         if not isinstance(env.action_space, gym.spaces.Box):
             raise EnvironmentError(
@@ -351,7 +348,6 @@ class LiquidDDPG(RLAgent):
         )
 
         self.buffer.warm(self, env.spec.id, batch_size)
-        metrics: TrainMetrics | None = None  # Updated at training end
 
         with TrainHandler(self, env, n_episodes, window_size, callbacks) as handler:
             for i_ep in range(n_episodes):
@@ -361,6 +357,8 @@ class LiquidDDPG(RLAgent):
                 state, _ = handler.env.reset()
 
                 for i_step in range(max_steps):
+                    current_step = i_step + 1
+
                     action, hidden = self.predict(
                         state,
                         hidden,
@@ -378,12 +376,21 @@ class LiquidDDPG(RLAgent):
                     critic_loss, actor_loss = self._train_step(batch_size, gamma)
                     self._update_target_networks(tau)
 
-                    handler.metrics.add_step(critic_loss, actor_loss)
-                    handler.step(i_step)
+                    handler.metrics.add_step(
+                        current_ep,
+                        current_step,
+                        critic_loss,
+                        actor_loss,
+                        action,
+                        noise_scale,
+                    )
+                    handler.step(current_step)
+
                     state = next_state
 
                     if done:
                         handler.metrics.add_episode(
+                            current_ep,
                             info["episode"]["r"].item(),
                             info["episode"]["l"].item(),
                         )
@@ -396,11 +403,6 @@ class LiquidDDPG(RLAgent):
 
                 if handler.stop():
                     break
-
-            # Store metrics for return
-            metrics = handler.metrics
-
-        return metrics
 
     @override
     def predict(
@@ -430,7 +432,11 @@ class LiquidDDPG(RLAgent):
             if noise_scale > 0:
                 # Exploration noise
                 noise = self.noise.sample() * noise_scale
-                action = torch.clamp(action + noise, min=-1, max=1)
+                action = torch.clamp(
+                    action + noise,
+                    min=max(action.min().item(), -1),
+                    max=min(action.max().item(), 1),
+                )
 
         self.actor.train()
         return action.flatten(), hidden
