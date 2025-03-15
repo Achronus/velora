@@ -372,7 +372,7 @@ class TestLiquidDDPG:
         checkpoint_dir = tmp_path / "checkpoints"
         checkpoint_dir.mkdir(exist_ok=True)
         CP_DIR = test_id
-        FREQ = 10
+        FREQ = 1
 
         # Clean up any existing directories from failed tests
         existing_dir = Path("checkpoints") / CP_DIR
@@ -447,7 +447,7 @@ class TestLiquidDDPG:
                                     noise_scale=0.3,
                                     gamma=0.99,
                                     tau=0.005,
-                                    window_size=1,
+                                    window_size=FREQ,
                                 )
 
                     # Verify experiment was created and configured
