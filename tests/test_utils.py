@@ -1,11 +1,14 @@
 import pytest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 from typing import Generator, List, Tuple
 
+import gymnasium as gym
 import torch
 import torch.nn as nn
 import numpy as np
 
+from velora.models.base import RLAgent
+from velora.utils.capture import record_last_episode
 from velora.utils.core import set_seed, set_device
 from velora.utils.torch import to_tensor, stack_tensor, soft_update, hard_update
 
@@ -233,3 +236,30 @@ class TestNetworkUpdates:
 
             with pytest.raises(RuntimeError):
                 hard_update(source_net, target_net)
+
+
+class TestRecordLastEpisode:
+    @pytest.fixture
+    def mock_agent(self):
+        agent = MagicMock(spec=RLAgent)
+        agent.device = "cpu"
+        agent.predict.return_value = (torch.tensor([0.0]), torch.zeros(1, 10))
+        return agent
+
+    def test_real_env(self, mock_agent, tmp_path):
+        """Test record_last_episode with a real Gymnasium environment."""
+        # Use a real, simple environment
+        with patch(
+            "gymnasium.make",
+            return_value=gym.make("MountainCarContinuous-v0", render_mode="rgb_array"),
+        ):
+            # Execute the function
+            record_last_episode(
+                mock_agent,
+                "MountainCarContinuous-v0",
+                "test_dir",
+                tmp_path,
+            )
+
+        # Verify agent was used
+        assert mock_agent.predict.call_count > 0

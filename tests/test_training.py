@@ -1,5 +1,5 @@
 import json
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 import pytest
 from collections import deque
 
@@ -8,7 +8,10 @@ from sqlmodel import select
 import torch
 
 from velora.metrics.models import Episode, Experiment, Step
+from velora.models.base import RLAgent
 from velora.models.config import BufferConfig, ModelDetails, RLAgentConfig, TorchConfig
+from velora.state import RecordState
+from velora.training.handler import TrainHandler
 from velora.training.metrics import (
     StepStorage,
     MovingMetric,
@@ -329,3 +332,67 @@ class TestTrainMetrics:
             assert "Avg Reward: 85.00" in print_args
             assert "Critic Loss: 0.70" in print_args
             assert "Actor Loss: 0.60" in print_args
+
+
+class TestTrainHandlerRecordLastEpisode:
+    @pytest.fixture
+    def mock_agent(self):
+        agent = MagicMock(spec=RLAgent)
+        agent.device = "cpu"
+        return agent
+
+    @pytest.fixture
+    def mock_env(self):
+        env = MagicMock()
+        env.spec.id = "TestEnv-v0"
+        env.spec.name = "TestEnv"
+        return env
+
+    @pytest.fixture
+    def train_handler(self, mock_agent, mock_env, experiment):
+        handler = TrainHandler(
+            agent=mock_agent,
+            env=mock_env,
+            n_episodes=100,
+            window_size=10,
+            callbacks=None,
+        )
+        handler.session = experiment[0]
+        handler._metrics = MagicMock()
+
+        return handler
+
+    @patch("velora.training.handler.record_last_episode")
+    def test_record_last_episode_with_record_state(
+        self, mock_record, train_handler, mock_agent, mock_env, tmp_path
+    ):
+        # Set up record_state in the handler's state
+        test_dir = tmp_path / "test_videos"
+        test_dir.mkdir()
+
+        train_handler.state = MagicMock()
+        train_handler.state.agent = mock_agent
+        train_handler.state.env = mock_env
+        train_handler.state.record_state = RecordState(
+            dirpath=test_dir, method="episode", episode_trigger=lambda x: x % 10 == 0
+        )
+
+        # Call the record_last_episode method
+        train_handler.record_last_episode()
+
+        # Verify the record_last_episode function was called with correct parameters
+        mock_record.assert_called_once_with(
+            mock_agent, mock_env.spec.id, test_dir.parent.name
+        )
+
+    @patch("velora.training.handler.record_last_episode")
+    def test_record_last_episode_without_record_state(self, mock_record, train_handler):
+        # Set up state without record_state
+        train_handler.state = MagicMock()
+        train_handler.state.record_state = None
+
+        # Call the record_last_episode method
+        train_handler.record_last_episode()
+
+        # Verify the record_last_episode function was not called
+        mock_record.assert_not_called()

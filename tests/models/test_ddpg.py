@@ -11,12 +11,7 @@ import torch
 import gymnasium as gym
 
 from velora.buffer.experience import Experience
-from velora.callbacks import (
-    CometAnalytics,
-    EarlyStopping,
-    RecordVideos,
-    SaveCheckpoints,
-)
+from velora.callbacks import CometAnalytics, EarlyStopping, SaveCheckpoints
 from velora.models import LiquidNCPNetwork
 from velora.models.ddpg import DDPGActor, DDPGCritic, LiquidDDPG
 from velora.utils.core import set_seed
@@ -401,7 +396,6 @@ class TestLiquidDDPG:
                     EarlyStopping(
                         target=1000.0, patience=3
                     ),  # Lower patience for faster test
-                    RecordVideos(CP_DIR, frequency=FREQ),
                     CometAnalytics("ddpg-test"),
                 ]
 

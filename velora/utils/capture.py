@@ -11,6 +11,7 @@ def record_last_episode(
     agent: RLAgent,
     env_name: str,
     dirname: str,
+    root_path: str | Path | None = None,
 ) -> None:
     """
     Manually makes a video recording of an agent in an episode.
@@ -25,8 +26,10 @@ def record_last_episode(
         env_name (str): the name of environment to use
         dirname (str): the model directory name. Used inside `checkpoints` directory
             as `checkpoints/<dirname>/videos`
+        root_path (str, optional): a root path for the checkpoint directory
     """
-    dirpath = Path("checkpoints", dirname, "videos")
+    cp_path = Path("checkpoints", dirname, "videos")
+    dirpath = Path(root_path, cp_path) if root_path else cp_path
 
     def trigger(t: int) -> bool:
         return True

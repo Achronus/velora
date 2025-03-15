@@ -23,7 +23,7 @@ RUN uv pip install --no-cache-dir --system \
     pytest-cov==6.0.0 \
     pydantic==2.10.6 \
     pydantic-settings==2.8.1 \
-    gymnasium[mujoco,other]==1.1.1 \
+    gymnasium[classic-control,mujoco,other]==1.1.1 \
     plotly==6.0.0 \
     sqlmodel==0.0.24 \
     comet-ml==3.49.3
