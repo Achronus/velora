@@ -173,8 +173,7 @@ class TrainMetrics:
         storing its unique ID locally.
 
         Parameters:
-            agent (str): the name of the agent
-            env (str): the name of the environment
+            config (RLAgentConfig): an RLAgent config model
         """
         exp = Experiment(
             agent=config.agent,

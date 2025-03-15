@@ -81,6 +81,7 @@ nav:
           - callbacks: learn/reference/callbacks.md
           - gymnasium: learn/reference/gym.md
           - noise: learn/reference/noise.md
+          - metrics: learn/reference/metrics.md
           - state: learn/reference/state.md
           - training: learn/reference/training.md
           - utils: learn/reference/utils.md

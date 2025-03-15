@@ -265,7 +265,6 @@ class CometAnalytics(TrainCallback):
     Features:
 
     - Upload agent configuration objects
-    - Track model weights (actor/critic)
     - Tracks episodic training metrics
     - Uploads video recordings (if `RecordVideos` callback applied)
     """
