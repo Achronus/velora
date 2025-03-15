@@ -1,38 +1,53 @@
-FROM python:3.12-slim
+## ------------------------------- Builder Stage ------------------------------ ## 
+FROM python:3.12-bookworm AS builder
 
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
+# Install minimal build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     python3-dev \
+    && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Poetry
-RUN pip install --no-cache-dir poetry \
+# Install Poetry and uv
+RUN pip install --no-cache-dir uv \
     && pip install --upgrade pip
 
 # Copy only the dependency files
-COPY pyproject.toml ./
+COPY ./pyproject.toml ./
 
-# Configure Poetry 
-RUN poetry config virtualenvs.create false
-
-# Install test dependencies only
-RUN poetry install --no-interaction --no-root --only testing
-
-# Install core dependencies manually
-RUN pip install pydantic==2.10.5 \
-    pydantic-settings==2.7.1 \
-    gymnasium[mujoco,other]==1.1.0 \
-    numpy==2.2.0 \
+# Install dependencies manually
+RUN uv pip install --no-cache-dir --system \
+    pytest==8.3.4 \
+    pytest-cov==6.0.0 \
+    pydantic==2.10.6 \
+    pydantic-settings==2.8.1 \
+    gymnasium[mujoco,other]==1.1.1 \
+    plotly==6.0.0 \
+    sqlmodel==0.0.24 \
     comet-ml==3.49.3
 
 # Install CPU-only PyTorch
-RUN pip install torch==2.6.0 torchvision==0.21.0 --index-url "https://download.pytorch.org/whl/cpu"
+RUN uv pip install --no-cache-dir --system \
+    torch==2.6.0 \
+    torchvision==0.21.0 \
+    --index-url "https://download.pytorch.org/whl/cpu"
+
+## ------------------------------- Test Stage ------------------------------ ##
+FROM python:3.12-slim-bookworm AS production
+
+RUN useradd --create-home appuser
+USER appuser
+
+WORKDIR /app
 
 # Set working directory permissions to ensure GitHub Actions can write to it
 RUN chmod -R 777 /app
 
-# Set the entrypoint to run commands with the dependencies
+# Copy installed packages from builder
+COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
+
+# Default entrypoint for running container
 ENTRYPOINT ["python", "-m"]

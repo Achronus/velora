@@ -1,3 +1,4 @@
+import os
 from sqlalchemy import Engine, ScalarResult
 from sqlmodel import Session, SQLModel, create_engine, select
 
@@ -13,7 +14,13 @@ def get_db_engine() -> Engine:
     """
     from velora.metrics.models import Episode, Experiment, Step  # pragma: no cover
 
-    engine = create_engine("sqlite:///metrics.db")
+    if os.getenv("VELORA_TEST_MODE", "").lower() in ("true", "1"):
+        # Use in-memory database for testing
+        engine = create_engine("sqlite:///:memory:")
+    else:
+        # Regular file-based database
+        engine = create_engine("sqlite:///metrics.db")
+
     SQLModel.metadata.create_all(engine)
     return engine
 

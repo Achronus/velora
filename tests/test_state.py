@@ -4,7 +4,6 @@ from unittest.mock import Mock
 
 from velora.models.base import RLAgent
 from velora.state import TrainState, RecordState
-from velora.training.metrics import TrainMetrics
 
 import gymnasium as gym
 
@@ -15,13 +14,14 @@ class TestTrainState:
         agent = Mock(spec=RLAgent)
         return agent
 
-    def test_init(self, mock_agent: RLAgent):
+    def test_init(self, experiment, mock_agent: RLAgent):
         # Default init
         state = TrainState(
             agent=mock_agent,
             env=gym.make("InvertedPendulum-v5"),
+            session=experiment[0],
+            experiment_id=experiment[1],
             total_episodes=100,
-            metrics=TrainMetrics(10, 100),
         )
         assert isinstance(state.env, gym.Env)
         assert state.total_episodes == 100
@@ -33,8 +33,9 @@ class TestTrainState:
         state = TrainState(
             agent=mock_agent,
             env=gym.make("InvertedPendulum-v5"),
+            session=experiment[0],
+            experiment_id=experiment[1],
             total_episodes=200,
-            metrics=TrainMetrics(50, 200),
             status="step",
             current_step=10,
             current_ep=10,
@@ -47,12 +48,13 @@ class TestTrainState:
         assert state.current_ep == 10
         assert state.stop_training is True
 
-    def test_update(self, mock_agent: RLAgent):
+    def test_update(self, experiment, mock_agent: RLAgent):
         state = TrainState(
             agent=mock_agent,
             env=gym.make("InvertedPendulum-v5"),
+            session=experiment[0],
+            experiment_id=experiment[1],
             total_episodes=100,
-            metrics=TrainMetrics(5, 100),
         )
 
         # Update just status

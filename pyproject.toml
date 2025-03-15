@@ -53,7 +53,7 @@ mkdocstrings-python = "^1.16.0"
 
 
 [tool.poetry.group.notebook.dependencies]
-notebook = "^7.2.2"
+notebook = "^7.3.3"
 ipywidgets = "^8.1.5"
 
 
@@ -87,7 +87,7 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.pytest.ini_options]
 addopts = "--cov-report term-missing --cov=velora tests/"
-filterwarnings = ["ignore::UserWarning"]
+filterwarnings = ["ignore::UserWarning", "ignore::DeprecationWarning"]
 
 [tool.mypy]
 python_version = "3.12"

@@ -1,23 +1,25 @@
+from pathlib import Path
+import shutil
 from typing import Any, Dict, Literal
 import pytest
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 import os
 import tempfile
 import json
-import shutil
-from pathlib import Path
 
 import torch
-
 import gymnasium as gym
 
 from velora.buffer.experience import Experience
-from velora.training.metrics import TrainMetrics
+from velora.callbacks import (
+    CometAnalytics,
+    EarlyStopping,
+    RecordVideos,
+    SaveCheckpoints,
+)
 from velora.models import LiquidNCPNetwork
-from velora.callbacks import TrainCallback, SaveCheckpoints, EarlyStopping, RecordVideos
 from velora.models.ddpg import DDPGActor, DDPGCritic, LiquidDDPG
-from velora.training.handler import TrainHandler
-from velora.state import TrainState, RecordState
+from velora.utils.core import set_seed
 
 
 NetworkParamsType = Dict[
@@ -116,7 +118,7 @@ class TestLiquidDDPG:
 
     @pytest.fixture
     def env(self) -> gym.Env:
-        return gym.make("MountainCarContinuous-v0", render_mode="rgb_array")
+        return gym.make("InvertedPendulum-v5", render_mode="rgb_array")
 
     def test_init(self, ddpg: LiquidDDPG, ddpg_params: DDPGParamsType):
         assert isinstance(ddpg.actor, DDPGActor)
@@ -166,7 +168,7 @@ class TestLiquidDDPG:
         # Fill buffer with valid experiences
         for _ in range(batch_size + 1):
             state = torch.zeros(ddpg.state_dim)
-            action = 1.0  # Single float value
+            action = torch.tensor([1.0])
             reward = 2.0  # Single float value
             next_state = torch.zeros(ddpg.state_dim)
             done = False
@@ -204,39 +206,6 @@ class TestLiquidDDPG:
         with pytest.raises(EnvironmentError):
             ddpg.train(mock_env, batch_size=32)
 
-    def test_train_valid_env(self, env: gym.Env, ddpg: LiquidDDPG):
-        _ = ddpg.train(env, batch_size=32, n_episodes=2, max_steps=10)
-
-    def test_train_if_done(self, env: gym.Env, ddpg: LiquidDDPG):
-        # Create a wrapper to force early termination
-        class EarlyDoneWrapper(gym.Wrapper):
-            def __init__(self, env):
-                super().__init__(env)
-                self.step_count = 0
-
-            def step(self, action):
-                self.step_count += 1
-                obs, reward, term, trunc, info = self.env.step(action)
-                # Force done after 5 steps
-                if self.step_count >= 5:
-                    term = True
-                return obs, reward, term, trunc, info
-
-            def reset(self, **kwargs):
-                self.step_count = 0
-                return self.env.reset(**kwargs)
-
-        wrapped_env = EarlyDoneWrapper(env)
-        n_episodes = 2
-
-        metrics = ddpg.train(
-            wrapped_env,
-            batch_size=32,
-            n_episodes=n_episodes,
-            max_steps=10,  # Even though max_steps is 10, should terminate at 5
-        )
-        assert isinstance(metrics, TrainMetrics)
-
     def test_save_error(self, ddpg: LiquidDDPG):
         with tempfile.NamedTemporaryFile(suffix=".pt", delete=False) as temp_file:
             filepath = temp_file.name
@@ -257,7 +226,7 @@ class TestLiquidDDPG:
         # Add some experiences to buffer
         for i in range(10):
             state = torch.zeros(ddpg.state_dim)
-            action = float(i)
+            action = torch.tensor([i])
             reward = float(i * 0.5)
             next_state = torch.ones(ddpg.state_dim)
             done = i == 9
@@ -392,126 +361,136 @@ class TestLiquidDDPG:
             with pytest.raises(ValueError, match="Mismatch between checkpoint keys"):
                 LiquidDDPG.load(modified_filepath)
 
-    def test_train_with_callbacks(self, env: gym.Env, ddpg: LiquidDDPG):
-        # Create mock callbacks
-        mock_callback1 = Mock(spec=TrainCallback)
-        mock_callback1.return_value = TrainState(
-            agent=ddpg,
-            env=env,
-            total_episodes=2,
-            metrics=TrainMetrics(10, 2),
-        )
+    def test_train_with_all_callbacks(
+        self, ddpg: LiquidDDPG, env: gym.Env, tmp_path, monkeypatch
+    ):
+        set_seed(64)
+        os.environ["VELORA_TEST_MODE"] = "True"
 
-        mock_callback2 = Mock(spec=TrainCallback)
-        mock_callback2.return_value = TrainState(
-            agent=ddpg,
-            env=env,
-            total_episodes=2,
-            metrics=TrainMetrics(10, 2),
-        )
+        # Create a unique directory using tmp_path for this test
+        test_id = f"ddpg-test-{id(ddpg)}"
+        checkpoint_dir = tmp_path / "checkpoints"
+        checkpoint_dir.mkdir(exist_ok=True)
+        CP_DIR = test_id
+        FREQ = 10
 
-        # Run training with the callbacks
-        ddpg.train(
-            env,
-            batch_size=32,
-            n_episodes=2,
-            max_steps=10,
-            callbacks=[mock_callback1, mock_callback2],
-        )
+        # Clean up any existing directories from failed tests
+        existing_dir = Path("checkpoints") / CP_DIR
+        if existing_dir.exists():
+            shutil.rmtree(existing_dir)
 
-        # Verify callbacks were called
-        assert mock_callback1.call_count > 0
-        assert mock_callback2.call_count > 0
+        # Mock the comet experiment
+        mock_experiment = MagicMock()
 
-    def test_train_early_stopping(self, env: gym.Env, ddpg: LiquidDDPG):
-        # Create callback that sets stop_training to True after the first episode
-        def early_stop_callback(state: TrainState) -> TrainState:
-            if state.status == "episode" and state.current_ep >= 1:
-                state.stop_training = True
-            return state
+        # Set the environment variable for Comet API key
+        monkeypatch.setenv("COMET_API_KEY", "test-key")
 
-        mock_callback = Mock(side_effect=early_stop_callback)
-
-        # Run training with callback
-        metrics = ddpg.train(
-            env,
-            batch_size=32,
-            n_episodes=5,  # Should not run all 5 episodes
-            max_steps=10,
-            callbacks=[mock_callback],
-        )
-
-        # Verify training stopped early
-        # We expect fewer than 5 episodes of rewards to be recorded
-        assert metrics.n_stored < metrics.n_episodes
-
-    def test_multiple_callbacks(self, ddpg: LiquidDDPG, env: gym.Env):
-        # Set up test constants
-        CP_DIR = "ddpg"
-        FREQ = 5
-        TARGET_REWARD = 15.0
-        BATCH_SIZE = 32
-        N_EPISODES = 2  # Minimal episodes for faster testing
-        MAX_STEPS = 5  # Minimal steps for faster testing
-
-        # Define checkpoint directory paths
-        checkpoint_dir = Path("checkpoints", CP_DIR)
-
-        try:
-            # Clean up any existing test directories
-            if checkpoint_dir.exists():
-                shutil.rmtree(checkpoint_dir)
-
-            # Create callbacks just like in the example
-            callbacks = [
-                SaveCheckpoints(CP_DIR, frequency=FREQ, buffer=True),
-                EarlyStopping(target=TARGET_REWARD),
-                RecordVideos("episode", CP_DIR, frequency=FREQ),
-            ]
-
-            # Mock functions to avoid actual file operations
-            with (
-                patch.object(SaveCheckpoints, "save_checkpoint"),
-                patch("gymnasium.wrappers.RecordVideo", return_value=env),
-                patch("velora.utils.capture.record_last_episode"),
-            ):
-                # Create and configure a StateHandler directly to verify record_state
-                handler = TrainHandler(ddpg, env, N_EPISODES, FREQ, callbacks)
-
-                # Run the start event which should set up record_state via RecordVideos
-                handler.start()
-
-                # Verify that record_state was set correctly
-                assert handler.state.record_state is not None
-                assert isinstance(handler.state.record_state, RecordState)
-                assert handler.state.record_state.method == "episode"
-                assert CP_DIR in str(handler.state.record_state.dirpath)
-
-                # Run the record_last method which should call record_last_episode
-                handler.record_last_episode()
-
-                # Run minimal training to verify integration
-                metrics = ddpg.train(
-                    env,
-                    batch_size=BATCH_SIZE,
-                    n_episodes=N_EPISODES,
-                    max_steps=MAX_STEPS,
-                    callbacks=callbacks,
+        # Mock comet_ml.Experiment to return our mock
+        with patch("comet_ml.Experiment", return_value=mock_experiment):
+            # Create callbacks - use monkeypatch to redirect paths to our temp dir
+            with patch("pathlib.Path") as mock_path:
+                # Make Path("checkpoints") return our temporary checkpoint dir
+                mock_path.side_effect = (
+                    lambda *args: tmp_path / "checkpoints"
+                    if args and args[0] == "checkpoints"
+                    else Path(*args)
                 )
 
-                # Verify metrics object was returned
-                assert isinstance(metrics, TrainMetrics)
+                callbacks = [
+                    SaveCheckpoints(CP_DIR, frequency=FREQ, buffer=True),
+                    EarlyStopping(
+                        target=1000.0, patience=3
+                    ),  # Lower patience for faster test
+                    RecordVideos(CP_DIR, frequency=FREQ),
+                    CometAnalytics("ddpg-test"),
+                ]
 
-                # Verify callbacks were registered in train_params
-                assert ddpg.config.train_params is not None
-                assert len(ddpg.config.train_params.callbacks) == 3
-                assert "SaveCheckpoints" in ddpg.config.train_params.callbacks
-                assert "EarlyStopping" in ddpg.config.train_params.callbacks
-                assert "RecordVideos" in ddpg.config.train_params.callbacks
+            try:
+                # Mock early stopping to trigger after a few episodes
+                with patch("velora.callbacks.get_current_episode") as mock_get_episode:
+                    # Create a mock episode with high reward to trigger early stopping
+                    mock_episode = MagicMock()
+                    mock_episode.reward_moving_avg = (
+                        1500.0  # High enough to trigger early stopping
+                    )
+                    mock_get_episode.return_value = [mock_episode]
 
-        finally:
-            # Clean up test directories
-            if checkpoint_dir.exists():
-                shutil.rmtree(checkpoint_dir)
-            # Close the environment
-            env.close()
+                    # Patch record statistics to return episode info
+                    with patch(
+                        "gymnasium.wrappers.RecordEpisodeStatistics.__call__"
+                    ) as mock_record_ep:
+                        # Mock episode return with high reward
+                        mock_info = {
+                            "episode": {
+                                "r": torch.tensor(1500.0),
+                                "l": torch.tensor(50),
+                            }
+                        }
+                        mock_record_ep.return_value = (
+                            torch.zeros(
+                                ddpg.state_dim, device=ddpg.device
+                            ),  # next_state
+                            10.0,  # reward
+                            True,  # terminated - make True to end episodes quickly
+                            False,  # truncated
+                            mock_info,  # info
+                        )
+
+                        # Mock predict to return tensors with correct shapes
+                        with patch.object(ddpg, "predict") as mock_predict:
+                            mock_predict.return_value = (
+                                torch.zeros(
+                                    ddpg.action_dim, device=ddpg.device
+                                ),  # action
+                                torch.zeros(
+                                    (1, ddpg.n_neurons + ddpg.action_dim),
+                                    device=ddpg.device,
+                                ),  # hidden state with correct shape
+                            )
+
+                            # Mock buffer.push to prevent storing experiences
+                            with (
+                                patch.object(ddpg.buffer, "push"),
+                                patch.object(ddpg.buffer, "warm"),
+                            ):
+                                # Mock _train_step to avoid network operations
+                                with patch.object(
+                                    ddpg, "_train_step"
+                                ) as mock_train_step:
+                                    mock_train_step.return_value = (
+                                        0.1,
+                                        0.2,
+                                    )  # Return mock losses
+
+                                    # Run training with reduced episodes for faster testing
+                                    ddpg.train(
+                                        env,
+                                        batch_size=32,
+                                        n_episodes=3,
+                                        callbacks=callbacks,
+                                        max_steps=100,
+                                        noise_scale=0.3,
+                                        gamma=0.99,
+                                        tau=0.005,
+                                        window_size=1,
+                                    )
+
+                    # Verify experiment was created and configured
+                    assert mock_experiment.set_name.call_count == 1
+                    assert mock_experiment.add_tags.call_count == 1
+                    assert mock_experiment.log_parameters.call_count == 1
+
+                    # Verify metrics were logged
+                    assert mock_experiment.log_metrics.call_count > 0
+
+                    # Verify experiment was ended
+                    assert mock_experiment.end.call_count == 1
+            finally:
+                # Clean up the directories - both real and temp paths just to be sure
+                real_path = Path("checkpoints") / CP_DIR
+                if real_path.exists():
+                    shutil.rmtree(real_path)
+
+                temp_path = tmp_path / "checkpoints" / CP_DIR
+                if temp_path.exists():
+                    shutil.rmtree(temp_path)

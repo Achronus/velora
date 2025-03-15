@@ -15,7 +15,6 @@ from velora.models.config import ModelDetails, RLAgentConfig, TorchConfig
 from velora.models.lnn.ncp import LiquidNCPNetwork
 from velora.noise import OUNoise
 from velora.training.handler import TrainHandler
-from velora.training.metrics import TrainMetrics
 from velora.utils.torch import soft_update
 
 CheckpointLiteral = Literal[

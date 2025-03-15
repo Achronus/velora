@@ -1,14 +1,17 @@
+import json
+from unittest.mock import patch
 import pytest
 from collections import deque
 
 import numpy as np
+from sqlmodel import select
 import torch
 
+from velora.metrics.models import Episode, Experiment, Step
+from velora.models.config import BufferConfig, ModelDetails, RLAgentConfig, TorchConfig
 from velora.training.metrics import (
     StepStorage,
     MovingMetric,
-    SimpleMetricStorage,
-    MetricStorage,
     TrainMetrics,
 )
 
@@ -121,167 +124,208 @@ class TestMovingMetric:
         metric.values = [1.0, 2.0, 3.0]
         assert len(metric) == 3
 
+    def test_latest_property(self, metric: MovingMetric):
+        metric.add(1.0)
+        metric.add(2.0)
 
-class TestSimpleMetricStorage:
-    @pytest.fixture
-    def storage(self) -> SimpleMetricStorage:
-        return SimpleMetricStorage()
-
-    def test_init(self, storage: SimpleMetricStorage):
-        assert storage.ep_rewards == []
-        assert storage.ep_lengths == []
-        assert storage.critic_losses == []
-        assert storage.actor_losses == []
-
-    def test_load(self, tmp_path):
-        # Create a temporary file with test data
-        filepath = tmp_path / "test_metrics.pt"
-        test_data = {
-            "ep_rewards": [1.0, 2.0],
-            "ep_lengths": [10, 20],
-            "critic_losses": [0.1, 0.2],
-            "actor_losses": [0.3, 0.4],
-        }
-        torch.save(test_data, filepath)
-
-        # Load the data
-        storage = SimpleMetricStorage.load(filepath)
-
-        # Check if the data was loaded correctly
-        assert storage.ep_rewards == [1.0, 2.0]
-        assert storage.ep_lengths == [10, 20]
-        assert storage.critic_losses == [0.1, 0.2]
-        assert storage.actor_losses == [0.3, 0.4]
-
-
-class TestMetricStorage:
-    @pytest.fixture
-    def storage(self) -> MetricStorage:
-        return MetricStorage(50)
-
-    def test_init(self, storage: MetricStorage):
-        assert storage._ep_rewards.window_size == 50
-        assert storage._ep_lengths.window_size == 50
-        assert storage._critic_losses.window_size == 50
-        assert storage._actor_losses.window_size == 50
-        assert isinstance(storage._current_losses, StepStorage)
-
-    def test_properties(self, storage: MetricStorage):
-        assert storage.ep_rewards is storage._ep_rewards
-        assert storage.ep_lengths is storage._ep_lengths
-        assert storage.critic_losses is storage._critic_losses
-        assert storage.actor_losses is storage._actor_losses
-
-    def test_save_state(self, storage: MetricStorage):
-        # Add some test data
-        storage._ep_rewards.values = [1.0, 2.0]
-        storage._ep_lengths.values = [10, 20]
-        storage._critic_losses.values = [0.1, 0.2]
-        storage._actor_losses.values = [0.3, 0.4]
-
-        state_dict = storage.save_state()
-
-        assert state_dict["ep_rewards"] == [1.0, 2.0]
-        assert state_dict["ep_lengths"] == [10, 20]
-        assert state_dict["critic_losses"] == [0.1, 0.2]
-        assert state_dict["actor_losses"] == [0.3, 0.4]
-
-    def test_repr(self, storage: MetricStorage):
-        assert (
-            repr(storage)
-            == "MetricStorage(ep_rewards=0, ep_lengths=0, critic_losses=0, actor_losses=0)"
-        )
+        assert metric.latest == 2.0
 
 
 class TestTrainMetrics:
     @pytest.fixture
-    def metrics(self) -> TrainMetrics:
-        return TrainMetrics(50, 100)
+    def metrics(self, experiment) -> TrainMetrics:
+        session, _ = experiment
+        return TrainMetrics(session, window_size=10, n_episodes=100)
 
-    def test_init(self, metrics: TrainMetrics):
-        assert metrics.window_size == 50
+    @pytest.fixture
+    def mock_config(self):
+        return RLAgentConfig(
+            agent="TestAgent",
+            env="TestEnv",
+            model_details=ModelDetails(
+                type="actor-critic",
+                state_dim=4,
+                n_neurons=64,
+                action_dim=2,
+                target_networks=True,
+            ),
+            buffer=BufferConfig(type="ReplayBuffer", capacity=10000),
+            torch=TorchConfig(device="cpu", optimizer="Adam", loss="MSELoss"),
+        )
+
+    def test_init(self, experiment):
+        session, _ = experiment
+        metrics = TrainMetrics(session, window_size=10, n_episodes=100)
+
+        assert metrics.session == session
+        assert metrics.window_size == 10
         assert metrics.n_episodes == 100
-        assert isinstance(metrics._storage, MetricStorage)
-        assert metrics._storage._ep_rewards.window_size == 50
+        assert metrics.experiment_id is None
+        assert isinstance(metrics._ep_rewards, MovingMetric)
+        assert metrics._ep_rewards.window_size == 10
+        assert isinstance(metrics._current_losses, StepStorage)
 
-    def test_n_stored(self, metrics: TrainMetrics):
-        assert metrics.n_stored == 0
+    def test_start_experiment(self, metrics, mock_config):
+        """Test starting an experiment."""
+        # Start the experiment
+        metrics.start_experiment(mock_config)
 
-        # Add some episodes
-        metrics._storage._ep_rewards.values = [1.0, 2.0, 3.0]
-        assert metrics.n_stored == 3
+        # Verify experiment was created
+        assert metrics.experiment_id is not None
 
-    def test_storage(self, metrics: TrainMetrics):
-        assert metrics.storage is metrics._storage
+        # Verify the experiment exists in the database
+        experiment = metrics.session.get(Experiment, metrics.experiment_id)
+        assert experiment is not None
+        assert experiment.agent == mock_config.agent
+        assert experiment.env == mock_config.env
 
-    def test_add_step(self, metrics: TrainMetrics):
-        metrics.add_step(0.1, 0.2)
-        assert metrics._storage._current_losses.critic_losses == [0.1]
-        assert metrics._storage._current_losses.actor_losses == [0.2]
+    def test_add_step(self, metrics, experiment):
+        """Test adding step metrics."""
+        # Setup - start an experiment first
+        session, experiment_id = experiment
+        metrics.experiment_id = experiment_id
 
-    def test_add_episode(self, metrics: TrainMetrics):
-        # Add some step data first
-        metrics._storage._current_losses.critic_losses = [0.1, 0.2]
-        metrics._storage._current_losses.actor_losses = [0.3, 0.4]
+        mock_action = torch.tensor([0.5, -0.3])
+
+        # Add a step
+        metrics.add_step(
+            ep_idx=5,
+            step_idx=10,
+            critic=0.8,
+            actor=0.6,
+            action=mock_action,
+            action_threshold=0.3,
+        )
+
+        # Verify step was added using select
+        statement = select(Step).where(
+            Step.experiment_id == experiment_id,
+            Step.episode_id == 5,
+            Step.step_num == 10,
+        )
+        steps = session.exec(statement).all()
+
+        assert len(steps) == 1
+        step = steps[0]
+        assert step.experiment_id == experiment_id
+        assert step.episode_id == 5
+        assert step.step_num == 10
+        assert step.critic_loss == 0.8
+        assert step.actor_loss == 0.6
+        assert json.loads(step.action) == mock_action.tolist()
+
+        # Verify losses were stored
+        assert 0.8 in metrics._current_losses.critic_losses
+        assert 0.6 in metrics._current_losses.actor_losses
+
+    def test_add_step_without_experiment(self, metrics):
+        """Test adding step metrics without first creating an experiment."""
+        # Experiment ID is None (not set)
+        with pytest.raises(RuntimeError) as excinfo:
+            metrics.add_step(
+                ep_idx=5,
+                step_idx=10,
+                critic=0.8,
+                actor=0.6,
+                action=torch.tensor([0.5]),
+                action_threshold=0.3,
+            )
+
+        assert "An experiment must be created first" in str(excinfo.value)
+
+    def test_add_episode(self, metrics, experiment):
+        """Test adding episode metrics."""
+        # Setup - start an experiment first
+        session, experiment_id = experiment
+        metrics.experiment_id = experiment_id
+
+        # Add step metrics first (to have losses to average)
+        metrics._current_losses.add({"critic_losses": 0.7, "actor_losses": 0.5})
 
         # Add an episode
-        metrics.add_episode(reward=1.5, n_steps=30)
+        metrics.add_episode(ep_idx=5, reward=95.0, n_steps=200)
 
-        # Check that episode metrics were added
-        assert metrics._storage._ep_rewards.values == [1.5]
-        assert metrics._storage._ep_lengths.values == [30]
-        assert round(metrics._storage._critic_losses.values[0], 2) == 0.15
-        assert round(metrics._storage._actor_losses.values[0], 2) == 0.35
-
-        # Check that step storage was emptied
-        assert metrics._storage._current_losses.critic_losses == []
-        assert metrics._storage._current_losses.actor_losses == []
-
-    def test_avg_reward(self, metrics: TrainMetrics):
-        metrics._storage._ep_rewards.window = deque([1.0, 2.0, 3.0])
-        assert metrics.reward_moving_avg() == 2.0
-
-    def test_info(self, capsys, metrics: TrainMetrics):
-        metrics._storage._ep_rewards.window = deque([1.0, 2.0, 3.0])
-        metrics._storage._critic_losses.window = deque([0.1, 0.2, 0.3])
-        metrics._storage._actor_losses.window = deque([0.4, 0.5, 0.6])
-
-        metrics.info(current_ep=50)
-
-        captured = capsys.readouterr()
-        assert "Episode: 50/100" in captured.out
-        assert "Avg Reward: 2.00" in captured.out
-        assert "Critic Loss: 0.20" in captured.out
-        assert "Actor Loss: 0.50" in captured.out
-
-    def test_save(self, tmp_path, metrics: TrainMetrics):
-        # Add some test data
-        metrics._storage._ep_rewards.values = [1.0, 2.0]
-        metrics._storage._ep_lengths.values = [10, 20]
-        metrics._storage._critic_losses.values = [0.1, 0.2]
-        metrics._storage._actor_losses.values = [0.3, 0.4]
-
-        # Save metrics
-        filepath = tmp_path / "test_metrics.pt"
-        metrics.save(filepath)
-
-        # Check if the file exists
-        assert filepath.exists()
-
-        # Load the saved data and verify
-        data = torch.load(filepath)
-        assert data["ep_rewards"] == [1.0, 2.0]
-        assert data["ep_lengths"] == [10, 20]
-        assert data["critic_losses"] == [0.1, 0.2]
-        assert data["actor_losses"] == [0.3, 0.4]
-
-    def test_attributes(self, metrics: TrainMetrics):
-        assert metrics.ep_rewards is metrics.storage.ep_rewards.values
-        assert metrics.ep_lengths is metrics.storage.ep_lengths.values
-        assert metrics.critic_losses is metrics.storage.critic_losses.values
-        assert metrics.actor_losses is metrics.storage.actor_losses.values
-
-    def test_repr(self, metrics: TrainMetrics):
-        assert (
-            repr(metrics) == "TrainMetrics(window_size=50, n_episodes=100, n_stored=0)"
+        # Verify episode was added using select
+        statement = select(Episode).where(
+            Episode.experiment_id == experiment_id, Episode.episode_num == 5
         )
+        episodes = session.exec(statement).all()
+
+        assert len(episodes) == 1
+        episode = episodes[0]
+        assert episode.experiment_id == experiment_id
+        assert episode.episode_num == 5
+        assert episode.reward == 95.0
+        assert episode.length == 200
+        assert episode.actor_loss == 0.5
+        assert episode.critic_loss == 0.7
+
+        # Verify current losses were emptied
+        assert metrics._current_losses.critic_losses == []
+        assert metrics._current_losses.actor_losses == []
+
+        # Verify reward was added to moving metric
+        assert 95.0 in metrics._ep_rewards.values
+
+    def test_add_episode_without_experiment(self, metrics):
+        """Test adding episode metrics without first creating an experiment."""
+        # Experiment ID is None (not set)
+        with pytest.raises(RuntimeError) as excinfo:
+            metrics.add_episode(ep_idx=5, reward=95.0, n_steps=200)
+
+        assert "An experiment must be created first" in str(excinfo.value)
+
+    def test_reward_moving_avg(self, metrics):
+        """Test calculating reward moving average."""
+        # Add some rewards
+        metrics._ep_rewards.add(80.0)
+        metrics._ep_rewards.add(90.0)
+
+        # Calculate average
+        avg = metrics.reward_moving_avg()
+        assert avg == 85.0  # Average of [80.0, 90.0]
+
+    def test_reward_moving_std(self, metrics):
+        """Test calculating reward moving standard deviation."""
+        # Add some rewards
+        metrics._ep_rewards.add(80.0)
+        metrics._ep_rewards.add(90.0)
+
+        # Calculate standard deviation
+        std = metrics.reward_moving_std()
+        assert std == 5.0  # std of [80.0, 90.0]
+
+    def test_info(self, metrics, experiment):
+        """Test info method that outputs to console."""
+        # Setup
+        session, experiment_id = experiment
+        metrics.experiment_id = experiment_id
+
+        # Create a test episode first
+        episode = Episode(
+            experiment_id=experiment_id,
+            episode_num=50,
+            reward=90.0,
+            length=200,
+            reward_moving_avg=85.0,
+            reward_moving_std=5.0,
+            actor_loss=0.6,
+            critic_loss=0.7,
+        )
+        session.add(episode)
+        session.commit()
+
+        # Mock print
+        with patch("builtins.print") as mock_print:
+            # Execute
+            metrics.info(current_ep=50)
+
+            # Verify print was called
+            mock_print.assert_called_once()
+
+            # Check the print message format
+            print_args = mock_print.call_args[0][0]
+            assert "Episode: 50/100" in print_args
+            assert "Avg Reward: 85.00" in print_args
+            assert "Critic Loss: 0.70" in print_args
+            assert "Actor Loss: 0.60" in print_args

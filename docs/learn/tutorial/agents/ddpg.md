@@ -84,7 +84,7 @@ This will train the agent with the following default parameters:
 
 - `n_episodes=1000` - for `1000` episodes.
 - `max_steps=1000` - with each episode having a maximum of `1000` steps.
-- `noise_scale=0.1` - with an action exploration noise of `0.1`.
+- `noise_scale=0.3` - with an action exploration noise of `0.3`.
 - `gamma=0.99` - a discount reward factor of `0.99`.
 - `tau=0.005` - a soft update factor of `0.005`.
 - `window_size=100` - a training progress status update every `100` episodes.

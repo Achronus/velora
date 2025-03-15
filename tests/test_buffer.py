@@ -76,7 +76,7 @@ class TestReplayBuffer:
     def sample_experience(self) -> Experience:
         return Experience(
             state=torch.tensor([1.0, 2.0]),
-            action=1.0,
+            action=torch.tensor([1.0]),
             reward=1.0,
             next_state=torch.tensor([2.0, 3.0]),
             done=False,
@@ -89,7 +89,7 @@ class TestReplayBuffer:
             replay_buffer.push(
                 Experience(
                     state=torch.tensor([float(i), float(i + 1)]),
-                    action=float(i),
+                    action=torch.tensor([i]),
                     reward=float(i * 0.5),
                     next_state=torch.tensor([float(i + 1), float(i + 2)]),
                     done=(i == 9),
@@ -178,7 +178,7 @@ class TestReplayBuffer:
 
         # Check specific values
         assert buffer_data["states"][0] == [0.0, 1.0]
-        assert buffer_data["actions"][1] == 1.0
+        assert buffer_data["actions"][1] == [1.0]
         assert buffer_data["rewards"][2] == 1.0
         assert buffer_data["next_states"][3] == [4.0, 5.0]
         assert buffer_data["dones"][9] == 1.0
@@ -271,7 +271,7 @@ class TestReplayBuffer:
         # Add another experience manually
         exp = Experience(
             state=torch.zeros(state_dim, device=device),
-            action=0.5,  # Continuous action for DDPG
+            action=torch.tensor([0.5]),
             reward=1.0,
             next_state=torch.zeros(state_dim, device=device),
             done=False,
@@ -308,7 +308,7 @@ class TestRolloutBuffer:
     def sample_experience(self) -> Experience:
         return Experience(
             state=torch.tensor([1.0, 2.0]),
-            action=1.0,
+            action=torch.tensor([1.0]),
             reward=1.0,
             next_state=torch.tensor([2.0, 3.0]),
             done=False,
@@ -321,7 +321,7 @@ class TestRolloutBuffer:
             rollout_buffer.push(
                 Experience(
                     state=torch.tensor([float(i), float(i + 1)]),
-                    action=float(i),
+                    action=torch.tensor([i]),
                     reward=float(i * 0.5),
                     next_state=torch.tensor([float(i + 1), float(i + 2)]),
                     done=(i == 2),
@@ -428,7 +428,7 @@ class TestRolloutBuffer:
 
         # Check specific values
         assert buffer_data["states"][0] == [0.0, 1.0]
-        assert buffer_data["actions"][1] == 1.0
+        assert buffer_data["actions"][1] == [1.0]
         assert buffer_data["rewards"][2] == 1.0
         assert buffer_data["next_states"][1] == [2.0, 3.0]
         assert buffer_data["dones"][2] == 1.0
@@ -537,7 +537,7 @@ class TestRolloutBuffer:
             buffer.push(
                 Experience(
                     state=torch.tensor([float(i), float(i + 1)]),
-                    action=float(i),
+                    action=torch.tensor([i]),
                     reward=float(i * 0.5),
                     next_state=torch.tensor([float(i + 1), float(i + 2)]),
                     done=(i == 2),
@@ -559,7 +559,7 @@ class TestRolloutBuffer:
             loaded_buffer.push(
                 Experience(
                     state=torch.tensor([10.0, 11.0]),
-                    action=10.0,
+                    action=torch.tensor([10.0]),
                     reward=5.0,
                     next_state=torch.tensor([11.0, 12.0]),
                     done=False,
@@ -572,7 +572,7 @@ class TestRolloutBuffer:
             loaded_buffer.push(
                 Experience(
                     state=torch.tensor([11.0, 12.0]),
-                    action=11.0,
+                    action=torch.tensor([11.0]),
                     reward=5.5,
                     next_state=torch.tensor([12.0, 13.0]),
                     done=True,
@@ -586,7 +586,7 @@ class TestRolloutBuffer:
                 loaded_buffer.push(
                     Experience(
                         state=torch.tensor([12.0, 13.0]),
-                        action=12.0,
+                        action=torch.tensor([12.0]),
                         reward=6.0,
                         next_state=torch.tensor([13.0, 14.0]),
                         done=False,

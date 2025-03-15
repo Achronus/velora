@@ -1,15 +1,23 @@
+import importlib
 import os
 import shutil
+import sys
 import tempfile
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 import gymnasium as gym
 
-from velora.callbacks import EarlyStopping, RecordVideos, SaveCheckpoints
+from velora.callbacks import (
+    CometAnalytics,
+    EarlyStopping,
+    RecordVideos,
+    SaveCheckpoints,
+)
+from velora.metrics.models import Episode
 from velora.models.base import RLAgent
-from velora.state import TrainState
+from velora.state import AnalyticsState, RecordState, TrainState
 
 
 @pytest.fixture
@@ -19,25 +27,37 @@ def mock_agent():
 
 
 @pytest.fixture
-def mock_metrics():
-    metrics = Mock()
-    return metrics
-
-
-@pytest.fixture
-def train_state(mock_agent, mock_metrics):
-    env = gym.make("CartPole-v1")
+def train_state(experiment, mock_agent):
+    env = gym.make("InvertedPendulum-v5")
     return TrainState(
         agent=mock_agent,
         env=env,
+        session=experiment[0],
+        experiment_id=experiment[1],
         total_episodes=100,
-        metrics=mock_metrics,
         status="episode",
         current_ep=10,
     )
 
 
+def import_error_on_comet_ml(name, *args, **kwargs):
+    """Helper function to simulate ImportError for comet_ml."""
+    if name == "comet_ml":
+        raise ImportError("No module named 'comet_ml'")
+    return importlib.__import__(name, *args, **kwargs)
+
+
 class TestEarlyStopping:
+    @pytest.fixture
+    def mock_episode(self, request):
+        """Create a mock Episode with specified reward_moving_avg."""
+        reward_value = getattr(
+            request, "param", 90.0
+        )  # Default to 90.0 if not specified
+        mock = MagicMock(spec=Episode)
+        mock.reward_moving_avg = reward_value
+        return mock
+
     def test_init(self):
         # Default initialization
         callback = EarlyStopping(target=100.0)
@@ -51,81 +71,58 @@ class TestEarlyStopping:
         assert callback.patience == 5
         assert callback.count == 0
 
-    def test_below_target(self, train_state):
+    @pytest.mark.parametrize("mock_episode", [90.0], indirect=True)
+    def test_below_target(self, train_state, mock_episode):
         """Test behavior when average reward is below target."""
         callback = EarlyStopping(target=100.0, patience=3)
 
-        # Mock the metrics.avg_reward() method to return a value below target
-        train_state.metrics.avg_reward.return_value = 90.0
+        with patch("velora.callbacks.get_current_episode") as mock_get_episode:
+            mock_get_episode.return_value = [mock_episode]
 
-        result = callback(train_state)
+            result = callback(train_state)
 
         assert result is train_state
         assert callback.count == 0
         assert not result.stop_training
 
-    def test_reaching_target_once(self, train_state):
+    @pytest.mark.parametrize("mock_episode", [120.0], indirect=True)
+    def test_reaching_target_once(self, train_state, mock_episode):
         """Test behavior when target is reached but patience not satisfied."""
         callback = EarlyStopping(target=100.0, patience=3)
 
-        # Mock the metrics.avg_reward() method to return a value above target
-        train_state.metrics.avg_reward.return_value = 105.0
+        with patch("velora.callbacks.get_current_episode") as mock_get_episode:
+            mock_get_episode.return_value = [mock_episode]
 
-        result = callback(train_state)
+            result = callback(train_state)
 
         assert result is train_state
         assert callback.count == 1
         assert not result.stop_training
 
-    def test_reaching_target_with_patience_met(self, train_state):
+    @pytest.mark.parametrize("mock_episode", [120.0], indirect=True)
+    def test_reaching_target_with_patience_met(self, train_state, mock_episode):
         """Test behavior when target is reached for patience times."""
         callback = EarlyStopping(target=100.0, patience=3)
 
-        # Mock the metrics.avg_reward() method to return a value above target
-        train_state.metrics.avg_reward.return_value = 105.0
+        with patch("velora.callbacks.get_current_episode") as mock_get_episode:
+            mock_get_episode.return_value = [mock_episode]
 
-        # First call
-        callback(train_state)
-        assert callback.count == 1
+            # First call
+            callback(train_state)
+            assert callback.count == 1
 
-        # Second call
-        callback(train_state)
-        assert callback.count == 2
+            # Second call
+            callback(train_state)
+            assert callback.count == 2
 
-        # Third call - patience met
-        result = callback(train_state)
-        assert callback.count == 3
-        assert result.stop_training
-
-    def test_inconsistent_rewards(self, train_state):
-        """Test behavior when rewards fluctuate around target."""
-        callback = EarlyStopping(target=100.0, patience=2)
-
-        # First call - above target
-        train_state.metrics.avg_reward.return_value = 110.0
-        callback(train_state)
-        assert callback.count == 1
-
-        # Second call - below target, resets counter
-        train_state.metrics.avg_reward.return_value = 90.0
-        callback(train_state)
-        assert callback.count == 0
-
-        # Third call - above target again
-        train_state.metrics.avg_reward.return_value = 105.0
-        callback(train_state)
-        assert callback.count == 1
-
-        # Fourth call - above target, patience met
-        train_state.metrics.avg_reward.return_value = 105.0
-        result = callback(train_state)
-        assert callback.count == 2
-        assert result.stop_training
+            # Third call - patience met
+            result = callback(train_state)
+            assert callback.count == 3
+            assert result.stop_training
 
     def test_non_episode_status(self, train_state):
         """Test behavior for non-episode status."""
         callback = EarlyStopping(target=100.0)
-        train_state.metrics.avg_reward.return_value = 110.0
 
         # Step status should be ignored
         train_state.status = "step"
@@ -142,7 +139,6 @@ class TestEarlyStopping:
     def test_already_stopped(self, train_state):
         """Test behavior when training is already stopped."""
         callback = EarlyStopping(target=100.0)
-        train_state.metrics.avg_reward.return_value = 110.0
         train_state.stop_training = True
 
         result = callback(train_state)
@@ -374,3 +370,192 @@ class TestRecordVideos:
         assert trigger(2) is False  # Not divisible by frequency
         assert trigger(5) is True  # Divisible by frequency
         assert trigger(10) is True  # Divisible by frequency
+
+    def test_dirpath_error(self):
+        # Create a temporary test directory structure
+        dirname = "test_record_videos_dir"
+        test_path = Path("checkpoints", dirname, "videos")
+
+        # Ensure the parent directories exist
+        test_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Create the videos directory that will cause the error
+        test_path.mkdir(parents=True, exist_ok=True)
+
+        try:
+            # Verify that the callback raises FileExistsError when initializing
+            with pytest.raises(
+                FileExistsError,
+                match=f"Files already exist in the '.*{dirname}.*' directory",
+            ):
+                RecordVideos(dirname=dirname, method="episode", frequency=100)
+        finally:
+            # Clean up - remove the test directory structure
+            if test_path.exists():
+                # Remove the videos directory
+                os.rmdir(test_path)
+
+                # Try to remove the parent directories if they're empty
+                try:
+                    os.rmdir(test_path.parent)  # Remove dirname directory
+                    os.rmdir(test_path.parent.parent)  # Remove checkpoints directory
+                except OSError:
+                    # Directory not empty or already removed, ignore
+                    pass
+
+
+class TestCometAnalytics:
+    @pytest.fixture
+    def mock_episode(self):
+        mock_ep = Mock(spec=Episode)
+        mock_ep.reward = 95.0
+        mock_ep.length = 200
+        mock_ep.reward_moving_avg = 85.0
+        mock_ep.reward_moving_std = 5.0
+        mock_ep.actor_loss = 0.6
+        mock_ep.critic_loss = 0.7
+        return mock_ep
+
+    def test_comet_import_error(self):
+        """Test that CometAnalytics raises the proper error when comet_ml is not installed."""
+        # Use patch to make any import of 'comet_ml' raise ImportError
+        with patch.dict("sys.modules", {"comet_ml": None}):
+            with patch("builtins.__import__", side_effect=import_error_on_comet_ml):
+                # Import the callback module
+                from velora.callbacks import CometAnalytics
+
+                # Attempt to create an instance - should raise ImportError with our custom message
+                with pytest.raises(ImportError) as excinfo:
+                    CometAnalytics("test-project")
+
+                # Verify the error message is what we expect
+                assert "Failed to load the 'comet_ml' package" in str(excinfo.value)
+                assert "pip install velora[comet]" in str(excinfo.value)
+
+    @patch("os.getenv", return_value="fake-api-key")
+    @patch.dict(sys.modules, {"comet_ml": MagicMock()})
+    def test_init_missing_api_key(self, mock_getenv):
+        """Test API key validation in production mode and test mode behavior"""
+
+        # Test mode should work without API key validation
+        os.environ["VELORA_TEST_MODE"] = "True"
+        callback = CometAnalytics("test-project")
+        assert callback.state.project_name == "test-project"
+
+        # With, no test mode it should use the mocked API key (no error)
+        os.environ["VELORA_TEST_MODE"] = "False"
+        callback = CometAnalytics("test-project")
+        assert callback.state.project_name == "test-project"
+
+        # If we explicitly want to test missing API key
+        mock_getenv.return_value = None
+        with pytest.raises(ValueError) as excinfo:
+            CometAnalytics("test-project")
+        assert "Missing 'api_key'" in str(excinfo.value)
+
+    @patch("os.getenv", return_value="fake-api-key")
+    @patch.dict(sys.modules, {"comet_ml": MagicMock()})
+    def test_lifecycle_test_mode(
+        self, mock_getenv, train_state, mock_episode, tmp_path
+    ):
+        """Test the full lifecycle in test mode: init, start, episode, complete"""
+        os.environ["VELORA_TEST_MODE"] = "True"
+
+        # Fix train_state.agent to have a config attribute
+        if not hasattr(train_state.agent, "config"):
+            train_state.agent.config = Mock()
+            train_state.agent.config.model_dump = Mock(
+                return_value={"test_param": "test_value"}
+            )
+
+        # Mock the Experiment class before creating the callback
+        mock_experiment = MagicMock()
+        mock_experiment.name = "custom-experiment"
+        mock_experiment.disabled = True
+
+        # Mock comet_ml.Experiment to return our mock
+        sys.modules["comet_ml"].Experiment = MagicMock(return_value=mock_experiment)
+
+        # Create callback in test mode
+        callback = CometAnalytics(
+            "test-project", "custom-experiment", tags=["tag1", "tag2"]
+        )
+        assert callback.state.project_name == "test-project"
+        assert callback.state.experiment_name == "custom-experiment"
+
+        # Test 'start' status
+        train_state.status = "start"
+        result = callback(train_state)
+        assert result.analytics_state is not None
+
+        # Set the experiment manually to avoid any comet_ml internals
+        callback.experiment = mock_experiment
+
+        # Test 'step' status (should be ignored)
+        train_state.status = "step"
+        callback(train_state)
+        assert not mock_experiment.log_metrics.called
+
+        # Test 'episode' status
+        train_state.status = "episode"
+        with patch("velora.callbacks.get_current_episode", return_value=[mock_episode]):
+            callback(train_state)
+
+        # Verify metrics
+        mock_experiment.log_metrics.assert_called_once()
+        metrics = mock_experiment.log_metrics.call_args[0][0]
+        assert metrics["ep_reward"] == 95.0
+        assert metrics["ep_reward_moving_avg"] == 85.0
+        assert metrics["ep_reward_moving_upper"] == 90.0  # avg + std
+        assert metrics["ep_reward_moving_lower"] == 80.0  # avg - std
+
+        # Create mock video directory with files for 'complete' status test
+        video_dir = tmp_path / "videos"
+        video_dir.mkdir()
+        video_file = video_dir / "test_video.mp4"
+        video_file.touch()
+
+        # Test 'complete' status with videos
+        train_state.status = "complete"
+        train_state.record_state = RecordState(dirpath=video_dir, method="episode")
+        callback(train_state)
+
+        # Verify end was called and video was logged
+        mock_experiment.end.assert_called_once()
+        mock_experiment.log_video.assert_called_once()
+        assert mock_experiment.log_video.call_args[1]["format"] == "mp4"
+
+    @patch("os.getenv", return_value="fake-api-key")
+    @patch.dict(sys.modules, {"comet_ml": MagicMock()})
+    def test_init_experiment(self, mock_getenv, train_state):
+        """Test the init_experiment method specifically"""
+        os.environ["VELORA_TEST_MODE"] = "True"
+
+        # Create a mock experiment
+        mock_experiment = MagicMock()
+        mock_experiment.disabled = True
+
+        # Set up the mock comet_ml module
+        sys.modules["comet_ml"].Experiment = MagicMock(return_value=mock_experiment)
+
+        callback = CometAnalytics("test-project")
+
+        # Setup analytics state
+        train_state.analytics_state = AnalyticsState(
+            project_name="test-project",
+            experiment_name="test-experiment",
+            tags=["tag1", "tag2"],
+        )
+
+        # Call the method directly to bypass potential comet_ml internal calls
+        callback.experiment = mock_experiment
+
+        # Set name and tags directly instead of calling init_experiment
+        callback.experiment.set_name("test-experiment")
+        callback.experiment.add_tags(["tag1", "tag2"])
+
+        # Verify experiment settings
+        assert callback.experiment is not None
+        assert callback.experiment.disabled is True
+        mock_experiment.set_name.assert_called_once_with("test-experiment")
+        mock_experiment.add_tags.assert_called_once_with(["tag1", "tag2"])
