@@ -1,86 +1,132 @@
 # Working with Training Metrics
 
-???+ api "API Docs"
-
-    [`velora.training.TrainMetrics`](../reference/training.md#velora.training.TrainMetrics)
-
 Understanding how your agent is learning is extremely important for figuring out how to optimize its performance and also fix it when it's broken.
 
-To do this offline, we use a *utility* class called `TrainMetrics` that is returned after an agent has completed it's training cycle using the `train()` method.
+To do this offline, we use a [SQLite [:material-arrow-right-bottom:]](https://www.sqlite.org/) database for storing our metrics called `metrics.db`.
 
-???+ warning "Metrics are a one time use unless you manually save them"
+## What's Inside It?
 
-    Normally, agents are trained for thousands of episodes and saving metrics can take up a lot of storage space. So, we **DO NOT** save the metrics internally inside the agent even if it takes *days* or *weeks* to train it.
+We've split the database into three main tables:
 
-    If you want to access them again, you will need to manually save them using the [`save()`](#saving-metrics) method.
+- [`experiment`](#experiments) - for tracking basic information about your experiment.
+- [`episode`](#episodes) - for storing episode metrics.
+- [`step`](#timesteps) - for storing timestep data for each episode.
 
-    ❗ We highly recommend you use a cloud-based solution instead (see the [Analytics Callbacks](../tutorial/callback.md#analytics) section) but understand that it's not for everyone. 
-
-## Storage
-
-The most notable feature of the `TrainMetrics` class is the `storage` attribute.
-
-This contains unique storage containers for each of the episodic statistics as `MovingMetric` dataclasses. We use these to calculate the moving averages in real-time using a window size for the `mean` and `std`.
-
-Typically, you won't use this yourself. Instead, you'll want to pull the episodic values using the respective `attributes`.
-
-These include:
-
-- `ep_rewards` - a `List[float]` of episode rewards.
-- `ep_lengths` - a `List[int]` of the number of steps taken per episode.
-- `actor_losses` - a `List[float]` of Actor loss values.
-- `critic_losses` - a `List[float]` of Critic loss values.
-
-```python
-from velora.models import [model]
-
-import gymnasium as gym
-
-env = # ...
-model = # ...
-
-metrics = model.train(env, 128)
-
-metrics.ep_rewards  # [10., 2., 6., 8., 9.]
-metrics.ep_lengths  # [20, 10, 30, 40, 12]
-```
-
-## Saving Metrics
+### Experiments
 
 ???+ api "API Docs"
 
-    [`velora.training.TrainMetrics.save(filepath)`](../reference/training.md#velora.training.TrainMetrics.save)
+    [`velora.metrics.Experiment`](../reference/metrics.md#velora.metrics.Experiment)
 
-Manually saving the metrics is really easy. We just use the `save()` method with a given `filepath`! 😊
+The `experiment` table is the simplest and is primarily used to maintain an `id` for different experiments. It stores the following details:
 
-```python
-metrics.save('metrics/my_metrics.pt')
-```
+- `id` - a unique identifier for each experiment.
+- `agent` - the class name of the agent used.
+- `env` - the name of the environment used during training.
+- `config` - the agent's configuration details stored in a JSON format (the same one when saving a model!).
+- `created_at` - the time and date when the experiment was created.
 
-## Loading Metrics
+### Episodes
 
 ???+ api "API Docs"
 
-    [`velora.training.SimpleMetricStorage.load(filepath)`](../reference/training.md#velora.training.SimpleMetricStorage.load)
+    [`velora.metrics.Episode`](../reference/metrics.md#velora.metrics.Episode)
 
-Loading metrics is also easy, but instead of using the `TrainMetrics` class, we use the `SimpleMetricStorage` class instead.
+The `episode` table stores the metrics for each training episode. It's the most comprehensive table of the three and stores the following details:
+
+- `id` - a unique identifier for the episode.
+- `experiment_id` - the experiment ID associated to the episode.
+- `episode_num` - the episode index.
+- `reward` - the episodic reward (return).
+- `length` - the number of timesteps performed to terminate the episode.
+- `reward_moving_avg` - the episodes reward moving average based on the training `window_size`.
+- `reward_moving_std` - the episodes reward moving standard deviation based on the training `window_size`.
+- `actor_loss` - the average Actor loss for the episode.
+- `critic_loss` - the average Critic loss for the episode.
+- `created_at` - the date and time when the the entry was created.
+
+### Timesteps
+
+???+ api "API Docs"
+
+    [`velora.metrics.Step`](../reference/metrics.md#velora.metrics.Step)
+
+The `step` table stores the metrics for each training timestep.
+
+One episode could have thousands of timesteps, so we've restricted the metrics stored to ones that help us compute `episode` averages. The table contains the following details:
+
+- `id` - a unique identifier for the timestep.
+- `experiment_id` - the experiment ID associated to the timestep.
+- `episode_id` - the episode ID associated to the timestep.
+- `step_num` - the timestep index.
+- `action` - a JSON string for the agent's action taken at the timestep.
+- `actor_loss` - the average Actor loss for the timestep.
+- `critic_loss` - the average Critic loss for the timestep.
+- `created_at` - the date and time when the the entry was created.
+
+## Exploring the Database
+
+Once you've run a training instance with an agent's `train()` method, the database will automatically store the above metrics. You can then freely access them for your own analysis whenever you want! 😊
+
+If you want to quickly explore the database, we recommend you use [DB Browser [:material-arrow-right-bottom:]](https://sqlitebrowser.org/). It's GUI interface is extremely useful for quickly checking the stored data and running SQL queries.
+
+## Interacting With It
+
+To get data out of the database and use it in your projects we can use a helper method to quickly get the `engine` and then build a session.
+
+We use [SQLModel [:material-arrow-right-bottom:]](https://sqlmodel.tiangolo.com/) under the hood, so we can interact with our database tables [Pydantic [:material-arrow-right-bottom:]](https://docs.pydantic.dev/latest/) model style! 😍
+
+We can use a `Session` as a context manager (recommended):
 
 ```python
-from velora.training import SimpleMetricStorage
+from velora.metrics import get_db_engine, Episode
+from sqlmodel import Session, select
 
-metrics = SimpleMetricStorage.load('metrics/my_metrics.pt')
+engine = get_db_engine()
 
-metrics.ep_rewards  # [10., 2., 6., 8., 9.]
-metrics.ep_lengths  # [20, 10, 30, 40, 12]
+# Create a new session
+with Session(engine) as session:
+    # Get some data
+    statement = select(Episode).where(
+        Episode.experiment_id == 1
+    )
+    results = session.exec(statement)
+
+    # Return specific elements
+    for episode in results:
+        print(episode.reward, episode.length)
 ```
 
-??? question "Why a different container?"
+This code should work 'as is'.
 
-    The `TrainMetrics.storage` container uses attributes as `MovingMetric` dataclasses. These are used for real-time calculations and are not needed in offline settings, so a lot of the functionality is redundant when loading a set of saved metrics.
+Or, as an instance:
 
-    To reduce the memory footprint, we use a lightweight and simplified storage container that only has `attributes` and a `load` method. 
+```python
+from velora.metrics import get_db_engine, Episode
+from sqlmodel import Session, select
 
-It includes all the same `attributes` mentioned in the [Storage](#storage) section just in a lightweight storage container.
+engine = get_db_engine()
+
+# Create a new session
+session = Session(engine)
+
+# Get some data
+statement = select(Episode).where(
+    Episode.experiment_id == 1
+)
+results = session.exec(statement)
+
+# Return specific elements
+for episode in results:
+    print(episode.reward, episode.length)
+
+# Close the session
+session.close()
+```
+
+This code should work 'as is'.
+
+We highly recommend you read the [SQLModel [:material-arrow-right-bottom:]](https://sqlmodel.tiangolo.com/) documentation for more details.
 
 ---
 

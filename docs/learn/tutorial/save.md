@@ -24,7 +24,7 @@ device = set_device()
 env = gym.make("InvertedPendulum-v5")
 
 model = LiquidDDPG(4, 10, 1, device=device)
-metrics = model.train(env, 128, n_episodes=100)
+model.train(env, 128, n_episodes=100)
 
 model.save('checkpoints/ddpg/saves/InvertedPendulum_final.pt')
 ```

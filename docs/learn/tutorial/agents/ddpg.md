@@ -75,7 +75,7 @@ BATCH_SIZE = 128
 env = gym.make("InvertedPendulum-v5")
 
 model = LiquidDDPG(4, 10, 1, device=device)
-metrics = model.train(env, BATCH_SIZE)
+model.train(env, BATCH_SIZE)
 ```
 
 This code should work 'as is'.
@@ -90,8 +90,6 @@ This will train the agent with the following default parameters:
 - `window_size=100` - a training progress status update every `100` episodes.
 
 Like before, you can customize these freely using the required parameter name.
-
-This will return a `List[float]` rewards for every episode. We'll be changing this in the next release to something more useful! 😉
 
 ## Making a Prediction
 
@@ -136,7 +134,7 @@ env = gym.make("InvertedPendulum-v5", render_mode='rgb_array')
 env = add_core_env_wrappers(env, device=device)
 
 model = LiquidDDPG(4, 10, 1, device=device)
-metrics = model.train(env, 128, n_episodes=100)
+model.train(env, 128, n_episodes=100)
 
 state, _ = env.reset()
 

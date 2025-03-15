@@ -82,6 +82,7 @@ These are items that go beyond the beta release (building on them) that are mand
 
     ---
 
+    - [ ] More metrics for explainability
     - [ ] [Prioritized Experience Replay](https://arxiv.org/abs/1511.05952) - 2016
     - [ ] [Curiosity](https://arxiv.org/abs/1705.05363) - 2017
     - [ ] [HER](https://arxiv.org/abs/1707.01495) - 2018

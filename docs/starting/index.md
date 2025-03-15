@@ -62,7 +62,7 @@ model = LiquidDDPG(
     buffer_size=buffer_size,
     device=device,
 )
-metrics = model.train(env, batch_size, n_episodes=300)
+model.train(env, batch_size, n_episodes=300)
 ```
 
 This code should work 'as is'.

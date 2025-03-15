@@ -65,7 +65,7 @@ import gymnasium as gym
 env = gym.make('InvertedPendulum-v5')
 
 model = LiquidDDPG(4, 10, 1)
-metrics = model.train(env, 128)
+model.train(env, 128)
 ```
 
 This code should work 'as is'.
@@ -73,14 +73,18 @@ This code should work 'as is'.
 Want to change the number of episodes? Use the `n_episodes` parameter! What about the episodic training status rate? Use the `window_size` parameter!
 
 ```python
-metrics = model.train(env, 128, n_episodes=10_000, window_size=1000)
+model.train(env, 128, n_episodes=10_000, window_size=1000)
 ```
 
 These are two core optional parameters for the `train()` method, with the addition of [`callbacks`](../tutorial/callback.md) but we'll talk about them later.
 
-Each agent has it's own set of hyperparameters for the `train` method that are unique to it. We'll cover this in more detail later in the [`Agents`](../tutorial/agents/index.md) documentation section.
+Each agent has it's own set of unique hyperparameters for it's `train()` method. They vary depending on the algorithm, so we'll leave this for a later section! 😉
 
-Like before, want to use a different agent? Just swap it out!
+??? tip "Want to Look Now?"
+
+    Refer to the 👉 [Agents section](../tutorial/agents/index.md).
+
+Like before, need a different agent? Just swap it out!
 
 ```python
 from velora.models import LiquidPPO
@@ -89,21 +93,14 @@ import gymnasium as gym
 env = gym.make('InvertedPendulum-v5')
 
 model = LiquidPPO(4, 10, 1)
-metrics = model.train(env, 128)
+model.train(env, 128)
 ```
 
-The `train()` method will always return a [`TrainMetrics`](../reference/training.md#velora.training.TrainMetrics) object. This contains useful information that can be plotted to visualize the whole training process.
+The `train()` method will create a [SQLite [:material-arrow-right-bottom:]](https://www.sqlite.org/) database called `metrics.db` in your local directory. This contains useful metrics that can be plotted to visualize the whole training process. How you use them is up to you!
 
-It's `storage` attribute includes the following episodic statistics:
+We personally use and recommend a cloud-based solution (see the [Analytics Callbacks](../tutorial/callback.md#analytics) section) which uses these metrics automatically.
 
-- `ep_rewards` - a `List[float]` of episode rewards.
-- `ep_lengths` - a `List[int]` of the number of steps taken per episode.
-- `actor_losses` - a `List[float]` of Actor loss values.
-- `critic_losses` - a `List[float]` of Critic loss values.
-
-How you use them is up to you! We personally use and recommend a cloud-based solution (see the [Analytics Callbacks](../tutorial/callback.md#analytics) section) which uses these metrics automatically.
-
-However, we've included them just in case you want to use your own offline method instead! 😉 We'll talk more about these metrics later in the [Training Metrics](../tutorial/metrics.md) section.
+However, we've included this offline method separately just in case you prefer it! 😉 We'll talk more about these metrics later in the [Training Metrics](../tutorial/metrics.md) section.
 
 ## Making Predictions
 
