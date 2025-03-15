@@ -37,13 +37,7 @@ RUN uv pip install --no-cache-dir --system \
 ## ------------------------------- Test Stage ------------------------------ ##
 FROM python:3.12-slim-bookworm AS production
 
-RUN useradd --create-home appuser
-USER appuser
-
 WORKDIR /app
-
-# Set working directory permissions to ensure GitHub Actions can write to it
-RUN chmod -R 777 /app
 
 # Copy installed packages from builder
 COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages

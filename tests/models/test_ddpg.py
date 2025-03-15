@@ -415,65 +415,40 @@ class TestLiquidDDPG:
                     )
                     mock_get_episode.return_value = [mock_episode]
 
-                    # Patch record statistics to return episode info
-                    with patch(
-                        "gymnasium.wrappers.RecordEpisodeStatistics.__call__"
-                    ) as mock_record_ep:
-                        # Mock episode return with high reward
-                        mock_info = {
-                            "episode": {
-                                "r": torch.tensor(1500.0),
-                                "l": torch.tensor(50),
-                            }
-                        }
-                        mock_record_ep.return_value = (
+                    # Mock predict to return tensors with correct shapes
+                    with patch.object(ddpg, "predict") as mock_predict:
+                        mock_predict.return_value = (
+                            torch.zeros(ddpg.action_dim, device=ddpg.device),  # action
                             torch.zeros(
-                                ddpg.state_dim, device=ddpg.device
-                            ),  # next_state
-                            10.0,  # reward
-                            True,  # terminated - make True to end episodes quickly
-                            False,  # truncated
-                            mock_info,  # info
+                                (1, ddpg.n_neurons + ddpg.action_dim),
+                                device=ddpg.device,
+                            ),  # hidden state with correct shape
                         )
 
-                        # Mock predict to return tensors with correct shapes
-                        with patch.object(ddpg, "predict") as mock_predict:
-                            mock_predict.return_value = (
-                                torch.zeros(
-                                    ddpg.action_dim, device=ddpg.device
-                                ),  # action
-                                torch.zeros(
-                                    (1, ddpg.n_neurons + ddpg.action_dim),
-                                    device=ddpg.device,
-                                ),  # hidden state with correct shape
-                            )
+                        # Mock buffer.push to prevent storing experiences
+                        with (
+                            patch.object(ddpg.buffer, "push"),
+                            patch.object(ddpg.buffer, "warm"),
+                        ):
+                            # Mock _train_step to avoid network operations
+                            with patch.object(ddpg, "_train_step") as mock_train_step:
+                                mock_train_step.return_value = (
+                                    0.1,
+                                    0.2,
+                                )  # Return mock losses
 
-                            # Mock buffer.push to prevent storing experiences
-                            with (
-                                patch.object(ddpg.buffer, "push"),
-                                patch.object(ddpg.buffer, "warm"),
-                            ):
-                                # Mock _train_step to avoid network operations
-                                with patch.object(
-                                    ddpg, "_train_step"
-                                ) as mock_train_step:
-                                    mock_train_step.return_value = (
-                                        0.1,
-                                        0.2,
-                                    )  # Return mock losses
-
-                                    # Run training with reduced episodes for faster testing
-                                    ddpg.train(
-                                        env,
-                                        batch_size=32,
-                                        n_episodes=3,
-                                        callbacks=callbacks,
-                                        max_steps=100,
-                                        noise_scale=0.3,
-                                        gamma=0.99,
-                                        tau=0.005,
-                                        window_size=1,
-                                    )
+                                # Run training with reduced episodes for faster testing
+                                ddpg.train(
+                                    env,
+                                    batch_size=32,
+                                    n_episodes=3,
+                                    callbacks=callbacks,
+                                    max_steps=100,
+                                    noise_scale=0.3,
+                                    gamma=0.99,
+                                    tau=0.005,
+                                    window_size=1,
+                                )
 
                     # Verify experiment was created and configured
                     assert mock_experiment.set_name.call_count == 1
