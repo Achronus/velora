@@ -431,11 +431,7 @@ class LiquidDDPG(RLAgent):
             if noise_scale > 0:
                 # Exploration noise
                 noise = self.noise.sample() * noise_scale
-                action = torch.clamp(
-                    action + noise,
-                    min=max(action.min().item(), -1),
-                    max=min(action.max().item(), 1),
-                )
+                action = torch.clamp(action + noise, min=-1, max=1)
 
         self.actor.train()
         return action.flatten(), hidden

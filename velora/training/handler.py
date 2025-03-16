@@ -116,7 +116,7 @@ class TrainHandler:
                 occurred. `None` otherwise
         """
         self.record_last_episode()
-        self.save_plots()
+        # self.save_plots()
 
         self.complete()
 
