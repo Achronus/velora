@@ -58,6 +58,42 @@ class TestEarlyStopping:
         mock.reward_moving_avg = reward_value
         return mock
 
+    def create_test_episode(
+        self, session, experiment_id, episode_num, reward
+    ) -> Episode:
+        """
+        Helper method to create a test episode in the database.
+        """
+        episode = Episode(
+            experiment_id=experiment_id,
+            episode_num=episode_num,
+            reward=reward,
+            length=100,
+            reward_moving_avg=reward,  # Use same value for simplicity
+            reward_moving_std=10.0,
+            actor_loss=0.5,
+            critic_loss=0.5,
+        )
+        session.add(episode)
+        session.commit()
+        return episode
+
+    def setup_train_state_with_episode(
+        self, train_state, experiment, reward
+    ) -> TrainState:
+        """
+        Helper method to set up train_state with an episode in the database.
+        """
+        session, experiment_id = experiment
+        train_state.session = session
+        train_state.experiment_id = experiment_id
+        train_state.status = "episode"
+
+        # Create a test episode
+        self.create_test_episode(session, experiment_id, train_state.current_ep, reward)
+
+        return train_state
+
     def test_init(self):
         # Default initialization
         callback = EarlyStopping(target=100.0)
@@ -71,54 +107,78 @@ class TestEarlyStopping:
         assert callback.patience == 5
         assert callback.count == 0
 
-    @pytest.mark.parametrize("mock_episode", [90.0], indirect=True)
-    def test_below_target(self, train_state, mock_episode):
+    def test_below_target(self, train_state, experiment):
         """Test behavior when average reward is below target."""
+        train_state = self.setup_train_state_with_episode(
+            train_state,
+            experiment,
+            90.0,
+        )
         callback = EarlyStopping(target=100.0, patience=3)
-
-        with patch("velora.callbacks.get_current_episode") as mock_get_episode:
-            mock_get_episode.return_value = [mock_episode]
-
-            result = callback(train_state)
+        result = callback(train_state)
 
         assert result is train_state
         assert callback.count == 0
         assert not result.stop_training
 
-    @pytest.mark.parametrize("mock_episode", [120.0], indirect=True)
-    def test_reaching_target_once(self, train_state, mock_episode):
+    def test_reaching_target_once(self, train_state, experiment):
         """Test behavior when target is reached but patience not satisfied."""
+        train_state = self.setup_train_state_with_episode(
+            train_state,
+            experiment,
+            120.0,
+        )
+
         callback = EarlyStopping(target=100.0, patience=3)
-
-        with patch("velora.callbacks.get_current_episode") as mock_get_episode:
-            mock_get_episode.return_value = [mock_episode]
-
-            result = callback(train_state)
+        result = callback(train_state)
 
         assert result is train_state
         assert callback.count == 1
         assert not result.stop_training
 
-    @pytest.mark.parametrize("mock_episode", [120.0], indirect=True)
-    def test_reaching_target_with_patience_met(self, train_state, mock_episode):
+    def test_reaching_target_with_patience_met(self, train_state, experiment):
         """Test behavior when target is reached for patience times."""
+        session, experiment_id = experiment
+        train_state.session = session
+        train_state.experiment_id = experiment_id
+        train_state.status = "episode"
+
         callback = EarlyStopping(target=100.0, patience=3)
 
-        with patch("velora.callbacks.get_current_episode") as mock_get_episode:
-            mock_get_episode.return_value = [mock_episode]
+        # First call with high reward
+        self.create_test_episode(
+            session,
+            experiment_id,
+            train_state.current_ep,
+            120.0,
+        )
+        result = callback(train_state)
+        assert callback.count == 1
+        assert not result.stop_training
 
-            # First call
-            callback(train_state)
-            assert callback.count == 1
+        # Second call with high reward
+        train_state.current_ep += 1
+        self.create_test_episode(
+            session,
+            experiment_id,
+            train_state.current_ep,
+            120.0,
+        )
+        result = callback(train_state)
+        assert callback.count == 2
+        assert not result.stop_training
 
-            # Second call
-            callback(train_state)
-            assert callback.count == 2
-
-            # Third call - patience met
-            result = callback(train_state)
-            assert callback.count == 3
-            assert result.stop_training
+        # Third call with high reward - patience met
+        train_state.current_ep += 1
+        self.create_test_episode(
+            session,
+            experiment_id,
+            train_state.current_ep,
+            120.0,
+        )
+        result = callback(train_state)
+        assert callback.count == 3
+        assert result.stop_training
 
     def test_non_episode_status(self, train_state):
         """Test behavior for non-episode status."""

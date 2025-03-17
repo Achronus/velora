@@ -12,8 +12,10 @@ import gymnasium as gym
 
 from velora.buffer.experience import Experience
 from velora.callbacks import CometAnalytics, EarlyStopping, SaveCheckpoints
+from velora.metrics.models import Episode
 from velora.models import LiquidNCPNetwork
 from velora.models.ddpg import DDPGActor, DDPGCritic, LiquidDDPG
+from velora.training.handler import TrainHandler
 from velora.utils.core import set_seed
 
 
@@ -401,10 +403,10 @@ class TestLiquidDDPG:
 
             try:
                 # Mock early stopping to trigger after a few episodes
-                with patch("velora.callbacks.get_current_episode") as mock_get_episode:
+                with patch("velora.metrics.db.get_current_episode") as mock_get_episode:
                     # Create a mock episode with high reward to trigger early stopping
                     mock_episode = MagicMock()
-                    mock_episode.reward_moving_avg = (
+                    mock_episode.reward = (
                         1500.0  # High enough to trigger early stopping
                     )
                     mock_get_episode.return_value = [mock_episode]
@@ -435,7 +437,7 @@ class TestLiquidDDPG:
                                 ddpg.train(
                                     env,
                                     batch_size=32,
-                                    n_episodes=3,
+                                    n_episodes=5,
                                     callbacks=callbacks,
                                     max_steps=100,
                                     noise_scale=0.3,
@@ -463,3 +465,55 @@ class TestLiquidDDPG:
                 temp_path = tmp_path / "checkpoints" / CP_DIR
                 if temp_path.exists():
                     shutil.rmtree(temp_path)
+
+    def test_early_stopping(self, ddpg: LiquidDDPG, env: gym.Env):
+        """Test that DDPG training stops early when EarlyStopping callback is triggered."""
+        early_stopping = EarlyStopping(target=100.0, patience=1)
+
+        # Mock necessary methods to avoid actual training
+        with (
+            patch.object(ddpg.buffer, "warm"),
+            patch.object(ddpg.buffer, "push"),
+            patch.object(ddpg, "_train_step", return_value=(0.1, 0.2)),
+            patch.object(
+                ddpg,
+                "predict",
+                return_value=(
+                    torch.zeros(ddpg.action_dim, device=ddpg.device),
+                    torch.zeros(
+                        (1, ddpg.n_neurons + ddpg.action_dim), device=ddpg.device
+                    ),
+                ),
+            ),
+        ):
+            # Prepare TrainHandler.episode to track episodes and add database entries
+            original_episode = TrainHandler.episode
+
+            def mock_episode(self, current_ep):
+                # Add a database entry for this episode
+                test_episode = Episode(
+                    experiment_id=self.state.experiment_id,
+                    episode_num=current_ep,
+                    reward=150.0,  # Higher than our target of 100.0
+                    length=100,
+                    reward_moving_avg=150.0,
+                    reward_moving_std=0.0,
+                    actor_loss=0.1,
+                    critic_loss=0.1,
+                )
+                self.state.session.add(test_episode)
+                self.state.session.commit()
+
+                # Call original episode method
+                original_episode(self, current_ep)
+
+            with patch.object(TrainHandler, "episode", mock_episode):
+                # Run training with the EarlyStopping callback
+                ddpg.train(
+                    env,
+                    batch_size=32,
+                    n_episodes=5,  # Set higher than our early stopping threshold
+                    callbacks=[early_stopping],
+                    max_steps=5,
+                    window_size=1,
+                )
