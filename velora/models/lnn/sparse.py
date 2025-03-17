@@ -57,6 +57,10 @@ class SparseParameter(nn.Parameter):
         else:
             super().__setattr__(name, value)
 
+    def apply_mask(self) -> None:
+        """Applies the sparsity mask to the data."""
+        self.data = self.data * self.mask.to(self.data.device)
+
 
 class SparseLinear(nn.Module):
     """A `torch.nn.Linear` layer with sparsely weighted connections."""
@@ -89,12 +93,14 @@ class SparseLinear(nn.Module):
 
         weight = torch.empty((out_features, in_features), device=device)
         self.weight = SparseParameter(weight, self.mask)
+
         if bias:
             self.bias = nn.Parameter(torch.empty(out_features, device=device))
         else:
             self.register_parameter("bias", None)
 
         self.reset_parameters()
+        self.weight.apply_mask()
 
     def reset_parameters(self) -> None:
         """

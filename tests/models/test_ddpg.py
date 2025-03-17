@@ -57,7 +57,7 @@ class TestDDPGActor:
 
         # Check output shapes
         assert actions.shape == (batch_size, actor_params["num_actions"])
-        assert hidden.shape[1] == actor.ncp.n_units
+        assert hidden.shape[1] == actor.ncp.hidden_size
 
         # Check if actions are bounded by tanh
         assert torch.all(actions >= -1) and torch.all(actions <= 1)
@@ -95,7 +95,7 @@ class TestDDPGCritic:
 
         # Check output shapes
         assert q_values.shape == (batch_size, 1)
-        assert hidden.shape[1] == critic.ncp.n_units
+        assert hidden.shape[1] == critic.ncp.hidden_size
 
 
 class TestLiquidDDPG:
@@ -468,6 +468,7 @@ class TestLiquidDDPG:
 
     def test_early_stopping(self, ddpg: LiquidDDPG, env: gym.Env):
         """Test that DDPG training stops early when EarlyStopping callback is triggered."""
+        set_seed(64)
         early_stopping = EarlyStopping(target=100.0, patience=1)
 
         # Mock necessary methods to avoid actual training

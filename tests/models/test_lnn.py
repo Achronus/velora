@@ -1,7 +1,6 @@
 from typing import Any, Literal
 import pytest
 from unittest.mock import patch
-from collections import OrderedDict
 
 import torch
 import torch.nn as nn
@@ -252,23 +251,12 @@ class TestLiquidNCPNetwork:
             == network_params["n_neurons"] + network_params["out_features"]
         )
 
-        # Check if layers are created correctly
-        assert isinstance(network.layers, OrderedDict)
-        assert list(network.layers.keys()) == ["inter", "command", "motor"]
-        assert all(
-            isinstance(layer, NCPLiquidCell) for layer in network.layers.values()
-        )
-
-        # Check sequential model
-        assert isinstance(network.ncp, nn.Sequential)
-        assert len(network.ncp) == 3
-
     def test_param_attrs(self, network: LiquidNCPNetwork):
         total = network.total_params
         active = network.active_params
 
-        assert total == 2570
-        assert active == 2220
+        assert total == 1017
+        assert active == 887
 
     def test_wiring_init(self, network: LiquidNCPNetwork):
         assert hasattr(network, "_wiring")
@@ -288,7 +276,7 @@ class TestLiquidNCPNetwork:
 
         # Check output shapes
         assert y_pred.shape == (batch_size, network_params["out_features"])
-        assert h_state.shape == (batch_size, network.n_units)
+        assert h_state.shape == (batch_size, network.hidden_size)
 
     def test_forward_single_sample(
         self, network: LiquidNCPNetwork, network_params: NetworkParamsType
@@ -299,34 +287,23 @@ class TestLiquidNCPNetwork:
 
         # For batch_size=1, y_pred should be squeezed to (out_features)
         assert y_pred.shape == (network_params["out_features"],)
-        assert h_state.shape == (1, network.n_units)
+        assert h_state.shape == (1, network.hidden_size)
 
     def test_forward_with_provided_hidden_state(
         self, network: LiquidNCPNetwork, network_params: NetworkParamsType
     ):
         batch_size = 4
         x = torch.rand(batch_size, network_params["in_features"])
-        h_state = torch.rand(batch_size, network.n_units)
+        h_state = torch.rand(batch_size, network.hidden_size)
 
         y_pred, new_h_state = network(x, h_state)
 
         # Check output shapes
         assert y_pred.shape == (batch_size, network_params["out_features"])
-        assert new_h_state.shape == (batch_size, network.n_units)
+        assert new_h_state.shape == (batch_size, network.hidden_size)
 
         # Hidden state should be updated (different from input)
         assert not torch.allclose(h_state, new_h_state)
-
-    def test_ncp_forward(self, network: LiquidNCPNetwork):
-        batch_size = 5
-        x = torch.rand(batch_size, network.in_features)
-        hidden = torch.rand(batch_size, network.n_units)
-
-        y_pred, new_h_state = network._ncp_forward(x, hidden)
-
-        # Check output shapes
-        assert y_pred.shape == (batch_size, network.out_features)
-        assert new_h_state.shape == (batch_size, network.n_units)
 
     def test_forward_invalid_dimensions(self, network: LiquidNCPNetwork):
         # 3D tensor (invalid)
@@ -368,24 +345,7 @@ class TestLiquidNCPNetwork:
 
         # Basic shape checks
         assert y_pred.shape == (batch_size, network_params["out_features"])
-        assert h_state.shape == (batch_size, network.n_units)
-
-    def test_layer_independence(self, network: LiquidNCPNetwork):
-        with patch.object(
-            network, "_ncp_forward", wraps=network._ncp_forward
-        ) as mock_ncp_forward:
-            batch_size = 2
-            x = torch.rand(batch_size, network.in_features)
-            h_state = torch.rand(batch_size, network.n_units)
-
-            network(x, h_state)
-
-            # Check if hidden state was split correctly
-            args, _ = mock_ncp_forward.call_args
-            passed_x, passed_h = args
-
-            assert torch.allclose(passed_x, x)
-            assert torch.allclose(passed_h, h_state)
+        assert h_state.shape == (batch_size, network.hidden_size)
 
 
 class TestSparseParameter:
@@ -448,6 +408,20 @@ class TestSparseParameter:
         assert param_copy[0, 0].item() == 0
         assert param_copy[0, 1].item() == 1
         assert id(param.mask) != id(param_copy.mask)
+
+    def test_apply_mask(self):
+        data = torch.ones(3, 4)
+        mask = torch.ones(3, 4)
+        mask[0, 0] = 0
+        mask[-1, -1] = 0
+
+        param = SparseParameter(data, mask)
+        param.apply_mask()
+
+        assert param.data[0, 0].item() == 0
+        assert param.data[-1, -1].item() == 0
+        assert param.mask.equal(mask)
+        assert any(param.data.not_equal(data).tolist())
 
 
 class TestSparseLinear:

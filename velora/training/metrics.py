@@ -284,6 +284,16 @@ class TrainMetrics:
         """
         return self._ep_rewards.std()
 
+    def max_moving_reward(self) -> float:
+        """
+        Calculates the highest reward for the window.
+
+        Returns:
+            max (float): the highest reward in the window.
+        """
+        values = self._ep_rewards.window
+        return max(values) if len(values) > 1 else 0.0
+
     def info(self, current_ep: int) -> None:
         """
         Outputs basic information to the console.
@@ -292,10 +302,12 @@ class TrainMetrics:
             current_ep (int): the current episode index
         """
         results = get_current_episode(self.session, self.experiment_id, current_ep)
+        window_max = self.max_moving_reward()
 
         for ep in results:
             print(
                 f"Episode: {current_ep}/{self.n_episodes}, "
+                f"Highest Reward: {window_max:.2f}, "
                 f"Avg Reward: {ep.reward_moving_avg:.2f}, "
                 f"Critic Loss: {ep.critic_loss:.2f}, "
                 f"Actor Loss: {ep.actor_loss:.2f}"

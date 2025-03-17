@@ -1,10 +1,10 @@
-from collections import OrderedDict
 from typing import Optional, Tuple
 
 import torch
 import torch.nn as nn
 
 from velora.models.lnn.cell import NCPLiquidCell
+from velora.models.lnn.sparse import SparseLinear
 from velora.utils.torch import active_parameters, total_parameters
 from velora.wiring import Wiring
 
@@ -13,11 +13,9 @@ class LiquidNCPNetwork(nn.Module):
     """
     A Liquid Neural Circuit Policy (NCP) Network with three layers:
 
-    1. Inter (input)
-    2. Command (hidden)
-    3. Motor (output)
-
-    Each layer is a `NCPLiquidCell`.
+    1. Inter (input) - a `SparseLinear` layer
+    2. Command (hidden) - a `NCPLiquidCell` layer
+    3. Motor (output) - a `SparseLinear` layer
 
     !!! note "Decision nodes"
 
@@ -70,31 +68,46 @@ class LiquidNCPNetwork(nn.Module):
         )
         self._masks, self._counts = self._wiring.data()
 
-        names = ["inter", "command", "motor"]
-        layers = [
-            NCPLiquidCell(
-                in_features,
-                self._counts.inter,
-                self._masks.inter,
-            ).to(device),
-            NCPLiquidCell(
-                self._counts.inter,
-                self._counts.command,
-                self._masks.command,
-            ).to(device),
-            NCPLiquidCell(
-                self._counts.command,
-                self._counts.motor,
-                self._masks.motor,
-            ).to(device),
-        ]
-        self.layers = OrderedDict([(name, layer) for name, layer in zip(names, layers)])
+        self.inter = SparseLinear(
+            in_features,
+            self._counts.inter,
+            torch.abs(self._masks.inter.T),
+            device=device,
+        )
 
-        self.ncp = nn.Sequential(self.layers)
-        self._out_sizes = [layer.n_hidden for layer in self.layers.values()]
+        self.command = NCPLiquidCell(
+            self._counts.inter,
+            self._counts.command,
+            self._masks.command,
+            device=device,
+        )
+        self.hidden_size = self._counts.command
 
-        self._total_params = total_parameters(self.ncp)
-        self._active_params = active_parameters(self.ncp)
+        self.motor = SparseLinear(
+            self._counts.command,
+            self._counts.motor,
+            torch.abs(self._masks.motor.T),
+            device=device,
+        )
+
+        self.relu = nn.ReLU()
+
+        self._total_params = total_parameters(self)
+        self._active_params = active_parameters(self)
+
+        # Enforce weight sparsity - required
+        def weight_sparsity_hook(
+            module: nn.Module,
+            grad_input: tuple[torch.Tensor | None, ...],
+            grad_output: tuple[torch.Tensor, ...],
+        ) -> None:
+            if hasattr(module, "weight") and hasattr(module.weight, "mask"):
+                device = module.weight.data.device
+                module.weight.data *= module.weight.mask.to(device)
+
+        for module in self.modules():
+            if isinstance(module, SparseLinear):
+                module.register_forward_hook(weight_sparsity_hook)
 
     @property
     def total_params(self) -> int:
@@ -115,40 +128,6 @@ class LiquidNCPNetwork(nn.Module):
             count (int): the active parameter count.
         """
         return self._active_params
-
-    def _ncp_forward(
-        self, x: torch.Tensor, hidden: torch.Tensor
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """
-        Performs a single timestep through the network layers.
-
-        Splits the hidden state into respective chunks for each layer
-        (`out_features`) to maintain their own independent hidden state dynamics.
-
-        Then, merges them together to create a new hidden state.
-
-        Parameters:
-            x (torch.Tensor): the current batch of data for the timestep with
-                shape: `(batch_size, features)`
-            hidden (torch.Tensor): the current hidden state
-
-        Returns:
-            y_pred (torch.Tensor): the network prediction.
-            new_h_state (torch.Tensor): the merged hidden state from all layers (updated state memory).
-        """
-        h_state = torch.split(hidden, self._out_sizes, dim=1)
-
-        new_h_state = []
-        inputs = x
-
-        # Handle layer independence
-        for i, layer in enumerate(self.layers.values()):
-            y_pred, h = layer(inputs, h_state[i])
-            inputs = y_pred  # (batch_size, layer_out_features)
-            new_h_state.append(h)
-
-        new_h_state = torch.cat(new_h_state, dim=1)  # (batch_size, n_units)
-        return y_pred, new_h_state
 
     def forward(
         self, x: torch.Tensor, h_state: Optional[torch.Tensor] = None
@@ -184,10 +163,15 @@ class LiquidNCPNetwork(nn.Module):
         batch_size, features = x.size()
 
         if h_state is None:
-            h_state = torch.zeros((batch_size, self.n_units), device=self.device)
+            h_state = torch.zeros(
+                (batch_size, self.hidden_size),
+                device=self.device,
+            )
 
         # Batch -> (batch_size, out_features)
-        y_pred, h_state = self._ncp_forward(x, h_state.to(self.device))
+        x = self.relu(self.inter(x))
+        x, h_state = self.command(x, h_state.to(self.device))
+        y_pred: torch.Tensor = self.motor(x)
 
         # Single item -> (out_features)
         if y_pred.shape[0] == 1:
