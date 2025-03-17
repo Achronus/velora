@@ -45,8 +45,7 @@ class EarlyStopping(TrainCallback):
     def __init__(self, target: float, *, patience: int = 3) -> None:
         """
         Parameters:
-            target (float): average reward target to achieve based on a models
-                `window_size`
+            target (float): episode reward target to achieve
             patience (int, optional): number of times the threshold needs
                 to be met to terminate training
         """
@@ -71,7 +70,7 @@ class EarlyStopping(TrainCallback):
             )
 
             for episode in results:
-                reward = episode.reward_moving_avg
+                reward = episode.reward
 
             if reward >= self.target:
                 self.count += 1

@@ -75,7 +75,7 @@ There are a number of `callbacks` available. Here's an exhaustive list of them:
 
     [`velora.callbacks.EarlyStopping(target, patience)`](../reference/callbacks.md#velora.callbacks.EarlyStopping)
 
-`EarlyStopping` terminates the training process when the average reward `target` is reached multiple times in a row based on the `patience` value.
+`EarlyStopping` terminates the training process when the episodic reward `target` is reached multiple times in a row based on the `patience` value.
 
 ```python
 from velora.callbacks import EarlyStopping
