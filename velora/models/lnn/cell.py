@@ -62,19 +62,6 @@ class NCPLiquidCell(nn.Module):
         # Hidden state projection
         self.proj = self._make_layer()
 
-        # Enforce weight sparsity - required
-        def weight_sparsity_hook(
-            module: SparseLinear,
-            grad_input: tuple[torch.Tensor],
-            grad_output: torch.Tensor,
-        ) -> None:
-            if hasattr(module, "weight") and hasattr(module.weight, "mask"):
-                module.weight.apply_mask()
-
-        for module in self.modules():
-            if isinstance(module, SparseLinear):
-                module.register_forward_hook(weight_sparsity_hook)
-
     def _make_layer(self) -> SparseLinear:
         """
         Helper method. Creates a new `SparseLinear` layer with the following values:

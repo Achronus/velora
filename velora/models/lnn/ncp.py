@@ -95,21 +95,10 @@ class LiquidNCPNetwork(nn.Module):
             device=device,
         ).to(device)
 
+        self.act = nn.Mish()
+
         self._total_params = total_parameters(self)
         self._active_params = active_parameters(self)
-
-        # Enforce weight sparsity - required
-        def weight_sparsity_hook(
-            module: SparseLinear,
-            grad_input: tuple[torch.Tensor],
-            grad_output: torch.Tensor,
-        ) -> None:
-            if hasattr(module, "weight") and hasattr(module.weight, "mask"):
-                module.weight.apply_mask()
-
-        for module in self.modules():
-            if isinstance(module, SparseLinear):
-                module.register_forward_hook(weight_sparsity_hook)
 
     @property
     def total_params(self) -> int:
@@ -171,9 +160,9 @@ class LiquidNCPNetwork(nn.Module):
             )
 
         # Batch -> (batch_size, out_features)
-        x = self.inter(x)
+        x = self.act(self.inter(x))
         x, h_state = self.command(x, h_state.to(self.device))
-        y_pred: torch.Tensor = self.motor(x)
+        y_pred: torch.Tensor = self.motor(self.act(x))
 
         # Single item -> (out_features)
         if y_pred.shape[0] == 1:

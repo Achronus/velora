@@ -125,6 +125,7 @@ class SparseLinear(nn.Module):
         Returns:
             y_pred (torch.Tensor): layer prediction with sparsity applied with shape `(..., out_features)`.
         """
+        self.weight.apply_mask()
         return F.linear(x, self.weight, self.bias)
 
     def extra_repr(self) -> str:
