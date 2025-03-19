@@ -110,7 +110,12 @@ class Wiring:
 
     @property
     def n_connections(self) -> SynapseCounts:
-        """Gets the `SynapseCounts` object containing neuron connection counts."""
+        """
+        Neuron connection counts.
+
+        Returns:
+            connections (SynapseCounts): object containing neuron connection counts.
+        """
         return self._n_connections
 
     def _init_masks(self, n_inputs: int) -> LayerMasks:
@@ -303,23 +308,23 @@ class Wiring:
         # Sensory -> inter
         self.masks.inter = self._build_connections(
             self.masks.inter,
-            self.counts.sensory,
+            self._n_connections.sensory,
         )
         # Inter -> command
         self.masks.command = self._build_connections(
             self.masks.command,
-            self.counts.inter,
+            self._n_connections.inter,
         )
         # Command -> motor
         self.masks.motor = self._build_connections(
             self.masks.motor,
-            self.counts.command,
+            self._n_connections.command,
         )
 
         # Command -> command
         self.masks.recurrent = self._build_recurrent_connections(
             self.masks.recurrent,
-            self.counts.command,
+            self._n_connections.command,
         )
 
     def data(self) -> Tuple[LayerMasks, NeuronCounts]:
