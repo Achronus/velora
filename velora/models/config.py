@@ -1,4 +1,4 @@
-from typing import List, Literal, Self
+from typing import Any, Dict, Literal, Self
 
 from pydantic import BaseModel
 
@@ -46,7 +46,7 @@ class TrainConfig(BaseModel):
             an action (if applicable)
         tau: the soft update factor used to slowly update the
             target networks (if applicable)
-        callbacks: a list of the names for callbacks used
+        callbacks: a dictionary of callback details
     """
 
     batch_size: int
@@ -56,7 +56,22 @@ class TrainConfig(BaseModel):
     gamma: float
     tau: float | None = None
     noise_scale: float | None = None
-    callbacks: List[str] | None = None
+    callbacks: Dict[str, Any] | None = None
+
+
+class ModuleConfig(BaseModel):
+    """
+    A config model for a module's details.
+
+    Attributes:
+        active_params: active module parameters count
+        total_params: total module parameter count
+        architecture: a summary of the module's architecture
+    """
+
+    active_params: int
+    total_params: int
+    architecture: Dict[str, Any]
 
 
 class ModelDetails(BaseModel):
@@ -71,6 +86,8 @@ class ModelDetails(BaseModel):
         target_networks: whether the agent uses target networks or not
         action_noise: the type of action noise used (if applicable).
             Default is `None`
+        actor: details about the Actor network
+        critic: details about the Critic network
     """
 
     type: Literal["actor-critic"]
@@ -79,6 +96,8 @@ class ModelDetails(BaseModel):
     action_dim: int
     target_networks: bool
     action_noise: Literal["OUNoise"] | None = None
+    actor: ModuleConfig
+    critic: ModuleConfig
 
 
 class RLAgentConfig(BaseModel):

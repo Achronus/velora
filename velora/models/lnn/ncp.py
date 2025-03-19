@@ -11,7 +11,7 @@ from velora.wiring import Wiring
 
 class LiquidNCPNetwork(nn.Module):
     """
-    A Liquid Neural Circuit Policy (NCP) Network with three layers:
+    A CfC Liquid Neural Circuit Policy (NCP) Network with three layers:
 
     1. Inter (input) - a `SparseLinear` layer
     2. Command (hidden) - a `NCPLiquidCell` layer
@@ -25,6 +25,11 @@ class LiquidNCPNetwork(nn.Module):
         command_neurons = max(int(0.4 * n_neurons), 1)
         inter_neurons = n_neurons - command_neurons
         ```
+
+    Combines a Liquid Time-Constant (LTC) cell with Ordinary Neural Circuits (ONCs). Paper references:
+
+    - [Closed-form Continuous-time Neural Models](https://arxiv.org/abs/2106.13898)
+    - [Reinforcement Learning with Ordinary Neural Circuits](https://proceedings.mlr.press/v119/hasani20a.html)
     """
 
     def __init__(
@@ -39,7 +44,7 @@ class LiquidNCPNetwork(nn.Module):
         """
         Parameters:
             in_features (int): number of inputs (sensory nodes)
-            n_neurons (int): number of decision nodes (inter and command nodes).
+            n_neurons (int): number of decision nodes (inter and command nodes)
             out_features (int): number of out features (motor nodes)
             sparsity_level (float, optional): controls the connection sparsity
                 between neurons.
@@ -60,50 +65,47 @@ class LiquidNCPNetwork(nn.Module):
 
         self.n_units = n_neurons + out_features  # inter + command + motor
 
-        self._wiring = Wiring(
+        self.wiring = Wiring(
             in_features,
             n_neurons,
             out_features,
             sparsity_level=sparsity_level,
         )
-        self._masks, self._counts = self._wiring.data()
+        self.masks, self.counts = self.wiring.data()
 
         self.inter = SparseLinear(
             in_features,
-            self._counts.inter,
-            torch.abs(self._masks.inter.T),
+            self.counts.inter,
+            torch.abs(self.masks.inter.T),
             device=device,
-        )
+        ).to(device)
 
         self.command = NCPLiquidCell(
-            self._counts.inter,
-            self._counts.command,
-            self._masks.command,
+            self.counts.inter,
+            self.counts.command,
+            self.masks.command,
             device=device,
-        )
-        self.hidden_size = self._counts.command
+        ).to(device)
+        self.hidden_size = self.counts.command
 
         self.motor = SparseLinear(
-            self._counts.command,
-            self._counts.motor,
-            torch.abs(self._masks.motor.T),
+            self.counts.command,
+            self.counts.motor,
+            torch.abs(self.masks.motor.T),
             device=device,
-        )
-
-        self.relu = nn.ReLU()
+        ).to(device)
 
         self._total_params = total_parameters(self)
         self._active_params = active_parameters(self)
 
         # Enforce weight sparsity - required
         def weight_sparsity_hook(
-            module: nn.Module,
-            grad_input: tuple[torch.Tensor | None, ...],
-            grad_output: tuple[torch.Tensor, ...],
+            module: SparseLinear,
+            grad_input: tuple[torch.Tensor],
+            grad_output: torch.Tensor,
         ) -> None:
             if hasattr(module, "weight") and hasattr(module.weight, "mask"):
-                device = module.weight.data.device
-                module.weight.data *= module.weight.mask.to(device)
+                module.weight.apply_mask()
 
         for module in self.modules():
             if isinstance(module, SparseLinear):
@@ -155,7 +157,7 @@ class LiquidNCPNetwork(nn.Module):
         """
         if x.dim() != 2:
             raise ValueError(
-                f"Unsupported dimensionality: '{x.shape=}'. Should be 2 dimensional with: '(batch_size, features)'."
+                f"Unsupported dimensionality: '{x.shape}'. Should be 2 dimensional with: '(batch_size, features)'."
             )
 
         x = x.to(torch.float32).to(self.device)
@@ -169,7 +171,7 @@ class LiquidNCPNetwork(nn.Module):
             )
 
         # Batch -> (batch_size, out_features)
-        x = self.relu(self.inter(x))
+        x = self.inter(x)
         x, h_state = self.command(x, h_state.to(self.device))
         y_pred: torch.Tensor = self.motor(x)
 

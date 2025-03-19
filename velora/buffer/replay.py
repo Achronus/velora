@@ -27,7 +27,6 @@ class ReplayBuffer(BufferBase):
         """
         super().__init__(capacity, device=device)
 
-    @property
     def config(self) -> BufferConfig:
         """
         Creates a buffer config model.

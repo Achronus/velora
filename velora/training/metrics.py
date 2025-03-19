@@ -307,8 +307,8 @@ class TrainMetrics:
         for ep in results:
             print(
                 f"Episode: {current_ep}/{self.n_episodes}, "
-                f"Highest Reward: {window_max:.2f}, "
                 f"Avg Reward: {ep.reward_moving_avg:.2f}, "
+                f"Max Reward: {window_max:.2f}, "
                 f"Critic Loss: {ep.critic_loss:.2f}, "
                 f"Actor Loss: {ep.actor_loss:.2f}"
             )

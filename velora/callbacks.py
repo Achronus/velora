@@ -1,7 +1,7 @@
 import os
 from abc import abstractmethod
 from pathlib import Path
-from typing import TYPE_CHECKING, List, get_args, override
+from typing import TYPE_CHECKING, Any, Dict, List, Tuple, get_args, override
 
 import gymnasium as gym
 
@@ -32,6 +32,17 @@ class TrainCallback:
 
         Returns:
             state (TrainState): the current training state.
+        """
+        pass  # pragma: no cover
+
+    @abstractmethod
+    def config(self) -> Tuple[str, Dict[str, Any]]:
+        """
+        Retrieves callback details in the form: `(name, values)`.
+
+        Returns:
+            name (str): callback name.
+            values (Dict[str, Any]): a dictionary containing callback settings.
         """
         pass  # pragma: no cover
 
@@ -86,6 +97,12 @@ class EarlyStopping(TrainCallback):
 
         return state
 
+    def config(self) -> Tuple[str, Dict[str, Any]]:
+        return self.__class__.__name__, {
+            "target": self.target,
+            "patience": self.patience,
+        }
+
 
 class SaveCheckpoints(TrainCallback):
     """
@@ -111,9 +128,11 @@ class SaveCheckpoints(TrainCallback):
             frequency (int, optional): save frequency (in episodes)
             buffer (bool, optional): whether to save the final buffer state
         """
-        self.filepath = Path("checkpoints", dirname, "saves")
+        self.dirname = dirname
         self.frequency = frequency
         self.buffer = buffer
+
+        self.filepath = Path("checkpoints", dirname, "saves")
 
         if self.filepath.exists():
             raise FileExistsError(
@@ -180,6 +199,13 @@ class SaveCheckpoints(TrainCallback):
             buffer_path = Path(self.filepath, f"{filename}.buffer.pt")
             print(f"Buffer saved at: {buffer_path}")
 
+    def config(self) -> Tuple[str, Dict[str, Any]]:
+        return self.__class__.__name__, {
+            "dirname": self.dirname,
+            "frequency": self.frequency,
+            "buffer": self.buffer,
+        }
+
 
 class RecordVideos(TrainCallback):
     """
@@ -215,7 +241,10 @@ class RecordVideos(TrainCallback):
                 f"'{method=}' is not supported. Choices: '{get_args(RecordMethodLiteral)}'"
             )
 
+        self.dirname = dirname
         self.method = method
+        self.frequency = frequency
+
         self.dirpath = Path("checkpoints", dirname, "videos")
 
         if self.dirpath.exists():
@@ -252,6 +281,13 @@ class RecordVideos(TrainCallback):
 
         # Ignore other events
         return state
+
+    def config(self) -> Tuple[str, Dict[str, Any]]:
+        return self.__class__.__name__, {
+            "dirname": self.dirname,
+            "method": self.method,
+            "frequency": self.frequency,
+        }
 
 
 class CometAnalytics(TrainCallback):
@@ -308,6 +344,11 @@ class CometAnalytics(TrainCallback):
         )
 
         experiment_name = experiment_name if experiment_name else "auto"
+
+        self.project_name = project_name
+        self.experiment_name = experiment_name
+        self.tags = tags if tags else "auto"
+
         print(
             f"'{self.__class__.__name__}' enabled with {project_name=} and {experiment_name=}."
         )
@@ -381,3 +422,10 @@ class CometAnalytics(TrainCallback):
 
         self.experiment.set_name(state.analytics_state.experiment_name)
         self.experiment.add_tags(state.analytics_state.tags)
+
+    def config(self) -> Tuple[str, Dict[str, Any]]:
+        return self.__class__.__name__, {
+            "project_name": self.project_name,
+            "experiment_name": self.experiment_name,
+            "tags": ",".join(self.tags) if isinstance(self.tags, list) else self.tags,
+        }

@@ -64,7 +64,7 @@ class RLAgent:
         """
         return TrainConfig(
             callbacks=(
-                [cb.__class__.__name__ for cb in params["callbacks"]]
+                dict(cb.config() for cb in params["callbacks"])
                 if params["callbacks"]
                 else None
             ),

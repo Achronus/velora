@@ -329,7 +329,7 @@ class TestTrainMetrics:
             # Check the print message format
             print_args = mock_print.call_args[0][0]
             assert "Episode: 50/100" in print_args
-            assert "Highest Reward:" in print_args
+            assert "Max Reward:" in print_args
             assert "Avg Reward: 85.00" in print_args, mock_print.call_args
             assert "Critic Loss: 0.70" in print_args
             assert "Actor Loss: 0.60" in print_args

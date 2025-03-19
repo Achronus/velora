@@ -1,21 +1,34 @@
 from copy import deepcopy
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Self, Tuple, Type, get_args, override
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Dict,
+    List,
+    Literal,
+    Self,
+    Tuple,
+    Type,
+    get_args,
+    override,
+)
 
 import gymnasium as gym
 import torch
 import torch.nn as nn
 import torch.optim as optim
 
+if TYPE_CHECKING:
+    from velora.callbacks import TrainCallback  # pragma: no cover
+
 from velora.buffer.experience import BatchExperience, Experience
 from velora.buffer.replay import ReplayBuffer
-from velora.callbacks import TrainCallback
 from velora.models.base import RLAgent
-from velora.models.config import ModelDetails, RLAgentConfig, TorchConfig
+from velora.models.config import ModelDetails, ModuleConfig, RLAgentConfig, TorchConfig
 from velora.models.lnn.ncp import LiquidNCPNetwork
 from velora.noise import OUNoise
 from velora.training.handler import TrainHandler
-from velora.utils.torch import soft_update
+from velora.utils.torch import soft_update, summary
 
 CheckpointLiteral = Literal[
     "state_dim",
@@ -60,7 +73,7 @@ class DDPGActor(nn.Module):
             n_neurons=n_neurons,
             out_features=num_actions,
             device=device,
-        )
+        ).to(device)
 
     def forward(
         self, obs: torch.Tensor, hidden: torch.Tensor | None = None
@@ -79,6 +92,19 @@ class DDPGActor(nn.Module):
         actions, new_hidden = self.ncp(obs, hidden)
         scaled_actions = torch.tanh(actions)  # Bounded: [-1, 1]
         return scaled_actions, new_hidden
+
+    def config(self) -> ModuleConfig:
+        """
+        Gets details about the module.
+
+        Returns:
+            config (ModuleConfig): a config model containing module details.
+        """
+        return ModuleConfig(
+            active_params=self.ncp.active_params,
+            total_params=self.ncp.total_params,
+            architecture=summary(self),
+        )
 
 
 class DDPGCritic(nn.Module):
@@ -108,7 +134,7 @@ class DDPGCritic(nn.Module):
             n_neurons=n_neurons,
             out_features=1,  # Q-value output
             device=device,
-        )
+        ).to(device)
 
     def forward(
         self,
@@ -129,9 +155,21 @@ class DDPGCritic(nn.Module):
             hidden (torch.Tensor): the new hidden state.
         """
         inputs = torch.cat([obs, actions], dim=-1)
-
         q_values, new_hidden = self.ncp(inputs, hidden)
         return q_values, new_hidden
+
+    def config(self) -> ModuleConfig:
+        """
+        Gets details about the module.
+
+        Returns:
+            config (ModuleConfig): a config model containing module details.
+        """
+        return ModuleConfig(
+            active_params=self.ncp.active_params,
+            total_params=self.ncp.total_params,
+            architecture=summary(self),
+        )
 
 
 class LiquidDDPG(RLAgent):
@@ -209,11 +247,13 @@ class LiquidDDPG(RLAgent):
             agent=self.__class__.__name__,
             model_details=ModelDetails(
                 type="actor-critic",
+                **locals(),
                 target_networks=True,
                 action_noise="OUNoise",
-                **locals(),
+                actor=self.actor.config(),
+                critic=self.critic.config(),
             ),
-            buffer=self.buffer.config,
+            buffer=self.buffer.config(),
             torch=TorchConfig(
                 device=str(self.device),
                 optimizer=optim.__name__,
@@ -309,7 +349,7 @@ class LiquidDDPG(RLAgent):
         batch_size: int,
         *,
         n_episodes: int = 1000,
-        callbacks: List[TrainCallback] | None = None,
+        callbacks: List["TrainCallback"] | None = None,
         max_steps: int = 1000,
         noise_scale: float = 0.3,
         gamma: float = 0.99,
@@ -407,7 +447,7 @@ class LiquidDDPG(RLAgent):
     def predict(
         self,
         state: torch.Tensor,
-        hidden: torch.Tensor = None,
+        hidden: torch.Tensor | None = None,
         *,
         noise_scale: float = 0.3,
     ) -> Tuple[torch.Tensor, torch.Tensor]:

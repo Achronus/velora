@@ -103,7 +103,7 @@ class TestReplayBuffer:
         assert len(replay_buffer.buffer) == 0
 
     def test_config(self, replay_buffer: ReplayBuffer):
-        config = replay_buffer.config
+        config = replay_buffer.config()
         assert config == BufferConfig(type="ReplayBuffer", capacity=100)
 
     def test_push_experience(
@@ -335,7 +335,7 @@ class TestRolloutBuffer:
         assert len(rollout_buffer.buffer) == 0
 
     def test_config(self, rollout_buffer: RolloutBuffer):
-        config = rollout_buffer.config
+        config = rollout_buffer.config()
         assert config == BufferConfig(type="RolloutBuffer", capacity=5)
 
     def test_push_experience(

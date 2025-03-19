@@ -50,11 +50,13 @@ class LayerMasks:
         inter (torch.Tensor): sparse weight mask for input layer
         command (torch.Tensor): sparse weight mask for hidden layer
         motor (torch.Tensor): sparse weight mask for output layer
+        recurrent (torch.Tensor): sparse weight mask for recurrent connections
     """
 
     inter: torch.Tensor
     command: torch.Tensor
     motor: torch.Tensor
+    recurrent: torch.Tensor
 
 
 class Wiring:
@@ -103,10 +105,6 @@ class Wiring:
             out_features,
         )
         self.masks = self._init_masks(in_features)
-        self.cmd_recurrent = torch.zeros(
-            (self.counts.command, self.counts.command),
-            dtype=torch.int32,
-        )
 
         self.build()
 
@@ -137,6 +135,10 @@ class Wiring:
             ),
             motor=torch.zeros(
                 (self.counts.command, self.counts.motor),
+                dtype=torch.int32,
+            ),
+            recurrent=torch.zeros(
+                (self.counts.command, self.counts.command),
                 dtype=torch.int32,
             ),
         )
@@ -296,7 +298,7 @@ class Wiring:
             2. Inter -> command
             3. Command -> motor
 
-        Plus, command recurrent connections for visualization.
+        Plus, command recurrent connections for ODE solvers.
         """
         # Sensory -> inter
         self.masks.inter = self._build_connections(
@@ -315,8 +317,8 @@ class Wiring:
         )
 
         # Command -> command
-        self.cmd_recurrent = self._build_recurrent_connections(
-            self.cmd_recurrent,
+        self.masks.recurrent = self._build_recurrent_connections(
+            self.masks.recurrent,
             self.counts.command,
         )
 

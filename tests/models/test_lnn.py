@@ -260,7 +260,7 @@ class TestLiquidNCPNetwork:
 
     def test_wiring_init(self, network: LiquidNCPNetwork):
         assert hasattr(network, "_wiring")
-        assert isinstance(network._wiring, Wiring)
+        assert isinstance(network.wiring, Wiring)
 
         # Check if masks and counts exist
         assert hasattr(network, "_masks")

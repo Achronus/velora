@@ -5,6 +5,7 @@ from velora.utils.torch import (
     hard_update,
     soft_update,
     stack_tensor,
+    summary,
     to_tensor,
     total_parameters,
 )
@@ -18,5 +19,6 @@ __all__ = [
     "hard_update",
     "total_parameters",
     "active_parameters",
+    "summary",
     "record_last_episode",
 ]

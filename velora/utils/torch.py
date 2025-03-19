@@ -1,4 +1,4 @@
-from typing import Any, List
+from typing import Any, Dict, List
 
 import torch
 import torch.nn as nn
@@ -101,3 +101,23 @@ def active_parameters(model: nn.Module) -> int:
         count (int): the total active number of parameters.
     """
     return sum((p != 0).sum().item() for p in model.parameters() if p.requires_grad)
+
+
+def summary(module: nn.Module) -> Dict[str, str]:
+    """
+    Outputs a summary of a module and all it's sub-modules as a dictionary.
+
+    Returns:
+        summary (Dict[str, str]): key-value pairs for the network layout.
+    """
+    model_dict = {}
+
+    for name, module in module.named_children():
+        if len(list(module.children())) > 0:
+            # If the module has submodules, recurse
+            model_dict[name] = summary(module)
+        else:
+            # If it's a leaf module, store its string representation
+            model_dict[name] = str(module)
+
+    return model_dict
