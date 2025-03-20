@@ -1,7 +1,12 @@
 import os
 from abc import abstractmethod
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Tuple, get_args, override
+from typing import TYPE_CHECKING, Any, Dict, List, Tuple, get_args
+
+try:
+    from typing import override
+except ImportError:
+    from typing_extensions import override  # pragma: no cover
 
 import gymnasium as gym
 
@@ -132,7 +137,7 @@ class SaveCheckpoints(TrainCallback):
         self.frequency = frequency
         self.buffer = buffer
 
-        self.filepath = Path("checkpoints", dirname, "saves")
+        self.filepath = Path("checkpoints", self.dirname, "saves")
 
         if self.filepath.exists():
             raise FileExistsError(

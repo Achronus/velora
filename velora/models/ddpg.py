@@ -1,17 +1,11 @@
 from copy import deepcopy
 from pathlib import Path
-from typing import (
-    TYPE_CHECKING,
-    Any,
-    Dict,
-    List,
-    Literal,
-    Self,
-    Tuple,
-    Type,
-    get_args,
-    override,
-)
+from typing import TYPE_CHECKING, Any, Dict, List, Literal, Self, Tuple, Type, get_args
+
+try:
+    from typing import override
+except ImportError:
+    from typing_extensions import override  # pragma: no cover
 
 import gymnasium as gym
 import torch

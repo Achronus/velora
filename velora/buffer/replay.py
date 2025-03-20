@@ -1,5 +1,10 @@
 import random
-from typing import List, override
+from typing import List
+
+try:
+    from typing import override
+except ImportError:
+    from typing_extensions import override  # pragma: no cover
 
 import gymnasium as gym
 import torch
