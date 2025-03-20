@@ -26,9 +26,9 @@ buffer = ReplayBuffer(capacity=100_000, device=device)
 
 ???+ api "API Docs"
 
-    [`velora.buffer.ReplayBuffer.push(exp)`](../reference/buffer.md#velora.buffer.BufferBase.push)
+    [`velora.buffer.ReplayBuffer.add(exp)`](../reference/buffer.md#velora.buffer.BufferBase.add)
 
-To add an item, we `push()` a set of `Experience` to it:
+To add an item, we `add()` a set of `Experience` to it:
 
 ```python
 from velora.buffer import Experience
@@ -42,7 +42,7 @@ exp = Experience(
     done=False,
 )
 
-buffer.push(exp)
+buffer.add(exp)
 ```
 
 `Experience` is a simple dataclass that holds the information of a single environment `timestep`. We'll talk about them in more detail later.
@@ -126,7 +126,7 @@ exp = Experience(
     next_state=torch.zeros(state_dim, device=device),
     done=False,
 )
-buffer.push(exp)
+buffer.add(exp)
 
 # Get a batch
 batch = buffer.sample(batch_size=5)
@@ -158,11 +158,11 @@ buffer = RolloutBuffer(capacity=10, device=device)
 
 ???+ api "API Docs"
 
-    [`velora.buffer.RolloutBuffer.push(exp)`](../reference/buffer.md#velora.buffer.RolloutBuffer.push)
+    [`velora.buffer.RolloutBuffer.add(exp)`](../reference/buffer.md#velora.buffer.RolloutBuffer.add)
 
     [`velora.buffer.RolloutBuffer.empty()`](../reference/buffer.md#velora.buffer.RolloutBuffer.empty)
 
-To add an item, we `push()` a set of `Experience` to it:
+To add an item, we `add()` a set of `Experience` to it:
 
 ```python
 from velora.buffer import Experience
@@ -176,7 +176,7 @@ exp = Experience(
     done=False,
 )
 
-buffer.push(exp)
+buffer.add(exp)
 ```
 
 Once the buffer is full, we need to `empty` it before we can add new samples:
@@ -228,8 +228,8 @@ exp = Experience(
     done=False,
 )
 
-buffer.push(exp)
-# buffer.push(exp)  # BufferError
+buffer.add(exp)
+# buffer.add(exp)  # BufferError
 
 batch = buffer.sample()
 
@@ -374,7 +374,7 @@ for i_ep in range(n_episodes):
         done = terminated or truncated
 
         # Add it to the buffer
-        buffer.push(
+        buffer.add(
             Experience(state, action.item(), reward, next_state, done),
         )
 

@@ -86,7 +86,7 @@ class TestReplayBuffer:
     def filled_buffer(self, replay_buffer: ReplayBuffer) -> ReplayBuffer:
         """Fixture that returns a replay buffer with 10 experiences."""
         for i in range(10):
-            replay_buffer.push(
+            replay_buffer.add(
                 Experience(
                     state=torch.tensor([float(i), float(i + 1)]),
                     action=torch.tensor([i]),
@@ -109,7 +109,7 @@ class TestReplayBuffer:
     def test_push_experience(
         self, replay_buffer: ReplayBuffer, sample_experience: Experience
     ) -> None:
-        replay_buffer.push(sample_experience)
+        replay_buffer.add(sample_experience)
         assert len(replay_buffer) == 1
         assert isinstance(replay_buffer.buffer[0], Experience)
 
@@ -118,13 +118,13 @@ class TestReplayBuffer:
     ) -> None:
         # Fill buffer beyond capacity
         for _ in range(150):
-            replay_buffer.push(sample_experience)
+            replay_buffer.add(sample_experience)
         assert len(replay_buffer) == 100  # Should not exceed capacity
 
     def test_sample_insufficient_experiences(
         self, replay_buffer: ReplayBuffer, sample_experience: Experience
     ) -> None:
-        replay_buffer.push(sample_experience)
+        replay_buffer.add(sample_experience)
         with pytest.raises(ValueError):
             replay_buffer.sample(batch_size=2)
 
@@ -133,7 +133,7 @@ class TestReplayBuffer:
     ) -> None:
         # Fill buffer with multiple experiences
         for _ in range(10):
-            replay_buffer.push(sample_experience)
+            replay_buffer.add(sample_experience)
 
         batch_size = 5
         batch = replay_buffer.sample(batch_size)
@@ -149,7 +149,7 @@ class TestReplayBuffer:
         self, replay_buffer: ReplayBuffer, sample_experience: Experience
     ) -> None:
         assert len(replay_buffer) == 0
-        replay_buffer.push(sample_experience)
+        replay_buffer.add(sample_experience)
         assert len(replay_buffer) == 1
 
     def test_state_dict_empty_buffer(self, replay_buffer: ReplayBuffer) -> None:
@@ -276,7 +276,7 @@ class TestReplayBuffer:
             next_state=torch.zeros(state_dim, device=device),
             done=False,
         )
-        buffer.push(exp)
+        buffer.add(exp)
 
         # Verify buffer length increases
         assert len(buffer) == n_samples + 1
@@ -318,7 +318,7 @@ class TestRolloutBuffer:
     def filled_buffer(self, rollout_buffer: RolloutBuffer) -> RolloutBuffer:
         """Fixture that returns a filled rollout buffer with 3 experiences."""
         for i in range(3):
-            rollout_buffer.push(
+            rollout_buffer.add(
                 Experience(
                     state=torch.tensor([float(i), float(i + 1)]),
                     action=torch.tensor([i]),
@@ -341,7 +341,7 @@ class TestRolloutBuffer:
     def test_push_experience(
         self, rollout_buffer: RolloutBuffer, sample_experience: Experience
     ) -> None:
-        rollout_buffer.push(sample_experience)
+        rollout_buffer.add(sample_experience)
         assert len(rollout_buffer) == 1
         assert isinstance(rollout_buffer.buffer[0], Experience)
 
@@ -350,11 +350,11 @@ class TestRolloutBuffer:
     ) -> None:
         # Fill buffer to capacity
         for _ in range(5):
-            rollout_buffer.push(sample_experience)
+            rollout_buffer.add(sample_experience)
 
         # Attempt to push when buffer is full
         with pytest.raises(BufferError):
-            rollout_buffer.push(sample_experience)
+            rollout_buffer.add(sample_experience)
 
     def test_sample_empty_buffer(self, rollout_buffer: RolloutBuffer) -> None:
         with pytest.raises(BufferError) as exc_info:
@@ -367,7 +367,7 @@ class TestRolloutBuffer:
         # Fill buffer with experiences
         num_experiences = 3
         for _ in range(num_experiences):
-            rollout_buffer.push(sample_experience)
+            rollout_buffer.add(sample_experience)
 
         batch = rollout_buffer.sample()
 
@@ -384,7 +384,7 @@ class TestRolloutBuffer:
     ) -> None:
         # Add some experiences
         for _ in range(3):
-            rollout_buffer.push(sample_experience)
+            rollout_buffer.add(sample_experience)
         assert len(rollout_buffer) == 3
 
         # Clear buffer
@@ -395,9 +395,9 @@ class TestRolloutBuffer:
         self, rollout_buffer: RolloutBuffer, sample_experience: Experience
     ) -> None:
         assert len(rollout_buffer) == 0
-        rollout_buffer.push(sample_experience)
+        rollout_buffer.add(sample_experience)
         assert len(rollout_buffer) == 1
-        rollout_buffer.push(sample_experience)
+        rollout_buffer.add(sample_experience)
         assert len(rollout_buffer) == 2
         rollout_buffer.empty()
         assert len(rollout_buffer) == 0
@@ -514,7 +514,7 @@ class TestRolloutBuffer:
             assert len(loaded_buffer) == 3  # Original size before emptying
 
             # Add more experiences to emptied buffer
-            filled_buffer.push(
+            filled_buffer.add(
                 Experience(
                     state=torch.tensor([10.0, 11.0]),
                     action=10.0,
@@ -534,7 +534,7 @@ class TestRolloutBuffer:
         # Create and fill a buffer
         buffer = RolloutBuffer(capacity=5)
         for i in range(3):
-            buffer.push(
+            buffer.add(
                 Experience(
                     state=torch.tensor([float(i), float(i + 1)]),
                     action=torch.tensor([i]),
@@ -556,7 +556,7 @@ class TestRolloutBuffer:
             assert len(loaded_buffer) == 3
 
             # Add more experiences
-            loaded_buffer.push(
+            loaded_buffer.add(
                 Experience(
                     state=torch.tensor([10.0, 11.0]),
                     action=torch.tensor([10.0]),
@@ -569,7 +569,7 @@ class TestRolloutBuffer:
             assert len(loaded_buffer) == 4
 
             # Try to add experiences up to capacity
-            loaded_buffer.push(
+            loaded_buffer.add(
                 Experience(
                     state=torch.tensor([11.0, 12.0]),
                     action=torch.tensor([11.0]),
@@ -583,7 +583,7 @@ class TestRolloutBuffer:
 
             # Should raise error on next push
             with pytest.raises(BufferError, match="Buffer full!"):
-                loaded_buffer.push(
+                loaded_buffer.add(
                     Experience(
                         state=torch.tensor([12.0, 13.0]),
                         action=torch.tensor([12.0]),

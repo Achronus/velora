@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Tuple, get_args
 
 try:
     from typing import override
-except ImportError:
+except ImportError:  # pragma: no cover
     from typing_extensions import override  # pragma: no cover
 
 import gymnasium as gym

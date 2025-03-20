@@ -172,7 +172,7 @@ class TestLiquidDDPG:
 
             # Create Experience object explicitly
             exp = Experience(state, action, reward, next_state, done)
-            ddpg.buffer.push(exp)
+            ddpg.buffer.add(exp)
 
         # Perform training step
         result = ddpg._train_step(batch_size, gamma)
@@ -190,7 +190,7 @@ class TestLiquidDDPG:
         for _ in range(batch_size - 1):
             state = torch.zeros(ddpg.state_dim)
             exp = Experience(state, 1.0, 2.0, state, False)
-            ddpg.buffer.push(exp)
+            ddpg.buffer.add(exp)
 
         # Should return None when buffer is insufficient
         result = ddpg._train_step(batch_size, gamma)
@@ -228,7 +228,7 @@ class TestLiquidDDPG:
             next_state = torch.ones(ddpg.state_dim)
             done = i == 9
             exp = Experience(state, action, reward, next_state, done)
-            ddpg.buffer.push(exp)
+            ddpg.buffer.add(exp)
 
         with tempfile.TemporaryDirectory() as temp_dir:
             filepath = os.path.join(temp_dir, "model.pt")
@@ -415,7 +415,7 @@ class TestLiquidDDPG:
 
                             # Mock buffer.push to prevent storing experiences
                             with (
-                                patch.object(ddpg.buffer, "push"),
+                                patch.object(ddpg.buffer, "add"),
                                 patch.object(ddpg.buffer, "warm"),
                             ):
                                 # Mock _train_step to avoid network operations
@@ -468,7 +468,7 @@ class TestLiquidDDPG:
         # Mock necessary methods to avoid actual training
         with (
             patch.object(ddpg.buffer, "warm"),
-            patch.object(ddpg.buffer, "push"),
+            patch.object(ddpg.buffer, "add"),
             patch.object(ddpg, "_train_step", return_value=(0.1, 0.2)),
             patch.object(
                 ddpg,

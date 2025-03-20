@@ -1,6 +1,6 @@
 try:
     from typing import override
-except ImportError:
+except ImportError:  # pragma: no cover
     from typing_extensions import override  # pragma: no cover
 
 import torch
@@ -36,7 +36,7 @@ class RolloutBuffer(BufferBase):
         return BufferConfig(type="RolloutBuffer", capacity=self.capacity)
 
     @override
-    def push(self, exp: Experience) -> None:
+    def add(self, exp: Experience) -> None:
         """
         Stores an experience in the buffer.
 
@@ -46,7 +46,7 @@ class RolloutBuffer(BufferBase):
         if len(self.buffer) == self.capacity:
             raise BufferError("Buffer full! Use the 'empty()' method first.")
 
-        super().push(exp)
+        super().add(exp)
 
     @override
     def sample(self) -> BatchExperience:

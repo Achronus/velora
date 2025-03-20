@@ -3,7 +3,7 @@ from typing import List
 
 try:
     from typing import override
-except ImportError:
+except ImportError:  # pragma: no cover
     from typing_extensions import override  # pragma: no cover
 
 import gymnasium as gym
@@ -84,7 +84,7 @@ class ReplayBuffer(BufferBase):
             next_state, reward, terminated, truncated, _ = env.step(action)
             done = terminated or truncated
 
-            self.push(Experience(state, action, reward, next_state, done))
+            self.add(Experience(state, action, reward, next_state, done))
 
             state = next_state
 

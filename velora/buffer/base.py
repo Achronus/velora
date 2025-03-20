@@ -27,14 +27,23 @@ class BufferBase:
         self.buffer: Deque[Experience] = deque(maxlen=capacity)
         self.device = device
 
-    def push(self, exp: Experience) -> None:
+    def add(self, exp: Experience) -> None:
         """
-        Stores an experience in the buffer.
+        Adds a single experience to the buffer.
 
         Parameters:
-            exp (Experience): a single set of experience as an object
+            exp (Experience): a single set of experience
         """
         self.buffer.append(exp)
+
+    def add_multi(self, exp: List[Experience]) -> None:
+        """
+        Adds multiple experiences to the buffer.
+
+        Parameters:
+            exp (List[Experience]): a list of experience
+        """
+        self.buffer.extend(exp)
 
     def _batch(self, batch: List[Experience]) -> BatchExperience:
         """
@@ -163,7 +172,7 @@ class BufferBase:
             data["next_states"],
             data["dones"],
         ):
-            buffer.push(
+            buffer.add(
                 Experience(
                     state=to_tensor(state, device=device),
                     action=to_tensor(action, device=device),

@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Literal, Self, Tuple, Type, g
 
 try:
     from typing import override
-except ImportError:
+except ImportError:  # pragma: no cover
     from typing_extensions import override  # pragma: no cover
 
 import gymnasium as gym
@@ -402,7 +402,7 @@ class LiquidDDPG(RLAgent):
                     )
                     done = terminated or truncated
 
-                    self.buffer.push(
+                    self.buffer.add(
                         Experience(state, action, reward, next_state, done),
                     )
 
@@ -460,7 +460,8 @@ class LiquidDDPG(RLAgent):
         """
         self.actor.eval()
         with torch.no_grad():
-            action, hidden = self.actor(state.unsqueeze(0), hidden)
+            state = state.unsqueeze(0) if state.dim() < 2 else state
+            action, hidden = self.actor(state, hidden)
 
             if noise_scale > 0:
                 # Exploration noise
@@ -468,7 +469,7 @@ class LiquidDDPG(RLAgent):
                 action = torch.clamp(action + noise, min=-1, max=1)
 
         self.actor.train()
-        return action.flatten(), hidden
+        return action, hidden
 
     def save(self, filepath: str | Path, *, buffer: bool = False) -> None:
         """
