@@ -9,7 +9,14 @@ import torch
 
 from velora.metrics.models import Episode, Experiment, Step
 from velora.models.base import RLAgent
-from velora.models.config import BufferConfig, ModelDetails, RLAgentConfig, TorchConfig
+from velora.models.config import (
+    BufferConfig,
+    ModelDetails,
+    ModuleConfig,
+    RLAgentConfig,
+    TorchConfig,
+)
+from velora.models.ddpg import LiquidDDPG
 from velora.state import RecordState
 from velora.training.handler import TrainHandler
 from velora.training.metrics import (
@@ -17,6 +24,7 @@ from velora.training.metrics import (
     MovingMetric,
     TrainMetrics,
 )
+from velora.utils.torch import summary
 
 
 class TestStepStorage:
@@ -142,6 +150,8 @@ class TestTrainMetrics:
 
     @pytest.fixture
     def mock_config(self):
+        ddpg = LiquidDDPG(4, 10, 1)
+
         return RLAgentConfig(
             agent="TestAgent",
             env="TestEnv",
@@ -151,6 +161,16 @@ class TestTrainMetrics:
                 n_neurons=64,
                 action_dim=2,
                 target_networks=True,
+                actor=ModuleConfig(
+                    active_params=ddpg.actor.ncp.active_params,
+                    total_params=ddpg.actor.ncp.total_params,
+                    architecture=summary(ddpg.actor),
+                ),
+                critic=ModuleConfig(
+                    active_params=ddpg.critic.ncp.active_params,
+                    total_params=ddpg.critic.ncp.total_params,
+                    architecture=summary(ddpg.critic),
+                ),
             ),
             buffer=BufferConfig(type="ReplayBuffer", capacity=10000),
             torch=TorchConfig(device="cpu", optimizer="Adam", loss="MSELoss"),
@@ -168,7 +188,7 @@ class TestTrainMetrics:
         assert metrics._ep_rewards.window_size == 10
         assert isinstance(metrics._current_losses, StepStorage)
 
-    def test_start_experiment(self, metrics, mock_config):
+    def test_start_experiment(self, metrics: TrainMetrics, mock_config):
         """Test starting an experiment."""
         # Start the experiment
         metrics.start_experiment(mock_config)

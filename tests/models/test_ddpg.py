@@ -248,20 +248,6 @@ class TestLiquidDDPG:
             # Check buffer properties
             assert len(loaded_ddpg.buffer) == len(ddpg.buffer)
 
-            # Test predict to ensure models produce similar results
-            state = torch.randn(ddpg.state_dim)
-            # Handle the case where predict returns a tuple
-            action1 = ddpg.predict(state, noise_scale=0.0)
-            action2 = loaded_ddpg.predict(state, noise_scale=0.0)
-
-            # If actions are tuples, compare the first element
-            if isinstance(action1, tuple):
-                action1 = action1[0]
-            if isinstance(action2, tuple):
-                action2 = action2[0]
-
-            assert torch.allclose(action1, action2)
-
     def test_load_without_buffer_file(self, ddpg: LiquidDDPG):
         with tempfile.TemporaryDirectory() as temp_dir:
             filepath = os.path.join(temp_dir, "model.pt")

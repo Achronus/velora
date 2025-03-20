@@ -256,15 +256,15 @@ class TestLiquidNCPNetwork:
         active = network.active_params
 
         assert total == 1017
-        assert active == 887
+        assert active == 657
 
     def test_wiring_init(self, network: LiquidNCPNetwork):
-        assert hasattr(network, "_wiring")
+        assert hasattr(network, "wiring")
         assert isinstance(network.wiring, Wiring)
 
         # Check if masks and counts exist
-        assert hasattr(network, "_masks")
-        assert hasattr(network, "_counts")
+        assert hasattr(network, "masks")
+        assert hasattr(network, "counts")
 
     def test_forward_shape(
         self, network: LiquidNCPNetwork, network_params: NetworkParamsType

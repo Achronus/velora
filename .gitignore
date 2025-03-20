@@ -172,3 +172,4 @@ cython_debug/
 /_build
 CHANGELOG.md
 metrics.db
+metrics.db-journal
