@@ -15,7 +15,7 @@ import torch.optim as optim
 if TYPE_CHECKING:
     from velora.callbacks import TrainCallback  # pragma: no cover
 
-from velora.buffer.experience import BatchExperience, Experience
+from velora.buffer.experience import BatchExperience
 from velora.buffer.replay import ReplayBuffer
 from velora.models.base import RLAgent
 from velora.models.config import ModelDetails, ModuleConfig, RLAgentConfig, TorchConfig
@@ -233,7 +233,12 @@ class LiquidDDPG(RLAgent):
         self.critic_optim = optim(self.critic.parameters(), lr=critic_lr)
 
         self.loss = nn.MSELoss()
-        self.buffer = ReplayBuffer(capacity=buffer_size, device=device)
+        self.buffer = ReplayBuffer(
+            buffer_size,
+            state_dim,
+            action_dim,
+            device=self.device,
+        )
         self.noise = OUNoise(action_dim, device=device)
 
         # Init config details
@@ -402,9 +407,7 @@ class LiquidDDPG(RLAgent):
                     )
                     done = terminated or truncated
 
-                    self.buffer.add(
-                        Experience(state, action, reward, next_state, done),
-                    )
+                    self.buffer.add(state, action, reward, next_state, done)
 
                     critic_loss, actor_loss = self._train_step(batch_size, gamma)
                     self._update_target_networks(tau)

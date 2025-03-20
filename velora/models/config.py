@@ -10,10 +10,14 @@ class BufferConfig(BaseModel):
     Attributes:
         type: the type of buffer
         capacity: the maximum capacity of the buffer
+        state_dim: dimension of state observations
+        action_dim: dimension of actions
     """
 
     type: Literal["ReplayBuffer", "RolloutBuffer"]
     capacity: int
+    state_dim: int
+    action_dim: int
 
 
 class TorchConfig(BaseModel):

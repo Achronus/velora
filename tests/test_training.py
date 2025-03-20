@@ -172,7 +172,12 @@ class TestTrainMetrics:
                     architecture=summary(ddpg.critic),
                 ),
             ),
-            buffer=BufferConfig(type="ReplayBuffer", capacity=10000),
+            buffer=BufferConfig(
+                type="ReplayBuffer",
+                capacity=10000,
+                state_dim=2,
+                action_dim=1,
+            ),
             torch=TorchConfig(device="cpu", optimizer="Adam", loss="MSELoss"),
         )
 

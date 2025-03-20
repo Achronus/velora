@@ -1,63 +1,90 @@
 from abc import abstractmethod
-from collections import deque
 from pathlib import Path
-from typing import Any, Deque, Dict, List, Literal, Self, get_args
+from typing import Any, Dict, Literal, Self
 
 import torch
 
-from velora.buffer.experience import BatchExperience, Experience
-from velora.utils.torch import stack_tensor, to_tensor
+from velora.buffer.experience import BatchExperience
+from velora.utils.torch import to_tensor
 
-StateDictKeys = Literal["buffer", "capacity", "device"]
+StateDictKeys = Literal[
+    "buffer",
+    "capacity",
+    "state_dim",
+    "action_dim",
+    "position",
+    "size",
+    "device",
+]
 BufferKeys = Literal["states", "actions", "rewards", "next_states", "dones"]
 
 
 class BufferBase:
     """
     A base class for all buffers.
+
+    Stores experiences `(states, actions, rewards, next_states, dones)` as
+    individual items in tensors.
     """
 
-    def __init__(self, capacity: int, *, device: torch.device | None = None) -> None:
+    def __init__(
+        self,
+        capacity: int,
+        state_dim: int,
+        action_dim: int,
+        *,
+        device: torch.device | None = None,
+    ) -> None:
         """
         Parameters:
             capacity (int): the total capacity of the buffer
+            state_dim (int): dimension of state observations
+            action_dim (int): dimension of actions
             device (torch.device, optional): the device to perform computations on
         """
         self.capacity = capacity
-        self.buffer: Deque[Experience] = deque(maxlen=capacity)
+        self.state_dim = state_dim
+        self.action_dim = action_dim
         self.device = device
 
-    def add(self, exp: Experience) -> None:
+        # Position indicators
+        self.position = 0
+        self.size = 0
+
+        # Pre-allocate storage
+        self.states = torch.zeros((capacity, state_dim), device=device)
+        self.actions = torch.zeros((capacity, action_dim), device=device)
+        self.rewards = torch.zeros((capacity, 1), device=device)
+        self.next_states = torch.zeros((capacity, state_dim), device=device)
+        self.dones = torch.zeros((capacity, 1), device=device)
+
+    def add(
+        self,
+        state: torch.Tensor,
+        action: torch.Tensor,
+        reward: float,
+        next_state: torch.Tensor,
+        done: bool,
+    ) -> None:
         """
         Adds a single experience to the buffer.
 
         Parameters:
-            exp (Experience): a single set of experience
+            state (torch.Tensor): current state observation
+            action (torch.Tensor): action taken
+            reward (float): reward received
+            next_state (torch.Tensor): next state observation
+            done (bool): whether the episode ended
         """
-        self.buffer.append(exp)
+        self.states[self.position] = state.to(torch.float32).to(self.device)
+        self.actions[self.position] = action.to(self.device)
+        self.rewards[self.position] = to_tensor([reward], device=self.device)
+        self.next_states[self.position] = next_state.to(torch.float32).to(self.device)
+        self.dones[self.position] = to_tensor([done], device=self.device)
 
-    def add_multi(self, exp: List[Experience]) -> None:
-        """
-        Adds multiple experiences to the buffer.
-
-        Parameters:
-            exp (List[Experience]): a list of experience
-        """
-        self.buffer.extend(exp)
-
-    def _batch(self, batch: List[Experience]) -> BatchExperience:
-        """
-        Helper method. Converts a `List[Experience]` into a `BatchExperience`.
-        """
-        states, actions, rewards, next_states, dones = zip(*batch)
-
-        return BatchExperience(
-            states=stack_tensor(states, device=self.device),
-            actions=stack_tensor(actions, device=self.device),
-            rewards=to_tensor(rewards, device=self.device).unsqueeze(1),
-            next_states=stack_tensor(next_states, device=self.device),
-            dones=to_tensor(dones, device=self.device).unsqueeze(1),
-        )
+        # Update position - deque style
+        self.position = (self.position + 1) % self.capacity
+        self.size = min(self.size + 1, self.capacity)
 
     @abstractmethod
     def sample(self) -> BatchExperience:
@@ -78,7 +105,7 @@ class BufferBase:
         Returns:
             size (int): the current size of the buffer.
         """
-        return len(self.buffer)
+        return self.size
 
     def state_dict(self) -> Dict[StateDictKeys, Any]:
         """
@@ -86,27 +113,28 @@ class BufferBase:
 
         - `buffer` - serialized arrays of `{states, actions, rewards, next_states, dones}`.
         - `capacity` - the maximum capacity of the buffer.
+        - `state_dim` - state dimension.
+        - `action_dim` - action dimension.
+        - `position` - current buffer position.
+        - `size` - current size of buffer.
         - `device` - the device used for computations.
 
         Returns:
-            state_dict (Dict[Literal["buffer", "capacity", "device"], Any]): a dictionary containing the current state of the buffer.
+            state_dict (Dict[str, Any]): a dictionary containing the current state of the buffer.
         """
-        if len(self.buffer) > 0:
-            states, actions, rewards, next_states, dones = zip(*self.buffer)
-
-            serialized_buffer: Dict[BufferKeys, List[Any]] = {
-                "states": stack_tensor(states).cpu().tolist(),
-                "actions": stack_tensor(actions).cpu().tolist(),
-                "rewards": to_tensor(rewards).cpu().tolist(),
-                "next_states": stack_tensor(next_states).cpu().tolist(),
-                "dones": to_tensor(dones).cpu().tolist(),
-            }
-        else:
-            serialized_buffer = {key: [] for key in list(get_args(BufferKeys))}
-
         return {
-            "buffer": serialized_buffer,
+            "buffer": {
+                "states": self.states.cpu(),
+                "actions": self.actions.cpu(),
+                "rewards": self.rewards.cpu(),
+                "next_states": self.next_states.cpu(),
+                "dones": self.dones.cpu(),
+            },
             "capacity": self.capacity,
+            "state_dim": self.state_dim,
+            "action_dim": self.action_dim,
+            "position": self.position,
+            "size": self.size,
             "device": str(self.device) if self.device else None,
         }
 
@@ -158,29 +186,21 @@ class BufferBase:
         )
 
         buffer = cls(
-            state_dict["capacity"],
+            capacity=state_dict["capacity"],
+            state_dim=state_dict["state_dim"],
+            action_dim=state_dict["action_dim"],
             device=device,
         )
 
-        data: Dict[BufferKeys, List[Any]] = state_dict["buffer"]
+        data: Dict[BufferKeys, torch.Tensor] = state_dict["buffer"]
 
-        # Recreate experiences from the parallel arrays
-        for state, action, reward, next_state, done in zip(
-            data["states"],
-            data["actions"],
-            data["rewards"],
-            data["next_states"],
-            data["dones"],
-        ):
-            buffer.add(
-                Experience(
-                    state=to_tensor(state, device=device),
-                    action=to_tensor(action, device=device),
-                    reward=reward,
-                    next_state=to_tensor(next_state, device=device),
-                    done=done,
-                )
-            )
+        buffer.position = state_dict["position"]
+        buffer.size = state_dict["size"]
+        buffer.states = data["states"].to(buffer.device)
+        buffer.actions = data["actions"].to(buffer.device)
+        buffer.rewards = data["rewards"].to(buffer.device)
+        buffer.next_states = data["next_states"].to(buffer.device)
+        buffer.dones = data["dones"].to(buffer.device)
 
         return buffer
 

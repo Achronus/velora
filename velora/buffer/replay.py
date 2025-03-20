@@ -1,6 +1,3 @@
-import random
-from typing import List
-
 try:
     from typing import override
 except ImportError:  # pragma: no cover
@@ -10,7 +7,7 @@ import gymnasium as gym
 import torch
 
 from velora.buffer.base import BufferBase
-from velora.buffer.experience import BatchExperience, Experience
+from velora.buffer.experience import BatchExperience
 from velora.gym.wrap import add_core_env_wrappers
 from velora.models.base import RLAgent
 from velora.models.config import BufferConfig
@@ -24,13 +21,22 @@ class ReplayBuffer(BufferBase):
     [Player Atari with Deep Reinforcement Learning](https://arxiv.org/abs/1312.5602).
     """
 
-    def __init__(self, capacity: int, *, device: torch.device | None = None) -> None:
+    def __init__(
+        self,
+        capacity: int,
+        state_dim: int,
+        action_dim: int,
+        *,
+        device: torch.device | None = None,
+    ) -> None:
         """
         Parameters:
             capacity (int): the total capacity of the buffer
+            state_dim (int): dimension of state observations
+            action_dim (int): dimension of actions
             device (torch.device, optional): the device to perform computations on
         """
-        super().__init__(capacity, device=device)
+        super().__init__(capacity, state_dim, action_dim, device=device)
 
     def config(self) -> BufferConfig:
         """
@@ -39,7 +45,12 @@ class ReplayBuffer(BufferBase):
         Returns:
             config (BufferConfig): a config model with buffer details.
         """
-        return BufferConfig(type="ReplayBuffer", capacity=self.capacity)
+        return BufferConfig(
+            type="ReplayBuffer",
+            capacity=self.capacity,
+            state_dim=self.state_dim,
+            action_dim=self.action_dim,
+        )
 
     @override
     def sample(self, batch_size: int) -> BatchExperience:
@@ -54,13 +65,20 @@ class ReplayBuffer(BufferBase):
 
                 All items have the same shape `(batch_size, features)`.
         """
-        if len(self.buffer) < batch_size:
+        if len(self) < batch_size:
             raise ValueError(
-                f"Buffer does not contain enough experiences. Available: {len(self.buffer)}, Requested: {batch_size}"
+                f"Buffer does not contain enough experiences. Available: {len(self)}, Requested: {batch_size}"
             )
 
-        batch: List[Experience] = random.sample(self.buffer, batch_size)
-        return self._batch(batch)
+        indices = torch.randint(0, self.size, (batch_size,), device=self.device)
+
+        return BatchExperience(
+            states=self.states[indices],
+            actions=self.actions[indices],
+            rewards=self.rewards[indices],
+            next_states=self.next_states[indices],
+            dones=self.dones[indices],
+        )
 
     def warm(self, agent: RLAgent, env_name: str, n_samples: int) -> None:
         """
@@ -79,12 +97,12 @@ class ReplayBuffer(BufferBase):
         hidden = None
         state, _ = env.reset()
 
-        while not len(self.buffer) >= n_samples:
+        while not len(self) >= n_samples:
             action, hidden = agent.predict(state, hidden)
             next_state, reward, terminated, truncated, _ = env.step(action)
             done = terminated or truncated
 
-            self.add(Experience(state, action, reward, next_state, done))
+            self.add(state, action, reward, next_state, done)
 
             state = next_state
 

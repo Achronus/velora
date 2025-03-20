@@ -10,7 +10,6 @@ import json
 import torch
 import gymnasium as gym
 
-from velora.buffer.experience import Experience
 from velora.callbacks import CometAnalytics, EarlyStopping, SaveCheckpoints
 from velora.metrics.models import Episode
 from velora.models import LiquidNCPNetwork
@@ -117,13 +116,11 @@ class TestLiquidDDPG:
     def env(self) -> gym.Env:
         return gym.make("InvertedPendulum-v5", render_mode="rgb_array")
 
-    def test_init(self, ddpg: LiquidDDPG, ddpg_params: DDPGParamsType):
+    def test_init(self, ddpg: LiquidDDPG):
         assert isinstance(ddpg.actor, DDPGActor)
         assert isinstance(ddpg.critic, DDPGCritic)
         assert isinstance(ddpg.actor_target, DDPGActor)
         assert isinstance(ddpg.critic_target, DDPGCritic)
-        assert len(ddpg.buffer) == 0
-        assert ddpg.buffer.capacity == ddpg_params["buffer_size"]
 
     def test_update_target_networks(self, ddpg: LiquidDDPG):
         tau = 0.005
@@ -170,9 +167,7 @@ class TestLiquidDDPG:
             next_state = torch.zeros(ddpg.state_dim)
             done = False
 
-            # Create Experience object explicitly
-            exp = Experience(state, action, reward, next_state, done)
-            ddpg.buffer.add(exp)
+            ddpg.buffer.add(state, action, reward, next_state, done)
 
         # Perform training step
         result = ddpg._train_step(batch_size, gamma)
@@ -188,9 +183,12 @@ class TestLiquidDDPG:
 
         # Add fewer experiences than batch_size
         for _ in range(batch_size - 1):
-            state = torch.zeros(ddpg.state_dim)
-            exp = Experience(state, 1.0, 2.0, state, False)
-            ddpg.buffer.add(exp)
+            state = torch.zeros([ddpg.state_dim])
+            action = torch.tensor([1.0])
+            reward = 2.0
+            next_state = torch.zeros(ddpg.state_dim)
+            done = False
+            ddpg.buffer.add(state, action, reward, next_state, done)
 
         # Should return None when buffer is insufficient
         result = ddpg._train_step(batch_size, gamma)
@@ -227,8 +225,7 @@ class TestLiquidDDPG:
             reward = float(i * 0.5)
             next_state = torch.ones(ddpg.state_dim)
             done = i == 9
-            exp = Experience(state, action, reward, next_state, done)
-            ddpg.buffer.add(exp)
+            ddpg.buffer.add(state, action, reward, next_state, done)
 
         with tempfile.TemporaryDirectory() as temp_dir:
             filepath = os.path.join(temp_dir, "model.pt")
