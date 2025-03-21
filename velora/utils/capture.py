@@ -1,14 +1,17 @@
+from typing import TYPE_CHECKING
 import warnings
 from pathlib import Path
 
 import gymnasium as gym
 
 from velora.gym.wrap import add_core_env_wrappers
-from velora.models.base import RLAgent
+
+if TYPE_CHECKING:
+    from velora.models.base import RLAgent  # pragma: no cover
 
 
 def record_last_episode(
-    agent: RLAgent,
+    agent: "RLAgent",
     env_name: str,
     dirname: str,
     root_path: str | Path | None = None,

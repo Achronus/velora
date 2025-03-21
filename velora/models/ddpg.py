@@ -2,6 +2,8 @@ from copy import deepcopy
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Literal, Self, Tuple, Type, get_args
 
+from velora.training.display import training_info
+
 try:
     from typing import override
 except ImportError:  # pragma: no cover
@@ -343,6 +345,17 @@ class LiquidDDPG(RLAgent):
         self.config = self.config.update(
             env.spec.name,
             self._set_train_params(locals()),
+        )
+
+        # Display console details
+        training_info(
+            self.__class__.__name__,
+            env.spec.id,
+            n_episodes,
+            batch_size,
+            window_size,
+            callbacks,
+            self.device,
         )
 
         self.buffer.warm(self, env.spec.id, batch_size)

@@ -5,8 +5,6 @@ from typing import TYPE_CHECKING, List, Self, Type
 import gymnasium as gym
 from sqlmodel import Session
 
-from velora.utils.format import number_to_short
-
 if TYPE_CHECKING:
     from velora.callbacks import TrainCallback  # pragma: no cover
 
@@ -99,12 +97,6 @@ class TrainHandler:
         self.start()
         self.env = add_core_env_wrappers(self.env, self.agent.device)
 
-        print(
-            "\n------------"
-            f"Training started on {self.env.spec.id} for {number_to_short(self.state.total_episodes)} episodes."
-            f"\nNote: moving averages computed based on window_size={number_to_short(self.window_size)}."
-            "\n------------"
-        )
         return self
 
     def __exit__(
@@ -134,7 +126,7 @@ class TrainHandler:
         self.train_time = ElapsedTime.elapsed(self.start_time)
         print(
             "------------",
-            f"\nTraining completed after: {self.train_time}.",
+            f"\nTraining completed in: {self.train_time}.",
         )
 
     def _run_callbacks(self) -> None:

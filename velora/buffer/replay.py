@@ -93,7 +93,6 @@ class ReplayBuffer(BufferBase):
         env = gym.make(env_name)
         env = add_core_env_wrappers(env, agent.device)
 
-        print(f"\nWarming buffer with {n_samples=}...", end=" ")
         hidden = None
         state, _ = env.reset()
 
@@ -110,4 +109,3 @@ class ReplayBuffer(BufferBase):
                 state, _ = env.reset()
 
         env.close()
-        print("Complete.")

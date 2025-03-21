@@ -51,6 +51,16 @@ class TrainCallback:
         """
         pass  # pragma: no cover
 
+    @abstractmethod
+    def info(self) -> str:
+        """
+        Provides details with basic information about the callback initialization.
+
+        Returns:
+            details (str): a string of information.
+        """
+        pass  # pragma: no cover
+
 
 class EarlyStopping(TrainCallback):
     """
@@ -69,10 +79,6 @@ class EarlyStopping(TrainCallback):
         self.patience = patience
 
         self.count = 0
-
-        print(
-            f"'{self.__class__.__name__}' enabled with reward_{target=} and {patience=}."
-        )
 
     def __call__(self, state: "TrainState") -> "TrainState":
         if state.stop_training:
@@ -98,6 +104,9 @@ class EarlyStopping(TrainCallback):
             "target": self.target,
             "patience": self.patience,
         }
+
+    def info(self) -> str:
+        return f"'{self.__class__.__name__}' enabled with 'target={self.target}' and 'patience={self.patience}'."
 
 
 class SaveCheckpoints(TrainCallback):
@@ -134,10 +143,6 @@ class SaveCheckpoints(TrainCallback):
             raise FileExistsError(
                 f"Items already exist in the '{self.filepath.parent}' directory! Either change the 'dirname' or delete the folders contents."
             )
-
-        print(
-            f"'{self.__class__.__name__}' enabled with ep_{frequency=} and {buffer=}."
-        )
 
     def __call__(self, state: "TrainState") -> "TrainState":
         # Only perform checkpoint operations on episode and complete events
@@ -202,6 +207,9 @@ class SaveCheckpoints(TrainCallback):
             "buffer": self.buffer,
         }
 
+    def info(self) -> str:
+        return f"'{self.__class__.__name__}' enabled with 'dirname={self.dirname}', 'frequency={self.frequency}' and 'buffer={self.buffer}'."
+
 
 class RecordVideos(TrainCallback):
     """
@@ -262,8 +270,6 @@ class RecordVideos(TrainCallback):
             step_trigger=trigger if method == "step" else None,
         )
 
-        print(f"'{self.__class__.__name__}' enabled with {str(method)}_{frequency=}.")
-
     def __call__(self, state: "TrainState") -> "TrainState":
         # 'start': Set the recording state
         if state.status == "start":
@@ -284,6 +290,9 @@ class RecordVideos(TrainCallback):
             "method": self.method,
             "frequency": self.frequency,
         }
+
+    def info(self) -> str:
+        return f"'{self.__class__.__name__}' enabled with 'dirname={self.dirname}', 'method={str(self.method)}' and 'frequency={self.frequency}'."
 
 
 class CometAnalytics(TrainCallback):
@@ -339,15 +348,9 @@ class CometAnalytics(TrainCallback):
             tags=tags,
         )
 
-        experiment_name = experiment_name if experiment_name else "auto"
-
         self.project_name = project_name
-        self.experiment_name = experiment_name
+        self.experiment_name = experiment_name if experiment_name else "auto"
         self.tags = tags if tags else "auto"
-
-        print(
-            f"'{self.__class__.__name__}' enabled with {project_name=} and {experiment_name=}."
-        )
 
     def __call__(self, state: "TrainState") -> "TrainState":
         # Setup experiment
@@ -425,3 +428,6 @@ class CometAnalytics(TrainCallback):
             "experiment_name": self.experiment_name,
             "tags": ",".join(self.tags) if isinstance(self.tags, list) else self.tags,
         }
+
+    def info(self) -> str:
+        return f"'{self.__class__.__name__}' enabled with 'project_name={self.project_name}', 'experiment_name={self.experiment_name}' and 'tags={self.tags}'."
