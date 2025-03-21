@@ -17,12 +17,11 @@ if TYPE_CHECKING:
 
 from velora.buffer.experience import BatchExperience
 from velora.buffer.replay import ReplayBuffer
-from velora.models.base import RLAgent
-from velora.models.config import ModelDetails, ModuleConfig, RLAgentConfig, TorchConfig
-from velora.models.lnn.ncp import LiquidNCPNetwork
+from velora.models.base import NCPModule, RLAgent
+from velora.models.config import ModelDetails, RLAgentConfig, TorchConfig
 from velora.noise import OUNoise
 from velora.training.handler import TrainHandler
-from velora.utils.torch import soft_update, summary
+from velora.utils.torch import soft_update
 
 CheckpointLiteral = Literal[
     "state_dim",
@@ -39,7 +38,7 @@ CheckpointLiteral = Literal[
 ]
 
 
-class DDPGActor(nn.Module):
+class DDPGActor(NCPModule):
     """
     A Liquid NCP Actor Network for the DDPG algorithm.
     """
@@ -59,15 +58,7 @@ class DDPGActor(nn.Module):
             num_actions (int): the number of actions
             device (torch.device, optional): the device to perform computations on
         """
-
-        super().__init__()
-
-        self.ncp = LiquidNCPNetwork(
-            in_features=num_obs,
-            n_neurons=n_neurons,
-            out_features=num_actions,
-            device=device,
-        ).to(device)
+        super().__init__(num_obs, n_neurons, num_actions, device=device)
 
     def forward(
         self, obs: torch.Tensor, hidden: torch.Tensor | None = None
@@ -87,21 +78,8 @@ class DDPGActor(nn.Module):
         scaled_actions = torch.tanh(actions)  # Bounded: [-1, 1]
         return scaled_actions, new_hidden
 
-    def config(self) -> ModuleConfig:
-        """
-        Gets details about the module.
 
-        Returns:
-            config (ModuleConfig): a config model containing module details.
-        """
-        return ModuleConfig(
-            active_params=self.ncp.active_params,
-            total_params=self.ncp.total_params,
-            architecture=summary(self),
-        )
-
-
-class DDPGCritic(nn.Module):
+class DDPGCritic(NCPModule):
     """
     A Liquid NCP Critic Network for the DDPG algorithm.
     """
@@ -121,14 +99,7 @@ class DDPGCritic(nn.Module):
             num_actions (int): the number of actions
             device (torch.device, optional): the device to perform computations on
         """
-        super().__init__()
-
-        self.ncp = LiquidNCPNetwork(
-            in_features=num_obs + num_actions,
-            n_neurons=n_neurons,
-            out_features=1,  # Q-value output
-            device=device,
-        ).to(device)
+        super().__init__(num_obs + num_actions, n_neurons, 1, device=device)
 
     def forward(
         self,
@@ -151,19 +122,6 @@ class DDPGCritic(nn.Module):
         inputs = torch.cat([obs, actions], dim=-1)
         q_values, new_hidden = self.ncp(inputs, hidden)
         return q_values, new_hidden
-
-    def config(self) -> ModuleConfig:
-        """
-        Gets details about the module.
-
-        Returns:
-            config (ModuleConfig): a config model containing module details.
-        """
-        return ModuleConfig(
-            active_params=self.ncp.active_params,
-            total_params=self.ncp.total_params,
-            architecture=summary(self),
-        )
 
 
 class LiquidDDPG(RLAgent):

@@ -4,8 +4,58 @@ from typing import Any, Dict, Self, Tuple
 
 import gymnasium as gym
 import torch
+import torch.nn as nn
 
-from velora.models.config import RLAgentConfig, TrainConfig
+from velora.models.config import ModuleConfig, RLAgentConfig, TrainConfig
+from velora.models.lnn.ncp import LiquidNCPNetwork
+from velora.utils.torch import summary
+
+
+class NCPModule(nn.Module):
+    """
+    A base class for NCP modules.
+
+    Useful for Actor-Critic modules.
+    """
+
+    def __init__(
+        self,
+        in_features: int,
+        n_neurons: int,
+        out_features: int,
+        *,
+        device: torch.device | None = None,
+    ):
+        """
+        Parameters:
+            in_features (int): the number of input nodes
+            n_neurons (int): the number of hidden neurons
+            out_features (int): the number of output nodes
+            device (torch.device, optional): the device to perform computations on
+        """
+        super().__init__()
+
+        self.device = device
+
+        self.ncp = LiquidNCPNetwork(
+            in_features=in_features,
+            n_neurons=n_neurons,
+            out_features=out_features,
+            device=device,
+        ).to(device)
+
+    def config(self) -> ModuleConfig:
+        """
+        Gets details about the module.
+
+        Returns:
+            config (ModuleConfig): a config model containing module details.
+        """
+        return ModuleConfig(
+            active_params=self.ncp.active_params,
+            total_params=self.ncp.total_params,
+            architecture=summary(self),
+        )
 
 
 class RLAgent:
