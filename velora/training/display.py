@@ -1,10 +1,18 @@
-import textwrap
 from typing import TYPE_CHECKING, List
 
 from velora.utils.format import number_to_short
 
 if TYPE_CHECKING:
     from velora.callbacks import TrainCallback  # pragma: no cover
+
+
+NAME_STR = """
+__     __   _                 
+\\ \\   / /__| | ___  _ __ __ _ 
+ \\ \\ / / _ \\ |/ _ \\| '__/ _` |
+  \\ V /  __/ | (_) | | | (_| |
+   \\_/ \\___|_|\\___/|_|  \\__,_|
+"""
 
 
 def training_info(
@@ -19,28 +27,18 @@ def training_info(
     """
     Display's starting information to the console for a training run.
     """
-    cb_str = ""
+    output = NAME_STR.strip()
 
-    if len(callbacks) > 0:
-        cb_str += "Active Callbacks:"
-        cb_str += "\n---------------------------------"
+    cb_str = "\n\nActive Callbacks:"
+    cb_str += "\n---------------------------------\n"
+    cb_str += "\n".join(cb.info().lstrip() for cb in callbacks)
+    cb_str += "\n---------------------------------\n"
 
-        for cb in callbacks:
-            cb_str += cb.info()
+    output += cb_str if callbacks else "\n\n"
+    output += f"Training '{agent_name}' agent on '{env_id}' for '{number_to_short(n_episodes)}' episodes.\n"
+    output += f"Sampling episodes with '{batch_size=}'.\n"
+    output += f"Running computations on device '{device}'.\n"
+    output += f"Moving averages computed based on 'window_size={number_to_short(window_size)}'.\n"
+    output += "---------------------------------"
 
-        cb_str += "\n---------------------------------\n"
-
-    print(
-        textwrap.dedent(f"""
-        __     __   _                 
-        \\ \\   / /__| | ___  _ __ __ _ 
-         \\ \\ / / _ \\ |/ _ \\| '__/ _` |
-          \\ V /  __/ | (_) | | | (_| |
-           \\_/ \\___|_|\\___/|_|  \\__,_|
-        ---------------------------------
-        {cb_str}Training '{agent_name}' agent on '{env_id}' for '{number_to_short(n_episodes)}' episodes.
-        Sampling episodes with '{batch_size=}'.
-        Running computations on device '{device}'.
-        Moving averages computed based on 'window_size={number_to_short(window_size)}'.
-        ---------------------------------""")
-    )
+    print(output)

@@ -125,7 +125,7 @@ class TrainHandler:
 
         self.train_time = ElapsedTime.elapsed(self.start_time)
         print(
-            "------------",
+            "---------------------------------",
             f"\nTraining completed in: {self.train_time}.",
         )
 
