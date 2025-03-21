@@ -271,7 +271,7 @@ class LiquidDDPG(RLAgent):
         soft_update(self.actor, self.actor_target, tau=tau)
         soft_update(self.critic, self.critic_target, tau=tau)
 
-    def _update_critic(self, batch: BatchExperience, gamma: float) -> float:
+    def _update_critic(self, batch: BatchExperience, gamma: float) -> torch.Tensor:
         """
         Helper method. Performs a Critic Network update.
 
@@ -282,7 +282,7 @@ class LiquidDDPG(RLAgent):
             gamma (float): the reward discount factor
 
         Returns:
-            critic_loss (float): the Critic's loss value.
+            critic_loss (torch.Tensor): the Critic's loss value.
         """
         with torch.no_grad():
             next_states = batch.next_states
@@ -297,9 +297,9 @@ class LiquidDDPG(RLAgent):
         critic_loss.backward()
         self.critic_optim.step()
 
-        return critic_loss.item()
+        return critic_loss
 
-    def _update_actor(self, states: torch.Tensor) -> float:
+    def _update_actor(self, states: torch.Tensor) -> torch.Tensor:
         """
         Helper method. Performs an Actor Network update.
 
@@ -307,7 +307,7 @@ class LiquidDDPG(RLAgent):
             states (torch.Tensor): a batch of state experiences from the buffer
 
         Returns:
-            actor_loss (float): the Actor's loss value.
+            actor_loss (torch.Tensor): the Actor's loss value.
         """
         next_actions, _ = self.actor(states)
         actor_q, _ = self.critic(states, next_actions)
@@ -317,9 +317,11 @@ class LiquidDDPG(RLAgent):
         actor_loss.backward()
         self.actor_optim.step()
 
-        return actor_loss.item()
+        return actor_loss
 
-    def _train_step(self, batch_size: int, gamma: float) -> Tuple[float, float]:
+    def _train_step(
+        self, batch_size: int, gamma: float
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Helper method. Performs a single training step.
 
@@ -328,8 +330,8 @@ class LiquidDDPG(RLAgent):
             gamma (float): the reward discount factor
 
         Returns:
-            critic_loss (float): the critic loss.
-            actor_loss (float): the actor loss.
+            critic_loss (torch.Tensor): the critic loss.
+            actor_loss (torch.Tensor): the actor loss.
         """
         if len(self.buffer) < batch_size:
             return
@@ -387,9 +389,12 @@ class LiquidDDPG(RLAgent):
 
         self.buffer.warm(self, env.spec.id, batch_size)
 
-        with TrainHandler(self, env, n_episodes, window_size, callbacks) as handler:
+        with TrainHandler(
+            self, env, n_episodes, max_steps, window_size, callbacks
+        ) as handler:
             for i_ep in range(n_episodes):
                 current_ep = i_ep + 1
+                ep_reward = 0.0
                 hidden = None
 
                 state, _ = handler.env.reset()
@@ -412,30 +417,24 @@ class LiquidDDPG(RLAgent):
                     critic_loss, actor_loss = self._train_step(batch_size, gamma)
                     self._update_target_networks(tau)
 
-                    handler.metrics.add_step(
-                        current_ep,
-                        current_step,
-                        critic_loss,
-                        actor_loss,
-                        action,
-                        noise_scale,
-                    )
+                    handler.metrics.add_step(critic_loss, actor_loss)
                     handler.step(current_step)
 
                     state = next_state
 
                     if done:
+                        ep_reward = info["episode"]["r"].item()
                         handler.metrics.add_episode(
                             current_ep,
-                            info["episode"]["r"].item(),
-                            info["episode"]["l"].item(),
+                            info["episode"]["r"],
+                            info["episode"]["l"],
                         )
                         break
 
-                handler.episode(current_ep)
-
                 if current_ep % window_size == 0 or handler.stop():
                     handler.metrics.info(current_ep)
+
+                handler.episode(current_ep, ep_reward)
 
                 if handler.stop():
                     break

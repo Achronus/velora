@@ -1,5 +1,6 @@
 from velora.utils.capture import record_last_episode
 from velora.utils.core import set_device, set_seed
+from velora.utils.format import number_to_short
 from velora.utils.torch import (
     active_parameters,
     hard_update,
@@ -21,4 +22,5 @@ __all__ = [
     "active_parameters",
     "summary",
     "record_last_episode",
+    "number_to_short",
 ]

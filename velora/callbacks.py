@@ -79,16 +79,7 @@ class EarlyStopping(TrainCallback):
             return state
 
         if state.status == "episode":
-            results = get_current_episode(
-                state.session,
-                state.experiment_id,
-                state.current_ep,
-            )
-
-            for episode in results:
-                reward = episode.reward
-
-            if reward >= self.target:
+            if state.ep_reward >= self.target:
                 self.count += 1
 
                 if self.count >= self.patience:

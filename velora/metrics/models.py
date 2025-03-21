@@ -24,7 +24,6 @@ class Experiment(SQLModel, table=True):
 
     # Relationships
     episodes: List["Episode"] = Relationship(back_populates="experiment")
-    steps: List["Step"] = Relationship(back_populates="experiment")
 
 
 class Episode(SQLModel, table=True):
@@ -71,45 +70,3 @@ class Episode(SQLModel, table=True):
 
     # Relationships
     experiment: Experiment = Relationship(back_populates="episodes")
-    steps: List["Step"] = Relationship(back_populates="episode")
-
-
-class Step(SQLModel, table=True):
-    """
-    Step-level metrics tracking individual actions and states.
-
-    Attributes:
-        id (int): a unique identifier for the timestep
-        experiment_id (int): the experiment ID associated to the timestep
-        episode_id (int): the episode ID associated to the timestep
-        step_num (int): the timestep index
-        action (str): a JSON string for the agent's action taken at the timestep
-        actor_loss (float): the average Actor loss for the timestep
-        critic_loss (float): the average Critic loss for the timestep
-        created_at (datetime): the date and time when the the entry was created
-    """
-
-    id: int | None = Field(default=None, primary_key=True)
-    experiment_id: int = Field(foreign_key="experiment.id", index=True)
-    episode_id: int = Field(foreign_key="episode.id", index=True)
-    step_num: int
-
-    # Action metrics
-    action: str  # JSON object
-
-    # Loss metrics
-    actor_loss: float
-    critic_loss: float
-
-    # Behaviour metrics
-    # explore_rate: float
-    # exploit_mean: float
-    # exploit_std: float
-    # is_exploration: bool
-
-    # Timestamps
-    created_at: datetime = Field(default_factory=datetime.now)
-
-    # Relationships
-    experiment: Experiment = Relationship(back_populates="steps")
-    episode: Episode = Relationship(back_populates="steps")

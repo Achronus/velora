@@ -5,6 +5,8 @@ from typing import TYPE_CHECKING, List, Self, Type
 import gymnasium as gym
 from sqlmodel import Session
 
+from velora.utils.format import number_to_short
+
 if TYPE_CHECKING:
     from velora.callbacks import TrainCallback  # pragma: no cover
 
@@ -27,6 +29,7 @@ class TrainHandler:
         agent: RLAgent,
         env: gym.Env,
         n_episodes: int,
+        max_steps: int,
         window_size: int,
         callbacks: List["TrainCallback"] | None,
     ) -> None:
@@ -35,15 +38,18 @@ class TrainHandler:
             agent (RLAgent): the agent being trained
             env (Gymnasium.Env): the environment to train the agent on
             n_episodes (int): the total number of training episodes
+            max_steps (int): maximum number of steps in an episode
             window_size (int): episode window size rate
             callbacks (List[TrainCallback] | None): a list of training callbacks.
                 If `None` sets to an empty list
         """
         self.agent = agent
         self.env = env
-        self.window_size = window_size
         self.n_episodes = n_episodes
+        self.max_steps = max_steps
+        self.window_size = window_size
         self.callbacks = callbacks or []
+        self.device = self.agent.device
 
         self.state: TrainState | None = None
 
@@ -76,6 +82,8 @@ class TrainHandler:
             self.session,
             self.window_size,
             self.n_episodes,
+            self.max_steps,
+            device=self.device,
         )
         self._metrics.start_experiment(self.agent.config)
 
@@ -92,8 +100,9 @@ class TrainHandler:
         self.env = add_core_env_wrappers(self.env, self.agent.device)
 
         print(
-            f"Training started on {self.env.spec.id} for {self.state.total_episodes} episodes."
-            f"\nNote: moving averages computed based on window_size={self.window_size}."
+            "\n------------"
+            f"Training started on {self.env.spec.id} for {number_to_short(self.state.total_episodes)} episodes."
+            f"\nNote: moving averages computed based on window_size={number_to_short(self.window_size)}."
             "\n------------"
         )
         return self
@@ -116,7 +125,6 @@ class TrainHandler:
                 occurred. `None` otherwise
         """
         self.record_last_episode()
-        # self.save_plots()
 
         self.complete()
 
@@ -153,14 +161,19 @@ class TrainHandler:
         self.state.update(status="step", current_step=current_step)
         self._run_callbacks()
 
-    def episode(self, current_ep: int) -> None:
+    def episode(self, current_ep: int, ep_reward: float) -> None:
         """
         Performs `episode` callback event.
 
         Parameters:
             current_ep (int): the current training episode index
+            ep_reward (float): the episodes reward (return)
         """
-        self.state.update(status="episode", current_ep=current_ep)
+        self.state.update(
+            status="episode",
+            current_ep=current_ep,
+            ep_reward=ep_reward,
+        )
         self._run_callbacks()
 
     def complete(self) -> None:

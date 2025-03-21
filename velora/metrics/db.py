@@ -13,7 +13,7 @@ def get_db_engine() -> Engine:
     Returns:
         engine (sqlalchemy.Engine): a database engine instance
     """
-    from velora.metrics.models import Episode, Experiment, Step  # pragma: no cover
+    from velora.metrics.models import Episode, Experiment  # pragma: no cover
 
     if os.getenv("VELORA_TEST_MODE", "").lower() in ("true", "1"):
         # Use in-memory database for testing

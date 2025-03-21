@@ -1,21 +1,15 @@
-import json
-from collections import deque
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Dict, List, Literal
-
-from velora.metrics.db import get_current_episode
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from velora.models.config import RLAgentConfig  # pragma: no cover
 
-import numpy as np
 import torch
 from sqlmodel import Session
 
-from velora.metrics.models import Episode, Experiment, Step
+from velora.metrics.models import Episode, Experiment
+from velora.utils.format import number_to_short
 
 
-@dataclass
 class StepStorage:
     """
     A storage container for step metrics.
@@ -23,126 +17,148 @@ class StepStorage:
     Useful for calculating the episodic average values to store in `MetricStorage`.
 
     Attributes:
-        critic_losses (List[float]): a list of agent Critic loss values
-        actor_losses (List[float]): a list of agent Actor loss values
+        critic_losses (torch.Tensor): a tensor of agent Critic loss values
+        actor_losses (torch.Tensor): a tensor of agent Actor loss values
     """
 
-    critic_losses: List[float] = field(default_factory=list)
-    actor_losses: List[float] = field(default_factory=list)
+    def __init__(self, capacity: int, *, device: torch.device | None = None) -> None:
+        """
+        Parameters:
+            capacity (int): storage capacity for each tensor
+            device (torch.device, optional): the device to perform computations on
+        """
+        self.capacity = capacity
+        self.device = device
 
-    def critic_avg(self) -> float:
+        # Position indicators
+        self.position = 0
+        self.size = 0
+
+        self.critic_losses = torch.zeros((capacity), device=device)
+        self.actor_losses = torch.zeros((capacity), device=device)
+
+    def critic_avg(self, ep_length: int) -> torch.Tensor:
         """
         Computes the critic loss average. Useful for computing episodic averages.
 
+        Parameters:
+            ep_length (int): size of the episode
+
         Returns:
-            avg (float): critic loss step average
+            avg (torch.Tensor): critic loss step average
         """
-        if len(self.critic_losses) == 0:
-            return 0
+        return self.critic_losses[:ep_length].mean()
 
-        return np.mean(self.critic_losses).item()
-
-    def actor_avg(self) -> float:
+    def actor_avg(self, ep_length: int) -> torch.Tensor:
         """
         Computes the actor loss average. Useful for computing episodic averages.
 
+        Parameters:
+            ep_length (int): size of the episode
+
         Returns:
-            avg (float): actor loss step average
+            avg (torch.Tensor): actor loss step average
         """
-        if len(self.actor_losses) == 0:
-            return 0
+        return self.actor_losses[:ep_length].mean()
 
-        return np.mean(self.actor_losses).item()
-
-    def add(self, items: Dict[Literal["critic_losses", "actor_losses"], float]) -> None:
+    def add(self, critic: torch.Tensor, actor: torch.Tensor) -> None:
         """
-        Stores one or more metrics into storage. Must be single values with
-        their respective keys.
+        Adds one of each metric into storage.
 
         Parameters:
-            items (Dict[str, float]): a set of key-value pairs for
-                loggable metrics.
-
-                Valid Options -
-
-                - `critic_losses` - agent Critic loss value
-                - `actor_losses` - agent Actor loss value
+            critic (torch.Tensor): critic loss
+            actor (torch.Tensor): actor loss
         """
-        for key, value in items.items():
-            array: List = getattr(self, key)
-            array.append(value)
+        self.critic_losses[self.position] = critic.to(self.device)
+        self.actor_losses[self.position] = actor.to(self.device)
+
+        # Update position
+        self.position = (self.position + 1) % self.capacity
+        self.size = min(self.size + 1, self.capacity)
 
     def empty(self) -> None:
         """Empty storage."""
-        self.critic_losses.clear()
-        self.actor_losses.clear()
+        self.critic_losses.zero_()
+        self.actor_losses.zero_()
+
+        self.position = 0
+        self.size = 0
 
 
-@dataclass
 class MovingMetric:
     """
     Tracks a metric with a moving window for statistics.
 
     Attributes:
-        values (List[float | int]): a list of values
-        window (collections.deque): a list of values for the statistics
-        window_size (int): the window size of the moving statistics.
-            Default is `100`
+        window (torch.Tensor): a list of values for the statistics
+        window_size (int): the window size of the moving statistics
     """
 
-    values: List[float | int] = field(default_factory=list)
-    window: deque = field(default_factory=deque)
-    window_size: int = 100
+    def __init__(self, window_size: int, *, device: torch.device | None = None) -> None:
+        """
+        Parameters:
+            window_size (int): the size of the moving window
+            device (torch.device, optional): the device to perform computations on
+        """
+        self.window_size = window_size
+        self.device = device
+
+        # Position indicators
+        self.position = 0
+        self.size = 0
+
+        # Pre-allocated storage
+        self.window = torch.zeros((window_size), device=device)
 
     @property
-    def latest(self) -> float | int:
+    def latest(self) -> torch.Tensor:
         """Gets the latest value."""
-        return self.values[-1]
+        latest_pos = (self.position - 1) % self.window_size
+        return self.window[latest_pos]
 
-    def add(self, value: float | int) -> None:
+    def add(self, value: torch.Tensor) -> None:
         """
         Adds a value and updates the window.
 
         Parameters:
-            value (float): value to add
+            value (torch.Tensor): value to add
         """
-        self.values.append(value)
-        self.window.append(value)
+        self.window[self.position] = value.to(self.device)
 
-        if len(self.window) > self.window_size:
-            self.window.popleft()  # Remove oldest value
+        # Update position - deque style
+        self.position = (self.position + 1) % self.window_size
+        self.size = min(self.size + 1, self.window_size)
 
-    def mean(self, values: List[float] | None = None) -> float:
+    def mean(self) -> torch.Tensor:
         """
         Calculates the mean of values or the current window.
 
-        Parameters:
-            values (List[float], optional): Values to calculate mean for.
-                If `None`, uses the current window
-
         Returns:
-            avg (float): the calculated mean.
+            avg (torch.Tensor): the calculated mean.
         """
-        values = values if values is not None else self.window
-        return np.mean(values).item() if values else 0.0
+        return self.window.mean()
 
-    def std(self, values: List[float] | None = None) -> float:
+    def std(self) -> torch.Tensor:
         """
         Calculates the standard deviation of values or the current window.
 
-        Parameters:
-            values (List[float], optional): Values to calculate standard deviation
-                for. If `None`, uses the current window
+        Returns:
+            std (torch.Tensor): the calculated standard deviation.
+        """
+        return self.window.std()
+
+    def max(self) -> torch.Tensor:
+        """
+        Calculates the maximum value of a set of values or the current window.
 
         Returns:
-            std (float): the calculated standard deviation.
+            max (torch.Tensor): the maximum value.
         """
-        values = values if values is not None else self.window
-        return np.std(values).item() if len(values) > 1 else 0.0
+        return self.window.max()
 
     def __len__(self) -> int:
         """Returns the number of items in the values array."""
-        return len(self.values)
+        return self.size
 
 
 class TrainMetrics:
@@ -151,21 +167,37 @@ class TrainMetrics:
     an agents training performance.
     """
 
-    def __init__(self, session: Session, window_size: int, n_episodes: int) -> None:
+    def __init__(
+        self,
+        session: Session,
+        window_size: int,
+        n_episodes: int,
+        max_steps: int,
+        *,
+        device: torch.device | None = None,
+    ) -> None:
         """
         Parameters:
             session (sqlmodel.Session): current metric database session
             window_size (int): moving average window size
             n_episodes (int): total number of training episodes
+            max_steps (int): maximum number of steps per episode
+            device (torch.device, optional): the device to perform computations on
         """
         self.session = session
         self.window_size = window_size
         self.n_episodes = n_episodes
+        self.max_steps = max_steps
+        self.device = device
 
-        self._ep_rewards = MovingMetric(window_size=window_size)
-        self._current_losses = StepStorage()
+        self._ep_rewards = MovingMetric(window_size, device=device)
+        self._ep_lengths = MovingMetric(window_size, device=device)
+        self._current_losses = StepStorage(max_steps, device=device)
 
         self.experiment_id: int | None = None
+
+        self._critic_loss: torch.Tensor | None = None
+        self._actor_loss: torch.Tensor | None = None
 
     def start_experiment(self, config: "RLAgentConfig") -> None:
         """
@@ -187,65 +219,37 @@ class TrainMetrics:
         self.session.refresh(exp)
         self.experiment_id = exp.id
 
-    def add_step(
-        self,
-        ep_idx: int,
-        step_idx: int,
-        critic: float,
-        actor: float,
-        action: torch.Tensor,
-        action_threshold: float,
-    ) -> None:
+    def add_step(self, critic: torch.Tensor, actor: torch.Tensor) -> None:
         """
-        Add timesteps metrics to the metric database.
+        Add timesteps metrics to local storage.
 
         Parameters:
-            ep_idx (int): the current episode index
-            step_idx (int): the current timestep index
-            critic (float): critic step loss
-            actor (float): actor step loss
-            action (torch.Tensor): the agent action for this timestep
-            action_threshold (float): explore-exploit action threshold
-                (e.g., noise scale)
+            critic (torch.Tensor): critic step loss
+            actor (torch.Tensor): actor step loss
         """
-        self._exp_created_check()
+        self._current_losses.add(critic, actor)
 
-        # is_explore = bool((action.mean().abs() >= action_threshold).item())
-
-        step = Step(
-            experiment_id=self.experiment_id,
-            episode_id=ep_idx,
-            step_num=step_idx,
-            action=json.dumps(action.tolist()),
-            actor_loss=actor,
-            critic_loss=critic,
-            # is_exploration=is_explore,
-        )
-        self.session.add(step)
-        self.session.commit()
-
-        self._current_losses.add(
-            {
-                "critic_losses": critic,
-                "actor_losses": actor,
-            }
-        )
-
-    def add_episode(self, ep_idx: int, reward: float, n_steps: int) -> None:
+    def add_episode(
+        self,
+        ep_idx: int,
+        reward: torch.Tensor,
+        ep_length: torch.Tensor,
+    ) -> None:
         """
         Add episode metrics to the metric database and reset step accumulators.
 
         Parameters:
             ep_idx (int): the current episode index
-            reward (float): episode reward
-            n_steps (int): number of steps after episode done
+            reward (torch.Tensor): episode reward
+            ep_length (torch.Tensor): number of steps after episode done
         """
         self._exp_created_check()
 
-        self._ep_rewards.add(reward)
+        self._ep_rewards.add(reward.to(self.device))
+        self._ep_lengths.add(ep_length.to(self.device))
 
-        actor_loss = self._current_losses.actor_avg()
-        critic_loss = self._current_losses.critic_avg()
+        self._actor_loss = self._current_losses.actor_avg(ep_length.item())
+        self._critic_loss = self._current_losses.critic_avg(ep_length.item())
 
         moving_avg = self.reward_moving_avg()
         moving_std = self.reward_moving_std()
@@ -253,12 +257,12 @@ class TrainMetrics:
         ep = Episode(
             experiment_id=self.experiment_id,
             episode_num=ep_idx,
-            reward=reward,
-            length=n_steps,
+            reward=reward.item(),
+            length=ep_length.item(),
             reward_moving_avg=moving_avg,
             reward_moving_std=moving_std,
-            actor_loss=actor_loss,
-            critic_loss=critic_loss,
+            actor_loss=self._actor_loss.item(),
+            critic_loss=self._critic_loss.item(),
         )
         self.session.add(ep)
         self.session.commit()
@@ -273,7 +277,7 @@ class TrainMetrics:
         Returns:
             avg (float): the average moving reward.
         """
-        return self._ep_rewards.mean()
+        return self._ep_rewards.mean().item()
 
     def reward_moving_std(self) -> float:
         """
@@ -282,17 +286,16 @@ class TrainMetrics:
         Returns:
             avg (float): the average moving standard deviation.
         """
-        return self._ep_rewards.std()
+        return self._ep_rewards.std().item()
 
-    def max_moving_reward(self) -> float:
+    def reward_moving_max(self) -> float:
         """
         Calculates the highest reward for the window.
 
         Returns:
             max (float): the highest reward in the window.
         """
-        values = self._ep_rewards.window
-        return max(values) if len(values) > 1 else 0.0
+        return self._ep_rewards.max().item()
 
     def info(self, current_ep: int) -> None:
         """
@@ -301,17 +304,20 @@ class TrainMetrics:
         Parameters:
             current_ep (int): the current episode index
         """
-        results = get_current_episode(self.session, self.experiment_id, current_ep)
-        window_max = self.max_moving_reward()
+        ep = number_to_short(current_ep)
+        max_eps = number_to_short(self.n_episodes)
 
-        for ep in results:
-            print(
-                f"Episode: {current_ep}/{self.n_episodes}, "
-                f"Avg Reward: {ep.reward_moving_avg:.2f}, "
-                f"Max Reward: {window_max:.2f}, "
-                f"Critic Loss: {ep.critic_loss:.2f}, "
-                f"Actor Loss: {ep.actor_loss:.2f}"
-            )
+        length = number_to_short(int(self._ep_lengths.max().item()))
+        max_length = number_to_short(self.max_steps)
+
+        print(
+            f"Episode: {ep}/{max_eps}, "
+            f"Max Length: {length}/{max_length}, "
+            f"Reward Avg: {self.reward_moving_avg():.2f}, "
+            f"Reward Max: {self.reward_moving_max():.2f}, "
+            f"Critic Loss: {self._critic_loss.item():.2f}, "
+            f"Actor Loss: {self._actor_loss.item():.2f}"
+        )
 
     def _exp_created_check(self) -> None:
         """

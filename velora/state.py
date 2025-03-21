@@ -82,6 +82,7 @@ class TrainState:
 
         current_ep (int, optional): the current episode index
         current_step (int, optional): the current training timestep
+        ep_reward (float, optional): the current episode reward
         stop_training (bool, optional): a flag to declare training termination
         record_state (RecordState, optional): the video recording state
         analytics_state (AnalyticsState, optional): the analytics state
@@ -95,6 +96,7 @@ class TrainState:
     status: StatusLiteral = "start"
     current_ep: int = 0
     current_step: int = 0
+    ep_reward: float = 0.0
     stop_training: bool = False
     record_state: RecordState | None = None
     analytics_state: AnalyticsState | None = None
@@ -105,6 +107,7 @@ class TrainState:
         status: StatusLiteral | None = None,
         current_ep: int | None = None,
         current_step: int | None = None,
+        ep_reward: int | None = None,
     ) -> None:
         """
         Updates the training state. When any input is `None`, uses existing value.
@@ -119,10 +122,12 @@ class TrainState:
 
             current_ep (int, optional): the current episode index
             current_step (int, optional): the current training timestep
+            ep_reward (float, optional): the current episode reward
         """
         self.status = status if status else self.status
         self.current_ep = current_ep if current_ep else self.current_ep
         self.current_step = current_step if current_step else self.current_step
+        self.ep_reward = ep_reward if ep_reward else self.ep_reward
 
     def analytics_update(self) -> None:
         """
