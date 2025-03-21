@@ -6,11 +6,10 @@ To do this offline, we use a [SQLite [:material-arrow-right-bottom:]](https://ww
 
 ## What's Inside It?
 
-We've split the database into three main tables:
+We've split the database into two main tables:
 
 - [`experiment`](#experiments) - for tracking basic information about your experiment.
 - [`episode`](#episodes) - for storing episode metrics.
-- [`step`](#timesteps) - for storing timestep data for each episode.
 
 ### Experiments
 
@@ -43,25 +42,6 @@ The `episode` table stores the metrics for each training episode. It's the most 
 - `reward_moving_std` - the episodes reward moving standard deviation based on the training `window_size`.
 - `actor_loss` - the average Actor loss for the episode.
 - `critic_loss` - the average Critic loss for the episode.
-- `created_at` - the date and time when the the entry was created.
-
-### Timesteps
-
-???+ api "API Docs"
-
-    [`velora.metrics.Step`](../reference/metrics.md#velora.metrics.Step)
-
-The `step` table stores the metrics for each training timestep.
-
-One episode could have thousands of timesteps, so we've restricted the metrics stored to ones that help us compute `episode` averages. The table contains the following details:
-
-- `id` - a unique identifier for the timestep.
-- `experiment_id` - the experiment ID associated to the timestep.
-- `episode_id` - the episode ID associated to the timestep.
-- `step_num` - the timestep index.
-- `action` - a JSON string for the agent's action taken at the timestep.
-- `actor_loss` - the average Actor loss for the timestep.
-- `critic_loss` - the average Critic loss for the timestep.
 - `created_at` - the date and time when the the entry was created.
 
 ## Exploring the Database
