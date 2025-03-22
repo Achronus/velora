@@ -10,6 +10,7 @@ import numpy as np
 from velora.models.base import RLAgent
 from velora.utils.capture import record_last_episode
 from velora.utils.core import set_seed, set_device
+from velora.utils.format import number_to_short
 from velora.utils.torch import to_tensor, stack_tensor, soft_update, hard_update
 
 
@@ -263,3 +264,93 @@ class TestRecordLastEpisode:
 
         # Verify agent was used
         assert mock_agent.predict.call_count > 0
+
+
+class TestNumberToShort:
+    @pytest.mark.parametrize(
+        "input_value, expected_output",
+        [
+            (1_000_000_000, "1B"),
+            (1_500_000_000, "1.5B"),
+            (2_750_000_000, "2.75B"),
+            (9_999_999_999, "10B"),  # Rounded to 10B
+        ],
+    )
+    def test_billions(self, input_value: int, expected_output: str):
+        """Test conversion of billion-scale numbers."""
+        result = number_to_short(input_value)
+        assert result == expected_output
+
+    @pytest.mark.parametrize(
+        "input_value, expected_output",
+        [
+            (1_000_000, "1M"),
+            (1_250_000, "1.25M"),
+            (5_600_000, "5.6M"),
+            (9_900_000, "9.9M"),
+            (999_999_999, "1000M"),  # Edge case just below billion
+        ],
+    )
+    def test_millions(self, input_value: int, expected_output: str):
+        """Test conversion of million-scale numbers."""
+        result = number_to_short(input_value)
+        assert result == expected_output
+
+    @pytest.mark.parametrize(
+        "input_value, expected_output",
+        [
+            (1_000, "1K"),
+            (1_500, "1.5K"),
+            (2_250, "2.25K"),
+            (9_999, "10K"),  # Rounded to 10K
+            (999_999, "1000K"),  # Edge case just below million
+        ],
+    )
+    def test_thousands(self, input_value: int, expected_output: str):
+        """Test conversion of thousand-scale numbers."""
+        result = number_to_short(input_value)
+        assert result == expected_output
+
+    @pytest.mark.parametrize(
+        "input_value, expected_output",
+        [
+            (0, "0"),
+            (1, "1"),
+            (42, "42"),
+            (500, "500"),
+            (999, "999"),
+        ],
+    )
+    def test_small_numbers(self, input_value: int, expected_output: str):
+        """Test conversion of numbers below 1000."""
+        result = number_to_short(input_value)
+        assert result == expected_output
+
+    @pytest.mark.parametrize(
+        "input_value, expected_output",
+        [
+            (-1, "-1"),
+            (-1_000, "-1K"),
+            (-1_000_000, "-1M"),
+            (-1_500_000_000, "-1.5B"),
+        ],
+    )
+    def test_negative_numbers(self, input_value: int, expected_output: str):
+        """Test conversion of negative numbers."""
+        result = number_to_short(input_value)
+        assert result == expected_output
+
+    @pytest.mark.parametrize(
+        "input_value, expected_output",
+        [
+            (1_234, "1.23K"),  # Regular rounding
+            (1_995, "2K"),  # Rounded up
+            (1_004_999, "1M"),  # Rounds to 1.00M, displayed as 1M
+            (1_994_999, "1.99M"),  # Maintains precision
+            (1_995_000, "2M"),  # Rounds up
+        ],
+    )
+    def test_rounding(self, input_value: int, expected_output: str):
+        """Test rounding behavior of the function."""
+        result = number_to_short(input_value)
+        assert result == expected_output

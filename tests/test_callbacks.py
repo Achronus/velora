@@ -128,6 +128,7 @@ class TestEarlyStopping:
             experiment,
             120.0,
         )
+        train_state.ep_reward = 120.0
 
         callback = EarlyStopping(target=100.0, patience=3)
         result = callback(train_state)
@@ -142,40 +143,23 @@ class TestEarlyStopping:
         train_state.session = session
         train_state.experiment_id = experiment_id
         train_state.status = "episode"
+        train_state.ep_reward = 120.0
 
         callback = EarlyStopping(target=100.0, patience=3)
 
         # First call with high reward
-        self.create_test_episode(
-            session,
-            experiment_id,
-            train_state.current_ep,
-            120.0,
-        )
         result = callback(train_state)
         assert callback.count == 1
         assert not result.stop_training
 
         # Second call with high reward
         train_state.current_ep += 1
-        self.create_test_episode(
-            session,
-            experiment_id,
-            train_state.current_ep,
-            120.0,
-        )
         result = callback(train_state)
         assert callback.count == 2
         assert not result.stop_training
 
         # Third call with high reward - patience met
         train_state.current_ep += 1
-        self.create_test_episode(
-            session,
-            experiment_id,
-            train_state.current_ep,
-            120.0,
-        )
         result = callback(train_state)
         assert callback.count == 3
         assert result.stop_training
