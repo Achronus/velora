@@ -6,14 +6,8 @@ import torch
 from velora.metrics.db import get_current_episode
 from velora.metrics.models import Experiment
 from velora.models.base import RLAgent
-from velora.models.config import (
-    BufferConfig,
-    ModelDetails,
-    ModuleConfig,
-    RLAgentConfig,
-    TorchConfig,
-    TrainConfig,
-)
+
+from velora.models.config import RLAgentConfig
 from velora.models.ddpg import LiquidDDPG
 from velora.state import RecordState
 from velora.training.handler import TrainHandler
@@ -22,7 +16,6 @@ from velora.training.metrics import (
     MovingMetric,
     TrainMetrics,
 )
-from velora.utils.torch import summary
 
 
 class TestStepStorage:
@@ -190,37 +183,13 @@ class TestTrainMetrics:
         )
 
     @pytest.fixture
-    def mock_config(self):
+    def mock_config(self) -> RLAgentConfig:
         ddpg = LiquidDDPG(4, 10, 1)
 
-        return RLAgentConfig(
-            agent="TestAgent",
-            env="TestEnv",
-            model_details=ModelDetails(
-                type="actor-critic",
-                state_dim=4,
-                n_neurons=64,
-                action_dim=2,
-                target_networks=True,
-                actor=ModuleConfig(
-                    active_params=ddpg.actor.ncp.active_params,
-                    total_params=ddpg.actor.ncp.total_params,
-                    architecture=summary(ddpg.actor),
-                ),
-                critic=ModuleConfig(
-                    active_params=ddpg.critic.ncp.active_params,
-                    total_params=ddpg.critic.ncp.total_params,
-                    architecture=summary(ddpg.critic),
-                ),
-            ),
-            buffer=BufferConfig(
-                type="ReplayBuffer",
-                capacity=10000,
-                state_dim=2,
-                action_dim=1,
-            ),
-            torch=TorchConfig(device="cpu", optimizer="Adam", loss="MSELoss"),
-            train_params=TrainConfig(
+        config = ddpg.config
+        config = config.update(
+            "TestEnv",
+            dict(
                 batch_size=32,
                 n_episodes=100,
                 max_steps=200,
@@ -230,6 +199,8 @@ class TestTrainMetrics:
                 noise_scale=0.3,
             ),
         )
+
+        return config
 
     def test_init(self, experiment):
         session, _ = experiment
@@ -251,7 +222,7 @@ class TestTrainMetrics:
         assert isinstance(metrics._current_losses, StepStorage)
         assert metrics._current_losses.capacity == 200
 
-    def test_start_experiment(self, metrics: TrainMetrics, mock_config):
+    def test_start_experiment(self, metrics: TrainMetrics, mock_config: RLAgentConfig):
         """Test starting an experiment."""
         # Start the experiment
         metrics.start_experiment(mock_config)

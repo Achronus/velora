@@ -8,6 +8,7 @@ import tempfile
 import json
 
 import torch
+from torch.jit import RecursiveScriptModule
 import gymnasium as gym
 
 from velora.callbacks import CometAnalytics, EarlyStopping, SaveCheckpoints
@@ -116,10 +117,10 @@ class TestLiquidDDPG:
         return gym.make("InvertedPendulum-v5", render_mode="rgb_array")
 
     def test_init(self, ddpg: LiquidDDPG):
-        assert isinstance(ddpg.actor, DDPGActor)
-        assert isinstance(ddpg.critic, DDPGCritic)
-        assert isinstance(ddpg.actor_target, DDPGActor)
-        assert isinstance(ddpg.critic_target, DDPGCritic)
+        assert isinstance(ddpg.actor, (DDPGActor, RecursiveScriptModule))
+        assert isinstance(ddpg.critic, (DDPGCritic, RecursiveScriptModule))
+        assert isinstance(ddpg.actor_target, (DDPGActor, RecursiveScriptModule))
+        assert isinstance(ddpg.critic_target, (DDPGCritic, RecursiveScriptModule))
 
     def test_update_target_networks(self, ddpg: LiquidDDPG):
         tau = 0.005

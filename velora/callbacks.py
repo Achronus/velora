@@ -418,7 +418,7 @@ class CometAnalytics(TrainCallback):
             auto_output_logging=False,
             log_graph=False,
             display_summary_level=0,
-            disabled=os.getenv("VELORA_TEST_MODE", "").lower() in ("true", "1"),
+            disabled=bool(os.getenv("VELORA_TEST_MODE", "").lower()) in ("true", "1"),
         )
 
         self.experiment.set_name(state.analytics_state.experiment_name)

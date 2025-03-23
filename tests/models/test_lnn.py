@@ -9,7 +9,6 @@ from velora.models.lnn import (
     NCPLiquidCell,
     LiquidNCPNetwork,
     SparseLinear,
-    SparseParameter,
 )
 from velora.utils.core import set_seed
 from velora.wiring import Wiring
@@ -97,8 +96,8 @@ class TestNCPLiquidCell:
         assert layer.out_features == cell.n_hidden
 
         # Check if mask is applied
-        assert torch.is_tensor(layer.weight.mask)
-        assert layer.weight.mask.shape == (cell.n_hidden, cell.head_size)
+        assert torch.is_tensor(layer.mask)
+        assert layer.mask.shape == (cell.n_hidden, cell.head_size)
         assert cell.device == layer.weight.device
 
     def test_new_hidden(self, cell: NCPLiquidCell):
@@ -348,82 +347,6 @@ class TestLiquidNCPNetwork:
         assert h_state.shape == (batch_size, network.hidden_size)
 
 
-class TestSparseParameter:
-    def test_init(self):
-        data = torch.ones(3, 4)
-        mask = torch.ones(3, 4)
-        mask[0, 0] = 0  # Set one value to zero in mask
-
-        param = SparseParameter(data, mask)
-
-        # Check that the parameter has been masked correctly
-        assert param[0, 0].item() == 0
-        assert param[0, 1].item() == 1
-        assert param.mask.equal(mask)
-        assert param.requires_grad is True
-
-    def test_requires_grad_false(self):
-        data = torch.ones(2, 2)
-        mask = torch.ones(2, 2)
-        param = SparseParameter(data, mask, requires_grad=False)
-        assert param.requires_grad is False
-
-    def test_mask_application(self):
-        data = torch.ones(3, 3)
-        mask = torch.zeros(3, 3)
-        mask[1, 1] = 1  # Only one value should be non-zero
-
-        param = SparseParameter(data, mask)
-
-        # Check that only masked values are non-zero
-        assert torch.sum(param != 0).item() == 1
-        assert param[1, 1].item() == 1
-
-    def test_data_assignment(self):
-        data = torch.ones(2, 3)
-        mask = torch.zeros(2, 3)
-        mask[0, 1] = 1
-
-        param = SparseParameter(data, mask)
-        # Assign new data
-        new_data = torch.full((2, 3), 5.0)
-        param.data = new_data
-
-        # Check that mask was applied to new data
-        assert param[0, 0].item() == 0  # Masked value
-        assert param[0, 1].item() == 5  # Unmasked value
-
-    def test_deepcopy(self):
-        import copy
-
-        data = torch.ones(2, 2)
-        mask = torch.ones(2, 2)
-        mask[0, 0] = 0
-
-        param = SparseParameter(data, mask)
-        param_copy = copy.deepcopy(param)
-
-        # Check that copy has same values but is a different object
-        assert id(param) != id(param_copy)
-        assert param_copy[0, 0].item() == 0
-        assert param_copy[0, 1].item() == 1
-        assert id(param.mask) != id(param_copy.mask)
-
-    def test_apply_mask(self):
-        data = torch.ones(3, 4)
-        mask = torch.ones(3, 4)
-        mask[0, 0] = 0
-        mask[-1, -1] = 0
-
-        param = SparseParameter(data, mask)
-        param.apply_mask()
-
-        assert param.data[0, 0].item() == 0
-        assert param.data[-1, -1].item() == 0
-        assert param.mask.equal(mask)
-        assert any(param.data.not_equal(data).tolist())
-
-
 class TestSparseLinear:
     def test_init(self):
         in_features = 5
@@ -436,9 +359,9 @@ class TestSparseLinear:
         # Check dimensions and properties
         assert layer.in_features == in_features
         assert layer.out_features == out_features
-        assert isinstance(layer.weight, SparseParameter)
+        assert isinstance(layer.weight, nn.Parameter)
         assert layer.weight.shape == (out_features, in_features)
-        assert layer.weight.mask.equal(mask)
+        assert layer.mask.equal(mask)
         assert layer.bias is not None
         assert layer.bias.shape == (out_features,)
 
