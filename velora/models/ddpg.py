@@ -1,17 +1,28 @@
 from copy import deepcopy
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Self, Tuple, Type, get_args
+from typing import TYPE_CHECKING, List, Literal, Self, Tuple, Type
+
+try:
+    from typing import override
+except ImportError:  # pragma: no cover
+    from typing_extensions import override  # pragma: no cover
 
 import gymnasium as gym
-import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
 
-from velora.buffer import BatchExperience, Experience, ReplayBuffer
-from velora.gym import add_core_env_wrappers
-from velora.models.lnn.ncp import LiquidNCPNetwork
+if TYPE_CHECKING:
+    from velora.callbacks import TrainCallback  # pragma: no cover
+
+from velora.buffer.experience import BatchExperience
+from velora.buffer.replay import ReplayBuffer
+from velora.models.base import NCPModule, RLAgent
+from velora.models.config import ModelDetails, RLAgentConfig, TorchConfig
 from velora.noise import OUNoise
+from velora.training.display import training_info
+from velora.training.handler import TrainHandler
+from velora.utils.restore import load_model, save_model
 from velora.utils.torch import soft_update
 
 CheckpointLiteral = Literal[
@@ -29,7 +40,7 @@ CheckpointLiteral = Literal[
 ]
 
 
-class DDPGActor(nn.Module):
+class DDPGActor(NCPModule):
     """
     A Liquid NCP Actor Network for the DDPG algorithm.
     """
@@ -49,15 +60,7 @@ class DDPGActor(nn.Module):
             num_actions (int): the number of actions
             device (torch.device, optional): the device to perform computations on
         """
-
-        super().__init__()
-
-        self.ncp = LiquidNCPNetwork(
-            in_features=num_obs,
-            n_neurons=n_neurons,
-            out_features=num_actions,
-            device=device,
-        )
+        super().__init__(num_obs, n_neurons, num_actions, device=device)
 
     def forward(
         self, obs: torch.Tensor, hidden: torch.Tensor | None = None
@@ -78,7 +81,7 @@ class DDPGActor(nn.Module):
         return scaled_actions, new_hidden
 
 
-class DDPGCritic(nn.Module):
+class DDPGCritic(NCPModule):
     """
     A Liquid NCP Critic Network for the DDPG algorithm.
     """
@@ -98,14 +101,7 @@ class DDPGCritic(nn.Module):
             num_actions (int): the number of actions
             device (torch.device, optional): the device to perform computations on
         """
-        super().__init__()
-
-        self.ncp = LiquidNCPNetwork(
-            in_features=num_obs + num_actions,
-            n_neurons=n_neurons,
-            out_features=1,  # Q-value output
-            device=device,
-        )
+        super().__init__(num_obs + num_actions, n_neurons, 1, device=device)
 
     def forward(
         self,
@@ -126,12 +122,11 @@ class DDPGCritic(nn.Module):
             hidden (torch.Tensor): the new hidden state.
         """
         inputs = torch.cat([obs, actions], dim=-1)
-
         q_values, new_hidden = self.ncp(inputs, hidden)
         return q_values, new_hidden
 
 
-class LiquidDDPG:
+class LiquidDDPG(RLAgent):
     """
     A Liquid variant of the Deep Deterministic Policy Gradient (DDPG)
     algorithm from the paper: [Continuous Control with Deep Reinforcement Learning](https://arxiv.org/abs/1509.02971).
@@ -170,11 +165,7 @@ class LiquidDDPG:
             critic_lr (float, optional): the critic optimizer learning rate
             device (torch.device, optional): the device to perform computations on
         """
-        self.state_dim = state_dim
-        self.n_neurons = n_neurons
-        self.action_dim = action_dim
-        self.buffer_size = buffer_size
-        self.device = device
+        super().__init__(state_dim, n_neurons, action_dim, buffer_size, device)
 
         self.actor = DDPGActor(
             self.state_dim,
@@ -197,8 +188,38 @@ class LiquidDDPG:
         self.critic_optim = optim(self.critic.parameters(), lr=critic_lr)
 
         self.loss = nn.MSELoss()
-        self.buffer = ReplayBuffer(capacity=buffer_size, device=device)
+        self.buffer: ReplayBuffer = ReplayBuffer(
+            buffer_size,
+            state_dim,
+            action_dim,
+            device=self.device,
+        )
         self.noise = OUNoise(action_dim, device=device)
+
+        self.active_params = self.actor.ncp.active_params
+        self.total_params = self.actor.ncp.total_params
+
+        # Init config details
+        self.config = RLAgentConfig(
+            agent=self.__class__.__name__,
+            model_details=ModelDetails(
+                type="actor-critic",
+                **locals(),
+                target_networks=True,
+                action_noise="OUNoise",
+                actor=self.actor.config(),
+                critic=self.critic.config(),
+            ),
+            buffer=self.buffer.config(),
+            torch=TorchConfig(
+                device=str(self.device),
+                optimizer=optim.__name__,
+                loss=self.loss.__class__.__name__,
+            ),
+        )
+
+        self.actor: DDPGActor = torch.jit.script(self.actor)
+        self.critic: DDPGCritic = torch.jit.script(self.critic)
 
     def _update_target_networks(self, tau: float) -> None:
         """
@@ -211,7 +232,7 @@ class LiquidDDPG:
         soft_update(self.actor, self.actor_target, tau=tau)
         soft_update(self.critic, self.critic_target, tau=tau)
 
-    def _update_critic(self, batch: BatchExperience, gamma: float) -> float:
+    def _update_critic(self, batch: BatchExperience, gamma: float) -> torch.Tensor:
         """
         Helper method. Performs a Critic Network update.
 
@@ -222,7 +243,7 @@ class LiquidDDPG:
             gamma (float): the reward discount factor
 
         Returns:
-            critic_loss (float): the Critic's loss value.
+            critic_loss (torch.Tensor): the Critic's loss value.
         """
         with torch.no_grad():
             next_states = batch.next_states
@@ -237,9 +258,9 @@ class LiquidDDPG:
         critic_loss.backward()
         self.critic_optim.step()
 
-        return critic_loss.item()
+        return critic_loss
 
-    def _update_actor(self, states: torch.Tensor) -> float:
+    def _update_actor(self, states: torch.Tensor) -> torch.Tensor:
         """
         Helper method. Performs an Actor Network update.
 
@@ -247,7 +268,7 @@ class LiquidDDPG:
             states (torch.Tensor): a batch of state experiences from the buffer
 
         Returns:
-            actor_loss (float): the Actor's loss value.
+            actor_loss (torch.Tensor): the Actor's loss value.
         """
         next_actions, _ = self.actor(states)
         actor_q, _ = self.critic(states, next_actions)
@@ -257,9 +278,11 @@ class LiquidDDPG:
         actor_loss.backward()
         self.actor_optim.step()
 
-        return actor_loss.item()
+        return actor_loss
 
-    def _train_step(self, batch_size: int, gamma: float) -> Tuple[float, float]:
+    def _train_step(
+        self, batch_size: int, gamma: float
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Helper method. Performs a single training step.
 
@@ -268,8 +291,8 @@ class LiquidDDPG:
             gamma (float): the reward discount factor
 
         Returns:
-            critic_loss (float): the critic loss.
-            actor_loss (float): the actor loss.
+            critic_loss (torch.Tensor): the critic loss.
+            actor_loss (torch.Tensor): the actor loss.
         """
         if len(self.buffer) < batch_size:
             return
@@ -281,18 +304,20 @@ class LiquidDDPG:
 
         return critic_loss, actor_loss
 
+    @override
     def train(
         self,
         env: gym.Env,
         batch_size: int,
         *,
         n_episodes: int = 1000,
+        callbacks: List["TrainCallback"] | None = None,
         max_steps: int = 1000,
-        noise_scale: float = 0.1,
+        noise_scale: float = 0.3,
         gamma: float = 0.99,
         tau: float = 0.005,
         window_size: int = 100,
-    ) -> List[float]:
+    ) -> None:
         """
         Trains the agent on a Gymnasium environment using a `ReplayBuffer`.
 
@@ -300,6 +325,8 @@ class LiquidDDPG:
             env (gym.Env): the Gymnasium environment to train on
             batch_size (int): the number of features in a single batch
             n_episodes (int, optional): the total number of episodes to train for
+            callbacks (List[TrainCallback], optional): a list of training callbacks
+                that are applied during the training process
             max_steps (int, optional): the total number of steps per episode
             noise_scale (float, optional): the exploration noise added when
                 selecting an action
@@ -309,78 +336,88 @@ class LiquidDDPG:
             window_size (int, optional): controls the episode rate for displaying
                 information to the console and for calculating the reward moving
                 average
-
-        Returns:
-            ep_rewards (List[float]): a list of episode rewards.
         """
         if not isinstance(env.action_space, gym.spaces.Box):
             raise EnvironmentError(
                 f"Invalid '{env.action_space=}'. Must be 'gym.spaces.Box'."
             )
 
-        env = add_core_env_wrappers(env, self.device)
+        # Add training details to config
+        self.config = self.config.update(
+            env.spec.name,
+            self._set_train_params(locals()),
+        )
 
-        episode_rewards = []
-        training_started = False
+        # Display console details
+        training_info(
+            self,
+            env.spec.id,
+            n_episodes,
+            batch_size,
+            window_size,
+            callbacks or [],
+            self.device,
+        )
 
-        print(f"{batch_size=}, getting buffer samples.")
-        for i_ep in range(n_episodes):
-            state, _ = env.reset()
+        self.buffer.warm(self, env.spec.id, batch_size)
 
-            critic_losses, actor_losses = [], []
-            actor_hidden = None
+        with TrainHandler(
+            self, env, n_episodes, max_steps, window_size, callbacks
+        ) as handler:
+            for i_ep in range(n_episodes):
+                current_ep = i_ep + 1
+                ep_reward = 0.0
+                hidden = None
 
-            for _ in range(max_steps):
-                action, actor_hidden = self.predict(
-                    state,
-                    actor_hidden,
-                    noise_scale=noise_scale,
-                )
-                next_state, reward, terminated, truncated, info = env.step(action)
-                done = terminated or truncated
+                state, _ = handler.env.reset()
 
-                self.buffer.push(
-                    Experience(state, action.item(), reward, next_state, done),
-                )
+                for i_step in range(max_steps):
+                    current_step = i_step + 1
 
-                if len(self.buffer) >= batch_size:
-                    if not training_started:
-                        print("Buffer warmed. Starting training...")
-                        training_started = True
+                    action, hidden = self.predict(
+                        state,
+                        hidden,
+                        noise_scale=noise_scale,
+                    )
+                    next_state, reward, terminated, truncated, info = handler.env.step(
+                        action
+                    )
+                    done = terminated or truncated
+
+                    self.buffer.add(state, action, reward, next_state, done)
 
                     critic_loss, actor_loss = self._train_step(batch_size, gamma)
                     self._update_target_networks(tau)
 
-                    critic_losses.append(critic_loss)
-                    actor_losses.append(actor_loss)
+                    handler.metrics.add_step(critic_loss, actor_loss)
+                    handler.step(current_step)
 
-                state = next_state
+                    state = next_state
 
-                if done:
-                    episode_rewards.append(info["episode"]["r"].item())
+                    if done:
+                        ep_reward = info["episode"]["r"].item()
+                        handler.metrics.add_episode(
+                            current_ep,
+                            info["episode"]["r"],
+                            info["episode"]["l"],
+                        )
+                        break
+
+                if current_ep % window_size == 0 or handler.stop():
+                    handler.metrics.info(current_ep)
+
+                handler.episode(current_ep, ep_reward)
+
+                if handler.stop():
                     break
 
-            if training_started and (i_ep + 1) % window_size == 0:
-                avg_reward = np.mean(episode_rewards[-window_size:])
-                avg_critic_loss = np.mean(critic_losses)
-                avg_actor_loss = np.mean(actor_losses)
-
-                print(
-                    f"Episode: {i_ep + 1}/{n_episodes}, "
-                    f"Avg Reward: {avg_reward:.2f}, "
-                    f"Critic Loss: {avg_critic_loss:.2f}, "
-                    f"Actor Loss: {avg_actor_loss:.2f}"
-                )
-
-        env.close()
-        return episode_rewards
-
+    @override
     def predict(
         self,
         state: torch.Tensor,
-        hidden: torch.Tensor = None,
+        hidden: torch.Tensor | None = None,
         *,
-        noise_scale: float = 0.1,
+        noise_scale: float = 0.3,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Makes an action prediction using the Actor network with exploration noise.
@@ -397,7 +434,8 @@ class LiquidDDPG:
         """
         self.actor.eval()
         with torch.no_grad():
-            action, hidden = self.actor(state.unsqueeze(0), hidden)
+            state = state.unsqueeze(0) if state.dim() < 2 else state
+            action, hidden = self.actor(state, hidden)
 
             if noise_scale > 0:
                 # Exploration noise
@@ -405,91 +443,20 @@ class LiquidDDPG:
                 action = torch.clamp(action + noise, min=-1, max=1)
 
         self.actor.train()
-        return action.flatten(), hidden
+        return action, hidden
 
-    def save(self, filepath: str | Path, *, buffer: bool = False) -> None:
-        """
-        Saves the current model state into a file and optionally the buffer.
-
-        Parameters:
-            filepath (str | Path): the location to store the model state
-            buffer (bool, optional): a flag for storing the buffer state.
-                When `True`, creates a file matching `<filepath>.buffer.<filepath_ext>`
-        """
-        save_path = Path(filepath)
-        save_path.parent.mkdir(parents=True, exist_ok=True)
-
-        checkpoint: Dict[CheckpointLiteral, Any] = {
-            "state_dim": self.state_dim,
-            "n_neurons": self.n_neurons,
-            "action_dim": self.action_dim,
-            "buffer_size": self.buffer_size,
-            "device": str(self.device),
-            "actor": self.actor.state_dict(),
-            "critic": self.critic.state_dict(),
-            "actor_target": self.actor_target.state_dict(),
-            "critic_target": self.critic_target.state_dict(),
-            "actor_optim": self.actor_optim.state_dict(),
-            "critic_optim": self.critic_optim.state_dict(),
-        }
-        torch.save(checkpoint, save_path)
-
-        if buffer:
-            buffer_path = self.buffer.create_filepath(save_path)
-            self.buffer.save(buffer_path)
+    def save(
+        self,
+        dirpath: str | Path,
+        *,
+        buffer: bool = False,
+        config: bool = False,
+    ) -> None:
+        save_model(self, dirpath, buffer=buffer, config=config)
 
     @classmethod
-    def load(cls, filepath: str | Path, *, buffer: bool = False) -> Self:
-        """
-        Loads a saved model state with and optionally with a buffer.
+    def load(cls, dirpath: str | Path, *, buffer: bool = False) -> Self:
+        return load_model(cls, dirpath, buffer=buffer)
 
-        Parameters:
-            filepath (str | Path): the location for the saved model state
-            buffer (bool, optional): a flag for loading the buffer state.
-                When `True`, filename must match `<filepath>.buffer.<filepath_ext>`
-        """
-        load_path = Path(filepath)
-        checkpoint: Dict[CheckpointLiteral, Any] = torch.load(load_path)
-        buffer_path = None
-
-        valid_keys = set(get_args(CheckpointLiteral))
-        if not all(key in valid_keys for key in checkpoint.keys()):
-            raise ValueError(
-                "File cannot be loaded. Mismatch between checkpoint keys! Are you loading the right file?"
-            )
-
-        # Create new model instance
-        model = cls(
-            checkpoint["state_dim"],
-            checkpoint["n_neurons"],
-            checkpoint["action_dim"],
-            buffer_size=checkpoint["buffer_size"],
-            device=torch.device(checkpoint["device"]),
-        )
-
-        # Check buffer valid
-        if buffer:
-            buffer_path = model.buffer.create_filepath(load_path)
-
-            if not buffer_path.exists():
-                raise FileNotFoundError(
-                    f"Buffer file '{buffer_path}' does not exist! Try with `buffer=False` instead."
-                )
-
-        model.actor.load_state_dict(checkpoint["actor"])
-        model.critic.load_state_dict(checkpoint["critic"])
-        model.actor_target.load_state_dict(checkpoint["actor_target"])
-        model.critic_target.load_state_dict(checkpoint["critic_target"])
-        model.actor_optim.load_state_dict(checkpoint["actor_optim"])
-        model.critic_optim.load_state_dict(checkpoint["critic_optim"])
-
-        if buffer:
-            model.buffer = model.buffer.load(buffer_path)
-
-        print(
-            f"Loaded model with:\n"
-            f"  state_dim={model.state_dim}, n_neurons={model.n_neurons}, action_dim={model.action_dim}\n"
-            f"  optim={type(model.actor_optim).__name__}, device={model.device}\n"
-            f"  buffer_size={model.buffer_size:,}, buffer_restored={buffer}"
-        )
-        return model
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}(state_dim={self.state_dim}, n_neurons={self.n_neurons}, action_dim={self.action_dim}, optim={type(self.actor_optim).__name__}, buffer_size={self.buffer_size:,}, device={self.device})"

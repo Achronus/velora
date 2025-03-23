@@ -50,11 +50,13 @@ class LayerMasks:
         inter (torch.Tensor): sparse weight mask for input layer
         command (torch.Tensor): sparse weight mask for hidden layer
         motor (torch.Tensor): sparse weight mask for output layer
+        recurrent (torch.Tensor): sparse weight mask for recurrent connections
     """
 
     inter: torch.Tensor
     command: torch.Tensor
     motor: torch.Tensor
+    recurrent: torch.Tensor
 
 
 class Wiring:
@@ -103,16 +105,17 @@ class Wiring:
             out_features,
         )
         self.masks = self._init_masks(in_features)
-        self.cmd_recurrent = torch.zeros(
-            (self.counts.command, self.counts.command),
-            dtype=torch.int32,
-        )
 
         self.build()
 
     @property
     def n_connections(self) -> SynapseCounts:
-        """Gets the `SynapseCounts` object containing neuron connection counts."""
+        """
+        Neuron connection counts.
+
+        Returns:
+            connections (SynapseCounts): object containing neuron connection counts.
+        """
         return self._n_connections
 
     def _init_masks(self, n_inputs: int) -> LayerMasks:
@@ -137,6 +140,10 @@ class Wiring:
             ),
             motor=torch.zeros(
                 (self.counts.command, self.counts.motor),
+                dtype=torch.int32,
+            ),
+            recurrent=torch.zeros(
+                (self.counts.command, self.counts.command),
                 dtype=torch.int32,
             ),
         )
@@ -296,28 +303,28 @@ class Wiring:
             2. Inter -> command
             3. Command -> motor
 
-        Plus, command recurrent connections for visualization.
+        Plus, command recurrent connections for ODE solvers.
         """
         # Sensory -> inter
         self.masks.inter = self._build_connections(
             self.masks.inter,
-            self.counts.sensory,
+            self._n_connections.sensory,
         )
         # Inter -> command
         self.masks.command = self._build_connections(
             self.masks.command,
-            self.counts.inter,
+            self._n_connections.inter,
         )
         # Command -> motor
         self.masks.motor = self._build_connections(
             self.masks.motor,
-            self.counts.command,
+            self._n_connections.command,
         )
 
         # Command -> command
-        self.cmd_recurrent = self._build_recurrent_connections(
-            self.cmd_recurrent,
-            self.counts.command,
+        self.masks.recurrent = self._build_recurrent_connections(
+            self.masks.recurrent,
+            self._n_connections.command,
         )
 
     def data(self) -> Tuple[LayerMasks, NeuronCounts]:

@@ -63,7 +63,7 @@ def wrap_gym_env(
         env (gymnasium.Env): The wrapped environment
     """
     if isinstance(env, str):
-        env = gym.make(env)
+        env = gym.make(env, render_mode="rgb_array")
 
     def apply_wrapper(env: gym.Env, wrapper: WrapperType) -> gym.Env:
         return wrapper(env)

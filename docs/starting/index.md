@@ -1,10 +1,20 @@
 # Getting Started
 
-To get started, simply install it through [pip [:material-arrow-right-bottom:]](https://pypi.org/project/velora/):
+To get started, simply install it through [pip [:material-arrow-right-bottom:]](https://pypi.org/) using one of the options below.
+
+For [PyTorch [:material-arrow-right-bottom:]](https://pytorch.org/get-started/locally/) with CUDA (recommended):
 
 ```bash
-pip install velora
+pip install torch torchvision velora --extra-index-url https://download.pytorch.org/whl/cu124
 ```
+
+Or, for [PyTorch [:material-arrow-right-bottom:]](https://pytorch.org/get-started/locally/) with CPU only:
+
+```bash
+pip install torch torchvision velora
+```
+
+## Example Usage
 
 Here's a simple example:
 
@@ -52,12 +62,12 @@ model = LiquidDDPG(
     buffer_size=buffer_size,
     device=device,
 )
-metrics = model.train(env, batch_size, n_episodes=300)
+model.train(env, batch_size, n_episodes=300)
 ```
 
 This code should work 'as is'.
 
-Currently, the framework only supports [Gymnasium [:material-arrow-right-bottom:]](https://gymnasium.farama.org/) environments and will likely stay that way.
+Currently, the framework only supports [Gymnasium [:material-arrow-right-bottom:]](https://gymnasium.farama.org/) environments and is planned to expand to [PettingZoo [:material-arrow-right-bottom:]](https://pettingzoo.farama.org/index.html) for Multi-agent (MARL) tasks.
 
 ## API Structure
 
@@ -69,6 +79,7 @@ The primary building blocks you'll use regularly.
 
 ```python
 from velora.models import [algorithm]
+from velora.callbacks import [callback]
 ```
 
 ### Extras

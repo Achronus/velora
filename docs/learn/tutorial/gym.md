@@ -18,7 +18,7 @@ Velora offers two simple methods to help with this: `wrap_gym_env` and `add_core
 
 ???+ api "API Docs"
 
-    [`velora.gym.wrap_gym_env`](../reference/gym.md#velora.gym.wrap_gym_env)
+    [`velora.gym.wrap_gym_env(env, wrappers)`](../reference/gym.md#velora.gym.wrap_gym_env)
 
 `wrap_gym_env` is a quick way to create new environments that with wrappers automatically applied. Normally, you'd have to apply wrappers, one by one like this:
 
@@ -60,7 +60,7 @@ Now, you just supply the environment `name` and a of `List[gym.Wrappers]` or `Li
 
 ???+ api "API Docs"
 
-    [`velora.gym.add_core_env_wrappers`](../reference/gym.md#velora.gym.add_core_env_wrappers)
+    [`velora.gym.add_core_env_wrappers(env, device)`](../reference/gym.md#velora.gym.add_core_env_wrappers)
 
 We've also added a `add_core_env_wrappers` method that applies specific wrappers that are required by every prebuilt algorithm in Velora.
 
@@ -90,7 +90,7 @@ env = gym.make("InvertedPendulum-v5")
 env = add_core_env_wrappers(env, device="cpu")
 ```
 
-You typically won't need to use this yourself, but it's useful to know for your own builds! 😊
+You'll mainly use this yourself when working with the `predict()` method to quickly convert the environment from `numpy` arrays to `torch` tensors! 😊
 
 ## Finding Environments
 

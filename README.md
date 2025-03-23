@@ -1,4 +1,4 @@
-![Logo](https://github.com/Achronus/velora/blob/main/docs/assets/imgs/main.jpg)
+![Logo](https://raw.githubusercontent.com/Achronus/velora/main/docs/assets/imgs/main.jpg)
 
 [![codecov](https://codecov.io/gh/Achronus/velora/graph/badge.svg?token=OF7WP5Q9PT)](https://codecov.io/gh/Achronus/velora)
 ![Python Version](https://img.shields.io/pypi/pyversions/velora)
@@ -27,11 +27,27 @@ Velora offers Liquidfied PyTorch-based implementations of RL algorithms, designe
 
 In other frameworks, we've seen a trend of heavy abstraction in favour of minimal lines of code. Our approach aims to offer a best of both worlds, abstracting code away but making the details explainable on the backend, while giving you the freedom to customize as needed.
 
-To get started, simply install it through [pip](https://pypi.org/):
+## Installation
+
+To get started, simply install it through [pip](https://pypi.org/) using one of the options below.
+
+### GPU Enabled
+
+For [PyTorch](https://pytorch.org/get-started/locally/) with CUDA (recommended):
 
 ```bash
-pip install velora
+pip install torch torchvision velora --extra-index-url https://download.pytorch.org/whl/cu124
 ```
+
+### CPU Only
+
+Or, for [PyTorch](https://pytorch.org/get-started/locally/) with CPU only:
+
+```bash
+pip install torch torchvision velora
+```
+
+## Example Usage
 
 Here's a simple example that should work 'as is':
 
@@ -79,10 +95,10 @@ model = LiquidDDPG(
     buffer_size=buffer_size,
     device=device,
 )
-metrics = model.train(env, batch_size, n_episodes=300)
+model.train(env, batch_size, n_episodes=300)
 ```
 
-Currently, the framework only supports [Gymnasium](https://gymnasium.farama.org/) environments and will likely stay that way.
+Currently, the framework only supports [Gymnasium](https://gymnasium.farama.org/) environments and is planned to expand to [PettingZoo](https://pettingzoo.farama.org/index.html) for Multi-agent (MARL) tasks.
 
 ## API Structure
 
@@ -94,6 +110,7 @@ The primary building blocks you'll use regularly.
 
 ```python
 from velora.models import [algorithm]
+from velora.callbacks import [callback]
 ```
 
 ### Extras

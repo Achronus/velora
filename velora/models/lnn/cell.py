@@ -8,14 +8,11 @@ from velora.models.lnn.sparse import SparseLinear
 
 class NCPLiquidCell(nn.Module):
     """
-    A Neural Circuit Policy (NCP) Liquid Time-Constant (LTC) cell.
+    A Liquid Time-Constant (LTC) cell using a Closed-form (CfC) approach.
 
     The LTC cell follows the closed-form continuous-depth
     (CFC; Equation 10) solution from the paper:
     [Closed-form Continuous-time Neural Models](https://arxiv.org/abs/2106.13898).
-
-    Plus, it follows an Ordinary Neural Circuit (ONC) approach from this paper:
-    [Reinforcement Learning with Ordinary Neural Circuits](https://proceedings.mlr.press/v119/hasani20a.html).
 
     Equation:
     $$
@@ -64,20 +61,6 @@ class NCPLiquidCell(nn.Module):
 
         # Hidden state projection
         self.proj = self._make_layer()
-
-        # Enforce weight sparsity - required
-        def weight_sparsity_hook(
-            module: nn.Module,
-            grad_input: tuple[torch.Tensor | None, ...],
-            grad_output: tuple[torch.Tensor, ...],
-        ) -> None:
-            if hasattr(module, "weight") and hasattr(module.weight, "mask"):
-                device = module.weight.data.device
-                module.weight.data *= module.weight.mask.to(device)
-
-        for module in self.modules():
-            if isinstance(module, SparseLinear):
-                module.register_forward_hook(weight_sparsity_hook)
 
     def _make_layer(self) -> SparseLinear:
         """

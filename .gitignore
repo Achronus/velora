@@ -165,6 +165,12 @@ cython_debug/
 /examples/*wandb/
 /examples/*videos/
 /examples/*logs/
+/examples/checkpoints*
+/examples/*viz/
+/examples/*solutions/
 /old
 /_build
 CHANGELOG.md
+metrics.db
+metrics.db-journal
+*.prof

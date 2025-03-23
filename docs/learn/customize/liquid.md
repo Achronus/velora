@@ -8,7 +8,9 @@ Now that we know how to build our sparsely connected neurons, we can start build
 
     [`velora.models.lnn.NCPLiquidCell`](../reference/models/lnn.md#velora.models.lnn.cell.NCPLiquidCell)
 
-We've actually already seen how to do this!
+For this example, we'll focus on creating a network made purely of `NCPLiquidCells`.
+
+Initializing the layers is the easy part:
 
 ```python
 from collections import OrderedDict
@@ -34,9 +36,9 @@ layers = OrderedDict([(name, layer) for name, layer in zip(names, layers)])
 
 This code should work 'as is'.
 
-However, using the layers is the tricky part. Since we are using a Recurrent architecture, we need to iterate through each layer manually and retain their respective hidden states.
+However, using them is tricky. Since we are using a Recurrent architecture, we need to iterate through each layer manually and retain their respective hidden states.
 
-This requires a bit of wizardry ✨. Let's look at some code first:
+This requires a bit of wizardry ✨. Let's look at some more code first:
 
 ```python hl_lines="5 10 17-18 21"
 from typing import Tuple
@@ -198,7 +200,20 @@ So instead, why don't we use a prebuilt version? 😉
 
 We can eliminate the need to do the previous step by using our prebuilt `LiquidNCPNetwork`.
 
-It uses exactly the same code with a few minor additions for handling the `x` and `y_pred` dimensions. And best of all, it's two lines of code! 😉
+Admittedly, it uses a different architecture but follows a relatively similar format.
+
+??? abstract "The Real Architecture"
+
+    For those interested, the real architecture consists of:
+
+    - Two `SparseLinear` layers
+    - One `NCPLiquidCell` layer
+
+    We initially tested them as three `NCPLiquidCells` and found their stability lacking. We hypothesis that additional cells can interfere with the agent's ability to learn an accurate set of system dynamics.
+
+    However, we still encourage you to test this out for yourselves! Exploration is not just for RL agents! 😉
+
+The main thing here is that all you need to do is write two lines of code and boom 💥, you've got a working, and heavily tested Liquid Network! 😉
 
 ```python
 from velora.models import LiquidNCPNetwork

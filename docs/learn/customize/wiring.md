@@ -1,14 +1,16 @@
 # Creating Sparse Neurons
 
-A major part of the NCP algorithm is *sparse connections*. This is handled through the `Wiring` class.
+A major part of the NCP algorithm is *sparse connections*. This is handled through the `Wiring` class which is then used by our `SparseLinear` module.
+
+## Wiring and Layer Masks
 
 ???+ api "API Docs"
 
-    [`velora.wiring.Wiring`](../../learn/reference/wiring.md#velora.wiring.Wiring)
+    [`velora.wiring.Wiring(in_features, n_neurons, out_features)`](../../learn/reference/wiring.md#velora.wiring.Wiring)
 
-It's main purpose is to create sparsity masks for the three NCP layers and store the information in dataclasses: `NeuronCounts`, `SynapseCounts`, and `LayerMasks`.
+The `Wiring` class's main purpose is to create sparsity masks for the three NCP layers and store the information in dataclasses: `NeuronCounts`, `SynapseCounts`, and `LayerMasks`.
 
-## Basic Usage
+### Basic Usage
 
 To use it, we create an instance of the `Wiring` class and then call the `data()` method to retrieve the `NeuronCounts` and `LayerMasks`:
 
@@ -16,7 +18,7 @@ To use it, we create an instance of the `Wiring` class and then call the `data()
 
     `SynapseCounts` is strictly used internally inside the wiring class. Typically, you won't need to access this or apply it elsewhere. 
     
-    However, you can access it using the `Wiring(...).n_connections` attribute if you need to.
+    However, you can access it using the `n_connections` attribute if you need to.
 
 ```python
 from velora.wiring import Wiring
@@ -128,11 +130,14 @@ class LayerMasks:
         inter (torch.Tensor): sparse weight mask for input layer
         command (torch.Tensor): sparse weight mask for hidden layer
         motor (torch.Tensor): sparse weight mask for output layer
+        recurrent (torch.Tensor): sparse weight mask for recurrent connections
     """
 
     inter: torch.Tensor
     command: torch.Tensor
     motor: torch.Tensor
+    recurrent: torch.Tensor
+
 ```
 
 The masks will vary depending on the network size and the `seed` you set. They are random connections after all!
@@ -230,6 +235,36 @@ connections = SynapseCounts(sensory=1, inter=2, command=3, motor=2)
 ```
 
 This code should work 'as is'.
+
+## Sparse Linear Layers
+
+???+ api "API Docs"
+
+    [`velora.models.lnn.SparseLinear(in_features, out_features, mask)`](../../learn/reference/models/lnn.md#velora.models.lnn.sparse.SparseLinear)
+
+We've seen how to use the `Wiring` class in `NCPLiquidCells` but what about in `Linear` layers?
+
+We've created our own implementation for this called a `SparseLinear` layer that applies the sparsity mask to the weights automatically.
+
+You can implement one like this:
+
+```python
+from velora.models.lnn import SparseLinear
+from velora.wiring import Wiring
+
+import torch
+
+wiring = Wiring(4, 10, 1)
+l1 = SparseLinear(4, 1, torch.abs(wiring.masks.inter.T))
+```
+
+This code should work 'as is'.
+
+Notice how we transpose (`T`) the mask and then take it's absolute value.
+
+The transpose operation is required to ensure our mask fits the weights correctly and take the absolute to ensure gradient stability (turning `-1` -> `1`).
+
+We didn't have to do this in the `NCPLiquidCell` because they have their own separate mask processing! 😉
 
 ---
 

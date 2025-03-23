@@ -1,67 +1,15 @@
 import math
-from typing import Any, Dict, Self
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 
-class SparseParameter(nn.Parameter):
-    """
-    A parameter that uses a sparsity mask to set some values to `0`.
-    """
-
-    mask: torch.Tensor
-
-    def __init__(
-        self,
-        data: torch.Tensor,
-        mask: torch.Tensor,
-        requires_grad: bool = True,
-    ) -> None:
-        """
-        Parameters:
-            data (torch.Tensor): the data to store as a parameter
-            mask (torch.Tensor): the sparsity mask
-            requires_grad (bool, optional): a flag to enable gradient computations
-        """
-        # __new__ handles the initialization
-        pass  # pragma: no cover
-
-    def __new__(
-        cls, data: torch.Tensor, mask: torch.Tensor, requires_grad: bool = True
-    ):
-        mask = mask.to(data.device).detach()
-        instance = super().__new__(cls, data * mask, requires_grad)
-
-        instance.mask = mask.clone().detach()
-        return instance
-
-    def __deepcopy__(self, memo: Dict[int, Any]) -> Self:
-        """Handle deep copying of the parameter including its mask."""
-        if id(self) in memo:
-            return memo[id(self)]  # pragma: no cover
-        else:
-            result = type(self)(
-                self.data.clone(memory_format=torch.preserve_format),
-                self.mask.clone(),  # Clone the mask too
-                self.requires_grad,
-            )
-            memo[id(self)] = result
-            return result
-
-    def __setattr__(self, name: str, value: Any) -> None:
-        if name == "data":
-            value: torch.Tensor = value
-            super().__setattr__(name, value * self.mask.to(value.device))
-        else:
-            super().__setattr__(name, value)
-
-
 class SparseLinear(nn.Module):
     """A `torch.nn.Linear` layer with sparsely weighted connections."""
 
     bias: torch.Tensor
+    mask: torch.Tensor
 
     def __init__(
         self,
@@ -85,16 +33,21 @@ class SparseLinear(nn.Module):
 
         self.in_features = in_features
         self.out_features = out_features
-        self.mask = mask.to(device)
+
+        self.register_buffer("mask", mask.to(device).detach())
 
         weight = torch.empty((out_features, in_features), device=device)
-        self.weight = SparseParameter(weight, self.mask)
+        self.weight = nn.Parameter(weight)
+
         if bias:
             self.bias = nn.Parameter(torch.empty(out_features, device=device))
         else:
             self.register_parameter("bias", None)
 
         self.reset_parameters()
+
+        with torch.no_grad():
+            self.weight.data.mul_(self.mask)
 
     def reset_parameters(self) -> None:
         """
@@ -119,7 +72,7 @@ class SparseLinear(nn.Module):
         Returns:
             y_pred (torch.Tensor): layer prediction with sparsity applied with shape `(..., out_features)`.
         """
-        return F.linear(x, self.weight, self.bias)
+        return F.linear(x, self.weight * self.mask, self.bias)
 
     def extra_repr(self) -> str:
         """String representation of layer parameters."""

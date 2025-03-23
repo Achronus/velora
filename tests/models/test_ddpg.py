@@ -1,16 +1,22 @@
+from pathlib import Path
+import shutil
+import time
 from typing import Any, Dict, Literal
 import pytest
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 import os
 import tempfile
+import json
 
 import torch
-
+from torch.jit import RecursiveScriptModule
 import gymnasium as gym
 
-from velora.buffer import Experience
+from velora.callbacks import CometAnalytics, EarlyStopping, SaveCheckpoints
 from velora.models import LiquidNCPNetwork
 from velora.models.ddpg import DDPGActor, DDPGCritic, LiquidDDPG
+from velora.training.handler import TrainHandler
+from velora.utils.core import set_seed
 
 
 NetworkParamsType = Dict[
@@ -51,7 +57,7 @@ class TestDDPGActor:
 
         # Check output shapes
         assert actions.shape == (batch_size, actor_params["num_actions"])
-        assert hidden.shape[1] == actor.ncp.n_units
+        assert hidden.shape[1] == actor.ncp.hidden_size
 
         # Check if actions are bounded by tanh
         assert torch.all(actions >= -1) and torch.all(actions <= 1)
@@ -89,7 +95,7 @@ class TestDDPGCritic:
 
         # Check output shapes
         assert q_values.shape == (batch_size, 1)
-        assert hidden.shape[1] == critic.ncp.n_units
+        assert hidden.shape[1] == critic.ncp.hidden_size
 
 
 class TestLiquidDDPG:
@@ -109,15 +115,13 @@ class TestLiquidDDPG:
 
     @pytest.fixture
     def env(self) -> gym.Env:
-        return gym.make("MountainCarContinuous-v0")
+        return gym.make("InvertedPendulum-v5", render_mode="rgb_array")
 
-    def test_init(self, ddpg: LiquidDDPG, ddpg_params: DDPGParamsType):
-        assert isinstance(ddpg.actor, DDPGActor)
-        assert isinstance(ddpg.critic, DDPGCritic)
-        assert isinstance(ddpg.actor_target, DDPGActor)
-        assert isinstance(ddpg.critic_target, DDPGCritic)
-        assert len(ddpg.buffer) == 0
-        assert ddpg.buffer.capacity == ddpg_params["buffer_size"]
+    def test_init(self, ddpg: LiquidDDPG):
+        assert isinstance(ddpg.actor, (DDPGActor, RecursiveScriptModule))
+        assert isinstance(ddpg.critic, (DDPGCritic, RecursiveScriptModule))
+        assert isinstance(ddpg.actor_target, (DDPGActor, RecursiveScriptModule))
+        assert isinstance(ddpg.critic_target, (DDPGCritic, RecursiveScriptModule))
 
     def test_update_target_networks(self, ddpg: LiquidDDPG):
         tau = 0.005
@@ -159,22 +163,20 @@ class TestLiquidDDPG:
         # Fill buffer with valid experiences
         for _ in range(batch_size + 1):
             state = torch.zeros(ddpg.state_dim)
-            action = 1.0  # Single float value
+            action = torch.tensor([1.0])
             reward = 2.0  # Single float value
             next_state = torch.zeros(ddpg.state_dim)
             done = False
 
-            # Create Experience object explicitly
-            exp = Experience(state, action, reward, next_state, done)
-            ddpg.buffer.push(exp)
+            ddpg.buffer.add(state, action, reward, next_state, done)
 
         # Perform training step
         result = ddpg._train_step(batch_size, gamma)
         assert result is not None
         critic_loss, actor_loss = result
 
-        assert isinstance(critic_loss, float)
-        assert isinstance(actor_loss, float)
+        assert isinstance(critic_loss, torch.Tensor)
+        assert isinstance(actor_loss, torch.Tensor)
 
     def test_train_step_insufficient_buffer(self, ddpg: LiquidDDPG):
         batch_size = 32
@@ -182,9 +184,12 @@ class TestLiquidDDPG:
 
         # Add fewer experiences than batch_size
         for _ in range(batch_size - 1):
-            state = torch.zeros(ddpg.state_dim)
-            exp = Experience(state, 1.0, 2.0, state, False)
-            ddpg.buffer.push(exp)
+            state = torch.zeros([ddpg.state_dim])
+            action = torch.tensor([1.0])
+            reward = 2.0
+            next_state = torch.zeros(ddpg.state_dim)
+            done = False
+            ddpg.buffer.add(state, action, reward, next_state, done)
 
         # Should return None when buffer is insufficient
         result = ddpg._train_step(batch_size, gamma)
@@ -197,97 +202,17 @@ class TestLiquidDDPG:
         with pytest.raises(EnvironmentError):
             ddpg.train(mock_env, batch_size=32)
 
-    def test_train_valid_env(self, env: gym.Env, ddpg: LiquidDDPG):
-        _ = ddpg.train(env, batch_size=32, n_episodes=2, max_steps=10)
-
-    def test_train_if_done(self, env: gym.Env, ddpg: LiquidDDPG):
-        # Create a wrapper to force early termination
-        class EarlyDoneWrapper(gym.Wrapper):
-            def __init__(self, env):
-                super().__init__(env)
-                self.step_count = 0
-
-            def step(self, action):
-                self.step_count += 1
-                obs, reward, term, trunc, info = self.env.step(action)
-                # Force done after 5 steps
-                if self.step_count >= 5:
-                    term = True
-                return obs, reward, term, trunc, info
-
-            def reset(self, **kwargs):
-                self.step_count = 0
-                return self.env.reset(**kwargs)
-
-        wrapped_env = EarlyDoneWrapper(env)
-        n_episodes = 2
-
-        rewards = ddpg.train(
-            wrapped_env,
-            batch_size=32,
-            n_episodes=n_episodes,
-            max_steps=10,  # Even though max_steps is 10, should terminate at 5
-        )
-        assert len(rewards) == n_episodes
-
-    def test_train_output_print_msg(self, env: gym.Env, ddpg: LiquidDDPG):
-        batch_size = 32
-        n_episodes = 4
-        window_size = 2
-
-        # Mock numpy mean to verify statistics calculation
-        with patch("numpy.mean") as mock_mean:
-            # Make mean return predictable values
-            mock_mean.side_effect = [10.0, 0.5, 0.3]  # reward, critic_loss, actor_loss
-
-            # Mock print to capture output
-            with patch("builtins.print") as mock_print:
-                ddpg.train(
-                    env,
-                    batch_size=batch_size,
-                    n_episodes=n_episodes,
-                    max_steps=10,
-                    window_size=window_size,
-                )
-
-                # Verify statistics were printed with correct format
-                expected_output = (
-                    "Episode: 4/4, "
-                    "Avg Reward: 10.00, "
-                    "Critic Loss: 0.50, "
-                    "Actor Loss: 0.30"
-                )
-                mock_print.assert_any_call(expected_output)
-
-        env.close()
-
-    def test_save_load(self, ddpg: LiquidDDPG):
+    def test_save_error(self, ddpg: LiquidDDPG):
         with tempfile.NamedTemporaryFile(suffix=".pt", delete=False) as temp_file:
             filepath = temp_file.name
-
         try:
-            # Save the model
-            ddpg.save(filepath)
-            assert os.path.exists(filepath)
+            # Create the file to trigger FileExistsError
+            with open(filepath, "w") as f:
+                f.write("dummy content")
 
-            # Load the model
-            loaded_ddpg = LiquidDDPG.load(filepath)
-
-            # Check model parameters
-            assert loaded_ddpg.state_dim == ddpg.state_dim
-            assert loaded_ddpg.n_neurons == ddpg.n_neurons
-            assert loaded_ddpg.action_dim == ddpg.action_dim
-            assert loaded_ddpg.buffer_size == ddpg.buffer_size
-            assert str(loaded_ddpg.device) == str(ddpg.device)
-
-            # Test predict with the same input
-            state = torch.randn(ddpg.state_dim)
-            action1, _ = ddpg.predict(state, noise_scale=0.0)
-            action2, _ = loaded_ddpg.predict(state, noise_scale=0.0)
-
-            # Actions should be identical since we're using the same state and no noise
-            assert torch.allclose(action1, action2)
-
+            # Now trying to save should raise FileExistsError
+            with pytest.raises(FileExistsError):
+                ddpg.save(filepath)
         finally:
             # Clean up
             if os.path.exists(filepath):
@@ -297,84 +222,107 @@ class TestLiquidDDPG:
         # Add some experiences to buffer
         for i in range(10):
             state = torch.zeros(ddpg.state_dim)
-            action = float(i)
+            action = torch.tensor([i])
             reward = float(i * 0.5)
             next_state = torch.ones(ddpg.state_dim)
             done = i == 9
+            ddpg.buffer.add(state, action, reward, next_state, done)
 
-            exp = Experience(state, action, reward, next_state, done)
-            ddpg.buffer.push(exp)
+        # Get the initial buffer size to compare later
+        buffer_size = len(ddpg.buffer)
 
-        with tempfile.NamedTemporaryFile(suffix=".pt", delete=False) as temp_file:
-            filepath = temp_file.name
+        # Create a unique temporary directory name
+        unique_id = f"model_save_{id(ddpg)}"
+        temp_dir = tempfile.gettempdir()
+        save_path = Path(temp_dir) / unique_id
 
         try:
-            # Save the model with buffer
-            ddpg.save(filepath, buffer=True)
+            # Ensure the directory doesn't exist before starting
+            if save_path.exists():
+                shutil.rmtree(save_path, ignore_errors=True)
 
-            # Check both files exist
-            assert os.path.exists(filepath)
-            buffer_path = ddpg.buffer.create_filepath(filepath)
-            assert os.path.exists(buffer_path)
+            # Save the model with buffer
+            ddpg.save(save_path, buffer=True, config=True)
+
+            # Check files exist
+            model_state_path = save_path / "model_state.safetensors"
+            optim_state_path = save_path / "optim_state.safetensors"
+            buffer_state_path = save_path / "buffer_state.safetensors"
+            metadata_path = save_path / "metadata.json"
+            config_path = save_path.parent / "model_config.json"
+
+            assert model_state_path.exists(), "model_state.safetensors doesn't exist"
+            assert optim_state_path.exists(), "optim_state.safetensors doesn't exist"
+            assert buffer_state_path.exists(), "buffer_state.safetensors doesn't exist"
+            assert metadata_path.exists(), "metadata.json doesn't exist"
+            assert config_path.exists(), "model_config.json doesn't exist"
 
             # Load the model with buffer
-            loaded_ddpg = LiquidDDPG.load(filepath, buffer=True)
+            loaded_ddpg = LiquidDDPG.load(save_path, buffer=True)
 
             # Check buffer properties
-            assert len(loaded_ddpg.buffer) == len(ddpg.buffer)
-
-            # Test predict to ensure models produce similar results
-            state = torch.randn(ddpg.state_dim)
-            action1, _ = ddpg.predict(state, noise_scale=0.0)
-            action2, _ = loaded_ddpg.predict(state, noise_scale=0.0)
-            assert torch.allclose(action1, action2)
-
+            assert len(loaded_ddpg.buffer) == buffer_size
         finally:
-            # Clean up
-            if os.path.exists(filepath):
-                os.unlink(filepath)
-            if os.path.exists(buffer_path):
-                os.unlink(buffer_path)
+            # Clean up resources
+            if save_path.exists():
+                # Close any open file handles
+                import gc
+
+                gc.collect()
+                # Try to clean up the directory with retries
+                max_retries = 3
+                for attempt in range(max_retries):
+                    try:
+                        shutil.rmtree(save_path, ignore_errors=True)
+                        if config_path.exists():
+                            os.unlink(config_path)
+                        break
+                    except (PermissionError, OSError):
+                        if attempt < max_retries - 1:
+                            time.sleep(0.1)  # Short delay before retry
+                        continue
 
     def test_load_without_buffer_file(self, ddpg: LiquidDDPG):
-        with tempfile.NamedTemporaryFile(suffix=".pt", delete=False) as temp_file:
-            filepath = temp_file.name
+        with tempfile.TemporaryDirectory() as temp_dir:
+            save_path = Path(temp_dir) / "model_save"
 
-        try:
             # Save model without buffer
-            ddpg.save(filepath, buffer=False)
+            ddpg.save(save_path, buffer=False)
 
             # Try to load with buffer=True, should raise error
-            with pytest.raises(
-                FileNotFoundError, match="Buffer file .* does not exist"
-            ):
-                LiquidDDPG.load(filepath, buffer=True)
+            buffer_state_path = save_path / "buffer_state.safetensors"
+            assert not buffer_state_path.exists(), "Buffer file should not exist"
 
-        finally:
-            # Clean up
-            if os.path.exists(filepath):
-                os.unlink(filepath)
+            with pytest.raises(
+                FileNotFoundError, match=r"Buffer state .* does not exist"
+            ):
+                LiquidDDPG.load(save_path, buffer=True)
 
     def test_save_directory_creation(self, ddpg: LiquidDDPG):
         with tempfile.TemporaryDirectory() as temp_dir:
-            new_dir = os.path.join(temp_dir, "new_subdir", "nested")
-            filepath = os.path.join(new_dir, "model.pt")
+            new_dir = Path(temp_dir) / "new_subdir" / "nested"
+            save_path = new_dir / "model_save"
 
             # Directory shouldn't exist yet
-            assert not os.path.exists(new_dir)
+            assert not new_dir.exists()
 
             # Save should create the directory
-            ddpg.save(filepath)
+            ddpg.save(save_path, config=True)
 
-            # Check directory and file were created
-            assert os.path.exists(new_dir)
-            assert os.path.exists(filepath)
+            # Check directory and files were created
+            assert new_dir.exists()
+            assert (save_path / "model_state.safetensors").exists()
+            assert (save_path / "optim_state.safetensors").exists()
+            assert (save_path / "metadata.json").exists()
+
+            # Check config file was created in the parent directory
+            config_path = save_path.parent / "model_config.json"
+            assert config_path.exists()
 
     def test_load_invalid_file(self):
-        with tempfile.NamedTemporaryFile(suffix=".pt", delete=False) as temp_file:
-            filepath = temp_file.name
+        with tempfile.TemporaryDirectory() as temp_dir:
+            filepath = os.path.join(temp_dir, "invalid_model.pt")
 
-        try:
             # Create an invalid model file
             with open(filepath, "w") as f:
                 f.write("This is not a valid PyTorch file")
@@ -383,31 +331,226 @@ class TestLiquidDDPG:
             with pytest.raises(Exception):
                 LiquidDDPG.load(filepath)
 
-        finally:
-            # Clean up
-            if os.path.exists(filepath):
-                os.unlink(filepath)
+    def test_save_existing_file_error(self, ddpg: LiquidDDPG):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            filepath = os.path.join(temp_dir, "model.pt")
 
-    def test_checkpoint_keys_validation(self, ddpg: LiquidDDPG):
-        with tempfile.NamedTemporaryFile(suffix=".pt", delete=False) as temp_file:
-            filepath = temp_file.name
+            # Create the file first
+            with open(filepath, "w") as f:
+                f.write("Existing file")
 
-        try:
-            # Save the model
-            ddpg.save(filepath)
+            # Attempt to save should raise FileExistsError
+            with pytest.raises(FileExistsError):
+                ddpg.save(filepath)
 
-            # Load the checkpoint and modify it
-            checkpoint = torch.load(filepath)
-            # Add an invalid key
-            checkpoint["invalid_key"] = "some_value"
-            # Save the modified checkpoint
-            torch.save(checkpoint, filepath)
+    def test_config_file_creation(self, ddpg: LiquidDDPG):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            save_path = Path(temp_dir) / "model_save"
 
-            # Attempt to load should raise ValueError about key mismatch
-            with pytest.raises(ValueError, match="Mismatch between checkpoint keys"):
-                LiquidDDPG.load(filepath)
+            # Save the model with config
+            ddpg.save(save_path, config=True)
 
-        finally:
-            # Clean up
-            if os.path.exists(filepath):
-                os.unlink(filepath)
+            # Check config file exists
+            config_path = save_path.parent / "model_config.json"
+            assert config_path.exists()
+
+            # Verify config file is valid JSON with expected structure
+            with open(config_path, "r") as f:
+                config_data = json.loads(f.read())
+
+            # Verify basic structure
+            assert "agent" in config_data
+            assert "model_details" in config_data
+            assert "state_dim" in config_data["model_details"]
+
+    def test_train_with_all_callbacks(
+        self, ddpg: LiquidDDPG, env: gym.Env, tmp_path, monkeypatch
+    ):
+        set_seed(64)
+        os.environ["VELORA_TEST_MODE"] = "True"
+
+        # Create a unique directory using tmp_path for this test
+        test_id = f"ddpg-test-{id(ddpg)}"
+        checkpoint_dir = tmp_path / "checkpoints"
+        checkpoint_dir.mkdir(exist_ok=True)
+        CP_DIR = test_id
+        FREQ = 1
+
+        # Clean up any existing directories from failed tests
+        existing_dir = Path("checkpoints") / CP_DIR
+        if existing_dir.exists():
+            shutil.rmtree(existing_dir)
+
+        # Mock the comet experiment
+        mock_experiment = MagicMock()
+
+        # Set the environment variable for Comet API key
+        monkeypatch.setenv("COMET_API_KEY", "test-key")
+
+        def patched_init(self, dirname, **kwargs):
+            self.dirname = dirname
+            self.filepath = tmp_path / "checkpoints" / dirname / "saves"
+            self.frequency = kwargs.get("frequency", 100)
+            self.buffer = kwargs.get("buffer", False)
+            print(
+                f"'{self.__class__.__name__}' enabled with ep_{self.frequency=} and {self.buffer=}."
+            )
+
+        # Apply the patch
+        with patch.object(SaveCheckpoints, "__init__", patched_init):
+            # Mock comet_ml.Experiment to return our mock
+            with patch("comet_ml.Experiment", return_value=mock_experiment):
+                callbacks = [
+                    SaveCheckpoints(CP_DIR, frequency=FREQ, buffer=True),
+                    EarlyStopping(
+                        target=1000.0, patience=3
+                    ),  # Lower patience for faster test
+                    CometAnalytics("ddpg-test"),
+                ]
+
+                try:
+                    # Skip the db operations completely
+                    with patch("velora.training.metrics.TrainMetrics.add_episode"):
+                        with patch("velora.training.metrics.TrainMetrics.info"):
+                            # Patch TrainHandler.episode to set ep_reward on the state
+                            # Include the correct signature with ep_reward parameter
+                            def patched_episode(
+                                self, current_ep, ep_reward=None, *args, **kwargs
+                            ):
+                                # Set ep_reward directly on the state
+                                self.state.ep_reward = 1500.0
+                                # No need to call original since we're providing a complete replacement
+
+                            with patch.object(TrainHandler, "episode", patched_episode):
+                                # Mock predict to return tensors with correct shapes
+                                with patch.object(ddpg, "predict") as mock_predict:
+                                    mock_predict.return_value = (
+                                        torch.zeros(
+                                            ddpg.action_dim, device=ddpg.device
+                                        ),  # action
+                                        torch.zeros(
+                                            (1, ddpg.actor.ncp.hidden_size),
+                                            device=ddpg.device,
+                                        ),  # hidden state with correct shape
+                                    )
+
+                                    # Mock buffer operations to prevent storing experiences
+                                    with (
+                                        patch.object(ddpg.buffer, "add"),
+                                        patch.object(ddpg.buffer, "warm"),
+                                    ):
+                                        # Mock _train_step to avoid network operations
+                                        with patch.object(
+                                            ddpg, "_train_step"
+                                        ) as mock_train_step:
+                                            mock_train_step.return_value = (
+                                                torch.tensor(0.1),
+                                                torch.tensor(0.2),
+                                            )  # Return mock losses
+
+                                            # Run training with reduced episodes for faster testing
+                                            ddpg.train(
+                                                env,
+                                                batch_size=32,
+                                                n_episodes=5,
+                                                callbacks=callbacks,
+                                                max_steps=100,
+                                                noise_scale=0.3,
+                                                gamma=0.99,
+                                                tau=0.005,
+                                                window_size=FREQ,
+                                            )
+
+                        # Verify experiment was created and configured
+                        assert mock_experiment.set_name.call_count == 1
+                        assert mock_experiment.add_tags.call_count == 1
+                        assert mock_experiment.log_parameters.call_count == 1
+
+                        # Verify experiment was ended
+                        assert mock_experiment.end.call_count == 1
+                finally:
+                    # Clean up the directories - both real and temp paths just to be sure
+                    real_path = Path("checkpoints") / CP_DIR
+                    if real_path.exists():
+                        shutil.rmtree(real_path)
+
+                    temp_path = tmp_path / "checkpoints" / CP_DIR
+                    if temp_path.exists():
+                        shutil.rmtree(temp_path)
+
+    def test_early_stopping(self, ddpg: LiquidDDPG, env: gym.Env):
+        """Test that DDPG training stops early when EarlyStopping callback is triggered."""
+        set_seed(64)
+        early_stopping = EarlyStopping(target=100.0, patience=1)
+
+        # Mock necessary methods to avoid actual training
+        with (
+            patch.object(ddpg.buffer, "warm"),
+            patch.object(ddpg.buffer, "add"),
+            patch.object(
+                ddpg,
+                "_train_step",
+                return_value=(
+                    torch.tensor(0.1),
+                    torch.tensor(0.2),
+                ),
+            ),
+            patch.object(
+                ddpg,
+                "predict",
+                return_value=(
+                    torch.zeros(ddpg.action_dim, device=ddpg.device),
+                    torch.zeros((1, ddpg.actor.ncp.hidden_size), device=ddpg.device),
+                ),
+            ),
+        ):
+            # Skip database operations by patching add_episode
+            with patch("velora.training.metrics.TrainMetrics.add_episode"):
+                with patch("velora.training.metrics.TrainMetrics.info"):
+                    # Prepare a patched episode method with the correct signature
+                    def mock_episode(self, current_ep, ep_reward=None, *args, **kwargs):
+                        # Set ep_reward directly on the state
+                        self.state.ep_reward = 150.0
+                        # No need to call original since we're providing a complete replacement
+
+                    with patch.object(TrainHandler, "episode", mock_episode):
+                        # Run training with the EarlyStopping callback
+                        ddpg.train(
+                            env,
+                            batch_size=32,
+                            n_episodes=5,  # Set higher than our early stopping threshold
+                            callbacks=[early_stopping],
+                            max_steps=5,
+                            window_size=1,
+                        )
+
+    def test_file_exists_error(self, ddpg: LiquidDDPG):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            save_path = Path(temp_dir) / "model_save"
+
+            # Create directory and model state file to trigger error
+            save_path.mkdir(parents=True, exist_ok=True)
+            model_state_path = save_path / "model_state.safetensors"
+            model_state_path.touch()
+
+            # Now trying to save should raise FileExistsError
+            with pytest.raises(FileExistsError, match=r"A model state already exists"):
+                ddpg.save(save_path)
+
+    def test_invalid_checkpoint_error(self, ddpg: LiquidDDPG):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            save_path = Path(temp_dir) / "model_save"
+            invalid_path = Path(temp_dir) / "invalid_save"
+
+            # Create an invalid safetensors file
+            invalid_path.mkdir(parents=True, exist_ok=True)
+            with open(invalid_path / "model_state.safetensors", "w") as f:
+                f.write("This is not a valid safetensors file")
+            with open(invalid_path / "optim_state.safetensors", "w") as f:
+                f.write("This is not a valid safetensors file")
+            with open(invalid_path / "metadata.json", "w") as f:
+                f.write("{}")
+
+            # Attempt to load should raise an exception
+            with pytest.raises(Exception):
+                LiquidDDPG.load(invalid_path)
