@@ -201,7 +201,6 @@ class LiquidDDPG(RLAgent):
         )
         self.noise = OUNoise(action_dim, device=device)
 
-        self.step_count = 0
         self.active_params = self.actor.ncp.active_params
         self.total_params = self.actor.ncp.total_params
 
@@ -371,7 +370,6 @@ class LiquidDDPG(RLAgent):
             self, env, n_episodes, max_steps, window_size, callbacks
         ) as handler:
             for i_ep in range(n_episodes):
-                self.step_count += 1
                 current_ep = i_ep + 1
                 ep_reward = 0.0
                 hidden = None

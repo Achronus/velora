@@ -37,7 +37,7 @@ def training_info(
         device (str): the device to perform computations on
     """
     output = NAME_STR.strip()
-    params_str = f"{agent.active_params}/{agent.total_params}"
+    params_str = f"{agent.active_params:,}/{agent.total_params:,}"
 
     if agent.active_params > 10_000:
         active, total = (

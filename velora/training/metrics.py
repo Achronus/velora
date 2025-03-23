@@ -200,8 +200,13 @@ class TrainMetrics:
 
         self.experiment_id: int | None = None
 
-        self._critic_loss: torch.Tensor | None = None
-        self._actor_loss: torch.Tensor | None = None
+        self._critic_loss: torch.Tensor = torch.zeros(1, device=self.device)
+        self._actor_loss: torch.Tensor = torch.zeros(1, device=self.device)
+        self._step_total: torch.Tensor = torch.zeros(
+            1,
+            dtype=torch.int32,
+            device=self.device,
+        )
 
     def start_experiment(self, config: "RLAgentConfig") -> None:
         """
@@ -254,6 +259,7 @@ class TrainMetrics:
 
         self._actor_loss = self._current_losses.actor_avg(ep_length.item())
         self._critic_loss = self._current_losses.critic_avg(ep_length.item())
+        self._step_total += ep_length
 
         moving_avg = self.reward_moving_avg()
         moving_std = self.reward_moving_std()
@@ -311,12 +317,16 @@ class TrainMetrics:
         ep = number_to_short(current_ep)
         max_eps = number_to_short(self.n_episodes)
 
-        length = number_to_short(int(self._ep_lengths.max().item()))
-        max_length = number_to_short(self.max_steps)
+        ep_length = number_to_short(int(self._ep_lengths.latest))
+        step_total = number_to_short(self._step_total.item())
+
+        max_length = number_to_short(int(self._ep_lengths.max().item()))
+        max_steps = number_to_short(self.max_steps)
 
         print(
             f"Episode: {ep}/{max_eps}, "
-            f"Max Length: {length}/{max_length}, "
+            f"Steps: {ep_length}/{step_total}, "
+            f"Max Length: {max_length}/{max_steps}, "
             f"Reward Avg: {self.reward_moving_avg():.2f}, "
             f"Reward Max: {self.reward_moving_max():.2f}, "
             f"Critic Loss: {self._critic_loss.item():.2f}, "
