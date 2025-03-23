@@ -145,7 +145,11 @@ class MovingMetric:
         Returns:
             std (torch.Tensor): the calculated standard deviation.
         """
-        return self.window.std()
+        return (
+            self.window.std()
+            if self.window.size(dim=0) > 1
+            else torch.tensor(0.0, device=self.device)
+        )
 
     def max(self) -> torch.Tensor:
         """
