@@ -1,6 +1,6 @@
 [project]
 name = "velora"
-version = "0.1.0"
+version = "0.1.1"
 description = "A Liquid Reinforcement Learning (RL) framework."
 authors = [{ name = "Ryan Partridge", email = "rpartridge101@gmail.com>" }]
 license = "MIT License"
@@ -16,6 +16,8 @@ issues = "https://github.com/Achronus/velora/issues"
 
 [project.optional-dependencies]
 comet = ["comet-ml>=3.49.5,<4.0.0"]
+viz = ["scikit-learn>=1.6.1,<2.0.0"]
+all = ["comet-ml>=3.49.5,<4.0.0", "scikit-learn>=1.6.1,<2.0.0"]
 
 [tool.poetry]
 classifiers = [
@@ -80,6 +82,10 @@ git-cliff = "^2.8.0"
 
 [tool.poetry.group.comet.dependencies]
 comet-ml = ">=3.49.5,<4.0.0"
+
+
+[tool.poetry.group.viz.dependencies]
+scikit-learn = ">=1.6.1,<2.0.0"
 
 
 [[tool.poetry.source]]
