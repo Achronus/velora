@@ -55,7 +55,7 @@ class TestTrainingInfo:
         assert "batch_size=64" in printed_output
         assert "device 'cpu'" in printed_output
         assert "window_size=100" in printed_output
-        assert "5000/10000" in printed_output
+        assert "5,000/10,000" in printed_output
         assert "Active Callbacks:" not in printed_output  # No callbacks
 
     @patch("builtins.print")

@@ -1,8 +1,6 @@
 from copy import deepcopy
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Literal, Self, Tuple, Type, get_args
-
-from velora.training.display import training_info
+from typing import TYPE_CHECKING, List, Literal, Self, Tuple, Type
 
 try:
     from typing import override
@@ -22,7 +20,9 @@ from velora.buffer.replay import ReplayBuffer
 from velora.models.base import NCPModule, RLAgent
 from velora.models.config import ModelDetails, RLAgentConfig, TorchConfig
 from velora.noise import OUNoise
+from velora.training.display import training_info
 from velora.training.handler import TrainHandler
+from velora.utils.restore import load_model, save_model
 from velora.utils.torch import soft_update
 
 CheckpointLiteral = Literal[
@@ -165,12 +165,7 @@ class LiquidDDPG(RLAgent):
             critic_lr (float, optional): the critic optimizer learning rate
             device (torch.device, optional): the device to perform computations on
         """
-        super().__init__(device)
-
-        self.state_dim = state_dim
-        self.n_neurons = n_neurons
-        self.action_dim = action_dim
-        self.buffer_size = buffer_size
+        super().__init__(state_dim, n_neurons, action_dim, buffer_size, device)
 
         self.actor = DDPGActor(
             self.state_dim,
@@ -360,7 +355,7 @@ class LiquidDDPG(RLAgent):
             n_episodes,
             batch_size,
             window_size,
-            callbacks,
+            callbacks or [],
             self.device,
         )
 
@@ -450,102 +445,18 @@ class LiquidDDPG(RLAgent):
         self.actor.train()
         return action, hidden
 
-    def save(self, filepath: str | Path, *, buffer: bool = False) -> None:
-        """
-        Saves the current model state into a file, plus a separate `config.json`
-        file detailing the core details for the training session, and optionally
-        the training buffer.
-
-        Parameters:
-            filepath (str | Path): the location to store the model state
-            buffer (bool, optional): a flag for storing the buffer state.
-                When `True`, creates a file matching `<filepath>.buffer.<filepath_ext>`
-        """
-        save_path = Path(filepath)
-        save_path.parent.mkdir(parents=True, exist_ok=True)
-
-        if save_path.exists():
-            raise FileExistsError(
-                f"Checkpoints already exist in the '{save_path.parent}' directory! Either change the 'filepath' or delete the folders contents."
-            )
-
-        checkpoint: Dict[CheckpointLiteral, Any] = {
-            "state_dim": self.state_dim,
-            "n_neurons": self.n_neurons,
-            "action_dim": self.action_dim,
-            "buffer_size": self.buffer_size,
-            "device": str(self.device),
-            "actor": self.actor.state_dict(),
-            "critic": self.critic.state_dict(),
-            "actor_target": self.actor_target.state_dict(),
-            "critic_target": self.critic_target.state_dict(),
-            "actor_optim": self.actor_optim.state_dict(),
-            "critic_optim": self.critic_optim.state_dict(),
-        }
-
-        torch.save(checkpoint, save_path)
-
-        config_path = Path(save_path.parent, "model_config.json")
-        if not config_path.exists():
-            with open(config_path, "w") as f:
-                f.write(self.config.model_dump_json(indent=2, exclude_none=True))
-
-        if buffer:
-            buffer_path = self.buffer.create_filepath(save_path)
-            self.buffer.save(buffer_path)
+    def save(
+        self,
+        dirpath: str | Path,
+        *,
+        buffer: bool = False,
+        config: bool = False,
+    ) -> None:
+        save_model(self, dirpath, buffer=buffer, config=config)
 
     @classmethod
-    def load(cls, filepath: str | Path, *, buffer: bool = False) -> Self:
-        """
-        Loads a saved model state and optionally the training buffer.
+    def load(cls, dirpath: str | Path, *, buffer: bool = False) -> Self:
+        return load_model(cls, dirpath, buffer=buffer)
 
-        Parameters:
-            filepath (str | Path): the location for the saved model state
-            buffer (bool, optional): a flag for loading the buffer state.
-                When `True`, filename must match `<filepath>.buffer.<filepath_ext>`
-        """
-        load_path = Path(filepath)
-        checkpoint: Dict[CheckpointLiteral, Any] = torch.load(load_path)
-        buffer_path = None
-
-        valid_keys = set(get_args(CheckpointLiteral))
-        if not all(key in valid_keys for key in checkpoint.keys()):
-            raise ValueError(
-                "File cannot be loaded. Mismatch between checkpoint keys! Are you loading the right file?"
-            )
-
-        # Create new model instance
-        model = cls(
-            checkpoint["state_dim"],
-            checkpoint["n_neurons"],
-            checkpoint["action_dim"],
-            buffer_size=checkpoint["buffer_size"],
-            device=torch.device(checkpoint["device"]),
-        )
-
-        # Check buffer valid
-        if buffer:
-            buffer_path = model.buffer.create_filepath(load_path)
-
-            if not buffer_path.exists():
-                raise FileNotFoundError(
-                    f"Buffer file '{buffer_path}' does not exist! Try with `buffer=False` instead."
-                )
-
-        model.actor.load_state_dict(checkpoint["actor"])
-        model.critic.load_state_dict(checkpoint["critic"])
-        model.actor_target.load_state_dict(checkpoint["actor_target"])
-        model.critic_target.load_state_dict(checkpoint["critic_target"])
-        model.actor_optim.load_state_dict(checkpoint["actor_optim"])
-        model.critic_optim.load_state_dict(checkpoint["critic_optim"])
-
-        if buffer:
-            model.buffer = model.buffer.load(buffer_path)
-
-        print(
-            f"Loaded model with:\n"
-            f"  state_dim={model.state_dim}, n_neurons={model.n_neurons}, action_dim={model.action_dim}\n"
-            f"  optim={type(model.actor_optim).__name__}, device={model.device}\n"
-            f"  buffer_size={model.buffer_size:,}, buffer_restored={buffer}"
-        )
-        return model
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}(state_dim={self.state_dim}, n_neurons={self.n_neurons}, action_dim={self.action_dim}, optim={type(self.actor_optim).__name__}, buffer_size={self.buffer_size:,}, device={self.device})"

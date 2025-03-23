@@ -341,6 +341,7 @@ class TestTrainMetrics:
             (100,), dtype=torch.int, device=torch.device("cpu")
         )
         metrics._ep_lengths[49] = 200  # Set episode 50's length
+        metrics._ep_lengths.latest = 200
         metrics._ep_rewards.add(torch.tensor(85.0))
         metrics._critic_loss = torch.tensor(0.7)
         metrics._actor_loss = torch.tensor(0.6)
@@ -356,7 +357,8 @@ class TestTrainMetrics:
             # Check the print message format (don't check exact format as it might change)
             print_args = mock_print.call_args[0][0]
             assert "Episode" in print_args
-            assert "Length:" in print_args
+            assert "Steps" in print_args
+            assert "Max Length:" in print_args
             assert "Reward Avg:" in print_args
             assert "Reward Max:" in print_args
             assert "Critic Loss:" in print_args

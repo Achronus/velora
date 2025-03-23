@@ -173,34 +173,22 @@ class SaveCheckpoints(TrainCallback):
             buffer = self.buffer
 
         if should_save:
-            self.save_checkpoint(state.agent, ep_idx, filename, buffer)
+            self.save_checkpoint(state.agent, filename, buffer)
 
         return state
 
-    def save_checkpoint(
-        self,
-        agent: RLAgent,
-        ep: int,
-        filename: str,
-        buffer: bool,
-    ) -> None:
+    def save_checkpoint(self, agent: RLAgent, dirname: str, buffer: bool) -> None:
         """
         Saves a checkpoint at a given episode with the given suffix.
 
         Parameters:
             agent (RLAgent): the agent being trained
-            ep (int): the current episode index
-            filename (str): the checkpoint filename
+            dirname (str): the checkpoint directory name
             buffer (bool): whether to save the buffer state
         """
-        checkpoint_path = Path(self.filepath, f"{filename}.pt")
-
-        agent.save(checkpoint_path, buffer=buffer)
-        print(f"Checkpoint saved at episode {number_to_short(ep)}: {checkpoint_path}")
-
-        if buffer:
-            buffer_path = Path(self.filepath, f"{filename}.buffer.pt")
-            print(f"Buffer saved at: {buffer_path}")
+        checkpoint_path = Path(self.filepath, dirname)
+        agent.save(checkpoint_path, buffer=buffer, config=True)
+        print(f"Checkpoint saved at: {checkpoint_path}")
 
     def config(self) -> Tuple[str, Dict[str, Any]]:
         return self.__class__.__name__, {

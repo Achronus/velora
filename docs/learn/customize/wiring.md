@@ -244,7 +244,7 @@ This code should work 'as is'.
 
 We've seen how to use the `Wiring` class in `NCPLiquidCells` but what about in `Linear` layers?
 
-We've created our own implementation for this called a `SparseLinear` layer that have `SparseParameter` weights.
+We've created our own implementation for this called a `SparseLinear` layer that applies the sparsity mask to the weights automatically.
 
 You can implement one like this:
 

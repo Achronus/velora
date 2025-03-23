@@ -235,9 +235,9 @@ class TestSaveCheckpoints:
 
         assert mock_mkdir.call_count == 1
         assert train_state.agent.save.call_count == 1
-        # Check filename contains episode number
+        # Check save path contains correct filename without .pt extension
         save_path = train_state.agent.save.call_args[0][0]
-        assert "CartPole-v1_ep10.pt" in str(save_path)
+        assert "CartPole-v1_ep10" in str(save_path)
         assert train_state.agent.save.call_args[1]["buffer"] is False
 
         assert result is train_state
@@ -266,9 +266,9 @@ class TestSaveCheckpoints:
 
         assert mock_mkdir.call_count == 1
         assert train_state.agent.save.call_count == 1
-        # Check filename contains "final"
+        # Check filename contains "final" without .pt extension
         save_path = train_state.agent.save.call_args[0][0]
-        assert "CartPole-v1_final.pt" in str(save_path)
+        assert "CartPole-v1_final" in str(save_path)
         # Buffer should be saved
         assert train_state.agent.save.call_args[1]["buffer"] is True
 
@@ -302,14 +302,13 @@ class TestSaveCheckpoints:
         with patch("builtins.print"):
             callback.save_checkpoint(
                 mock_agent,
-                ep=10,
-                filename="test_custom",
+                "test_custom",
                 buffer=True,
             )
 
         assert mock_agent.save.call_count == 1
         # Check path and buffer flag
-        assert "test_custom.pt" in str(mock_agent.save.call_args[0][0])
+        assert "test_custom" in str(mock_agent.save.call_args[0][0])
         assert mock_agent.save.call_args[1]["buffer"] is True
 
     def test_dirname_exists_error(self):

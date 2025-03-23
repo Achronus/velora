@@ -1,8 +1,6 @@
+import json
 from typing import Tuple
 import pytest
-import os
-import tempfile
-from pathlib import Path
 
 import gymnasium as gym
 import torch
@@ -43,7 +41,7 @@ class TestBatchExperience:
 class TestReplayBuffer:
     @pytest.fixture
     def replay_buffer(self) -> ReplayBuffer:
-        return ReplayBuffer(capacity=100, state_dim=2, action_dim=1)
+        return ReplayBuffer(capacity=100, state_dim=2, action_dim=1, device="cpu")
 
     @pytest.fixture
     def sample_experience(self) -> Tuple:
@@ -89,7 +87,7 @@ class TestReplayBuffer:
         )
 
     def test_push_experience(
-        self, replay_buffer: ReplayBuffer, sample_experience: Tuple
+        self, replay_buffer: ReplayBuffer, sample_experience: tuple
     ) -> None:
         replay_buffer.add(*sample_experience)
         assert len(replay_buffer) == 1
@@ -104,14 +102,14 @@ class TestReplayBuffer:
         assert len(replay_buffer) == 100  # Should not exceed capacity
 
     def test_sample_insufficient_experiences(
-        self, replay_buffer: ReplayBuffer, sample_experience: Tuple
+        self, replay_buffer: ReplayBuffer, sample_experience: tuple
     ) -> None:
         replay_buffer.add(*sample_experience)
         with pytest.raises(ValueError):
             replay_buffer.sample(batch_size=2)
 
     def test_sample_batch(
-        self, replay_buffer: ReplayBuffer, sample_experience: Tuple
+        self, replay_buffer: ReplayBuffer, sample_experience: tuple
     ) -> None:
         # Fill buffer with multiple experiences
         for _ in range(10):
@@ -128,7 +126,7 @@ class TestReplayBuffer:
         assert batch.dones.shape[0] == batch_size
 
     def test_len_method(
-        self, replay_buffer: ReplayBuffer, sample_experience: Tuple
+        self, replay_buffer: ReplayBuffer, sample_experience: tuple
     ) -> None:
         assert len(replay_buffer) == 0
         replay_buffer.add(*sample_experience)
@@ -137,104 +135,109 @@ class TestReplayBuffer:
     def test_state_dict_empty_buffer(self, replay_buffer: ReplayBuffer) -> None:
         state_dict = replay_buffer.state_dict()
 
-        assert state_dict["capacity"] == 100
-        assert state_dict["state_dim"] == 2
-        assert state_dict["action_dim"] == 1
-        assert state_dict["device"] is None
+        # Check that state_dict returns the correct tensors
+        assert "states" in state_dict
+        assert "actions" in state_dict
+        assert "rewards" in state_dict
+        assert "next_states" in state_dict
+        assert "dones" in state_dict
 
         # Check that buffer fields are tensors with correct shapes
-        assert state_dict["buffer"]["states"].shape == (100, 2)
-        assert state_dict["buffer"]["actions"].shape == (100, 1)
-        assert state_dict["buffer"]["rewards"].shape == (100, 1)
-        assert state_dict["buffer"]["next_states"].shape == (100, 2)
-        assert state_dict["buffer"]["dones"].shape == (100, 1)
+        assert state_dict["states"].shape == (100, 2)
+        assert state_dict["actions"].shape == (100, 1)
+        assert state_dict["rewards"].shape == (100, 1)
+        assert state_dict["next_states"].shape == (100, 2)
+        assert state_dict["dones"].shape == (100, 1)
+
+        # Check metadata
+        metadata = replay_buffer.metadata()
+        assert metadata["capacity"] == 100
+        assert metadata["state_dim"] == 2
+        assert metadata["action_dim"] == 1
+        assert metadata["device"] == "cpu"
+        assert metadata["position"] == 0
+        assert metadata["size"] == 0
 
     def test_state_dict_filled_buffer(self, filled_buffer: ReplayBuffer) -> None:
         state_dict = filled_buffer.state_dict()
 
-        assert state_dict["capacity"] == 100
-        assert state_dict["state_dim"] == 2
-        assert state_dict["action_dim"] == 1
-        assert state_dict["device"] is None
+        # Check that state_dict returns the correct tensors
+        assert "states" in state_dict
+        assert "actions" in state_dict
+        assert "rewards" in state_dict
+        assert "next_states" in state_dict
+        assert "dones" in state_dict
 
-        # Check buffer size
-        assert state_dict["size"] == 10
-        assert state_dict["position"] == 10
+        # Get metadata to verify buffer state
+        metadata = filled_buffer.metadata()
+        assert metadata["capacity"] == 100
+        assert metadata["state_dim"] == 2
+        assert metadata["action_dim"] == 1
+        assert metadata["device"] == "cpu"
+        assert metadata["size"] == 10
+        assert metadata["position"] == 10
 
         # Validate first few items in the buffer
-        buffer_data = state_dict["buffer"]
-        assert torch.allclose(buffer_data["states"][0], torch.tensor([0.0, 1.0]))
-        assert torch.allclose(buffer_data["actions"][1], torch.tensor([1.0]))
-        assert torch.allclose(buffer_data["rewards"][2], torch.tensor([1.0]))
-        assert torch.allclose(buffer_data["next_states"][3], torch.tensor([4.0, 5.0]))
-        assert torch.allclose(buffer_data["dones"][9], torch.tensor([1.0]))
+        assert torch.allclose(state_dict["states"][0], torch.tensor([0.0, 1.0]))
+        assert torch.allclose(state_dict["actions"][1], torch.tensor([1.0]))
+        assert torch.allclose(state_dict["rewards"][2], torch.tensor([1.0]))
+        assert torch.allclose(state_dict["next_states"][3], torch.tensor([4.0, 5.0]))
+        assert torch.allclose(state_dict["dones"][9], torch.tensor([1.0]))
 
-    def test_save_load(self, filled_buffer: ReplayBuffer) -> None:
-        with tempfile.NamedTemporaryFile(suffix=".pt", delete=False) as temp_file:
-            filepath = temp_file.name
+    def test_save_load(self, filled_buffer: ReplayBuffer, tmp_path) -> None:
+        # Create directory
+        buffer_dir = tmp_path / "buffer_dir"
+        buffer_dir.mkdir(parents=True, exist_ok=True)
 
-        try:
-            # Save the buffer
-            filled_buffer.save(filepath)
-            assert os.path.exists(filepath)
+        # Save buffer
+        filled_buffer.save(buffer_dir)
 
-            # Load the buffer
-            loaded_buffer = ReplayBuffer.load(filepath)
+        # Check files exist
+        metadata_path = buffer_dir / "buffer_metadata.json"
+        state_path = buffer_dir / "buffer_state.safetensors"
 
-            # Check properties
-            assert loaded_buffer.capacity == filled_buffer.capacity
-            assert loaded_buffer.device == filled_buffer.device
-            assert loaded_buffer.position == filled_buffer.position
-            assert loaded_buffer.size == filled_buffer.size
-            assert len(loaded_buffer) == len(filled_buffer)
+        assert metadata_path.exists()
+        assert state_path.exists()
 
-            # Check experiences by sampling
-            original_batch = filled_buffer.sample(batch_size=5)
-            loaded_batch = loaded_buffer.sample(batch_size=5)
+        # Load metadata
+        with open(metadata_path, "r") as f:
+            metadata = json.load(f)
 
-            # Due to random sampling, we can't directly compare the batches
-            # But we can check they have the same shape and general characteristics
-            assert original_batch.states.shape == loaded_batch.states.shape
-            assert original_batch.actions.shape == loaded_batch.actions.shape
-            assert original_batch.rewards.shape == loaded_batch.rewards.shape
-            assert original_batch.next_states.shape == loaded_batch.next_states.shape
-            assert original_batch.dones.shape == loaded_batch.dones.shape
+        # Load buffer
+        loaded_buffer = ReplayBuffer.load(state_path, metadata)
 
-        finally:
-            # Clean up
-            if os.path.exists(filepath):
-                os.unlink(filepath)
+        # Check properties
+        assert loaded_buffer.capacity == filled_buffer.capacity
+        assert str(loaded_buffer.device) == str(
+            filled_buffer.device
+        )  # Compare as strings
+        assert loaded_buffer.position == filled_buffer.position
+        assert loaded_buffer.size == filled_buffer.size
+        assert len(loaded_buffer) == len(filled_buffer)
 
-    def test_create_filepath(self) -> None:
-        # Test with string path
-        string_path = "models/checkpoint.pt"
-        buffer_path = ReplayBuffer.create_filepath(string_path)
-        assert buffer_path == Path("models", "checkpoint.buffer.pt")
+        # Sample and check
+        original_batch = filled_buffer.sample(batch_size=5)
+        loaded_batch = loaded_buffer.sample(batch_size=5)
 
-        # Test with Path object
-        path_obj = Path("models/checkpoint.pth")
-        buffer_path = ReplayBuffer.create_filepath(path_obj)
-        assert buffer_path == Path("models", "checkpoint.buffer.pth")
+        assert original_batch.states.shape == loaded_batch.states.shape
+        assert original_batch.actions.shape == loaded_batch.actions.shape
+        assert original_batch.rewards.shape == loaded_batch.rewards.shape
+        assert original_batch.next_states.shape == loaded_batch.next_states.shape
+        assert original_batch.dones.shape == loaded_batch.dones.shape
 
-        # Test with multiple extensions
-        complex_path = "models/run1.model.pt"
-        buffer_path = ReplayBuffer.create_filepath(complex_path)
-        assert buffer_path == Path("models", "run1.model.buffer.pt")
+    def test_save_directory_creation(
+        self, filled_buffer: ReplayBuffer, tmp_path
+    ) -> None:
+        # Create a directory
+        nested_dir = tmp_path / "nested_dir"
+        nested_dir.mkdir(parents=True, exist_ok=True)
 
-    def test_save_directory_creation(self, filled_buffer: ReplayBuffer) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            new_dir = os.path.join(temp_dir, "new_subdir", "nested")
-            filepath = os.path.join(new_dir, "buffer.pt")
+        # Save the buffer
+        filled_buffer.save(nested_dir)
 
-            # Directory shouldn't exist yet
-            assert not os.path.exists(new_dir)
-
-            # Save should create the directory
-            filled_buffer.save(filepath)
-
-            # Check directory and file were created
-            assert os.path.exists(new_dir)
-            assert os.path.exists(filepath)
+        # Check files
+        assert (nested_dir / "buffer_metadata.json").exists()
+        assert (nested_dir / "buffer_state.safetensors").exists()
 
     def test_buffer_warm(self):
         device = torch.device("cpu")
@@ -291,7 +294,7 @@ class TestReplayBuffer:
 class TestRolloutBuffer:
     @pytest.fixture
     def rollout_buffer(self) -> RolloutBuffer:
-        return RolloutBuffer(capacity=5, state_dim=2, action_dim=1)
+        return RolloutBuffer(capacity=5, state_dim=2, action_dim=1, device="cpu")
 
     @pytest.fixture
     def sample_experience(self) -> Tuple:
@@ -406,149 +409,166 @@ class TestRolloutBuffer:
     def test_state_dict_empty_buffer(self, rollout_buffer: RolloutBuffer) -> None:
         state_dict = rollout_buffer.state_dict()
 
-        assert state_dict["capacity"] == 5
-        assert state_dict["state_dim"] == 2
-        assert state_dict["action_dim"] == 1
-        assert state_dict["device"] is None
-        assert state_dict["size"] == 0
-        assert state_dict["position"] == 0
+        # Check that state_dict returns the correct tensors
+        assert "states" in state_dict
+        assert "actions" in state_dict
+        assert "rewards" in state_dict
+        assert "next_states" in state_dict
+        assert "dones" in state_dict
 
-        # Check that buffer tensors are initialized to correct shapes
-        assert state_dict["buffer"]["states"].shape == (5, 2)
-        assert state_dict["buffer"]["actions"].shape == (5, 1)
-        assert state_dict["buffer"]["rewards"].shape == (5, 1)
-        assert state_dict["buffer"]["next_states"].shape == (5, 2)
-        assert state_dict["buffer"]["dones"].shape == (5, 1)
+        # Check that buffer tensors are initialized with correct shapes
+        assert state_dict["states"].shape == (5, 2)
+        assert state_dict["actions"].shape == (5, 1)
+        assert state_dict["rewards"].shape == (5, 1)
+        assert state_dict["next_states"].shape == (5, 2)
+        assert state_dict["dones"].shape == (5, 1)
+
+        # Check metadata
+        metadata = rollout_buffer.metadata()
+        assert metadata["capacity"] == 5
+        assert metadata["state_dim"] == 2
+        assert metadata["action_dim"] == 1
+        assert metadata["device"] == "cpu"
+        assert metadata["position"] == 0
+        assert metadata["size"] == 0
 
     def test_state_dict_filled_buffer(self, filled_buffer: RolloutBuffer) -> None:
         state_dict = filled_buffer.state_dict()
 
-        assert state_dict["capacity"] == 5
-        assert state_dict["state_dim"] == 2
-        assert state_dict["action_dim"] == 1
-        assert state_dict["device"] is None
-        assert state_dict["size"] == 3  # We added 3 experiences
-        assert state_dict["position"] == 3
+        # Check that state_dict returns the correct tensors
+        assert "states" in state_dict
+        assert "actions" in state_dict
+        assert "rewards" in state_dict
+        assert "next_states" in state_dict
+        assert "dones" in state_dict
 
-        # Check buffer contents - the first 3 entries should have our data
-        buffer_data = state_dict["buffer"]
+        # Get metadata to verify buffer state
+        metadata = filled_buffer.metadata()
+        assert metadata["capacity"] == 5
+        assert metadata["state_dim"] == 2
+        assert metadata["action_dim"] == 1
+        assert metadata["device"] == "cpu"
+        assert metadata["size"] == 3  # We added 3 experiences
+        assert metadata["position"] == 3
 
         # Test first experience
-        assert torch.allclose(buffer_data["states"][0], torch.tensor([0.0, 1.0]))
-        assert torch.allclose(buffer_data["actions"][0], torch.tensor([0.0]))
-        assert torch.allclose(buffer_data["rewards"][0], torch.tensor([0.0]))
-        assert torch.allclose(buffer_data["next_states"][0], torch.tensor([1.0, 2.0]))
-        assert torch.allclose(buffer_data["dones"][0], torch.tensor([0.0]))
+        assert torch.allclose(state_dict["states"][0], torch.tensor([0.0, 1.0]))
+        assert torch.allclose(state_dict["actions"][0], torch.tensor([0.0]))
+        assert torch.allclose(state_dict["rewards"][0], torch.tensor([0.0]))
+        assert torch.allclose(state_dict["next_states"][0], torch.tensor([1.0, 2.0]))
+        assert torch.allclose(state_dict["dones"][0], torch.tensor([0.0]))
 
         # Test last experience (position 2)
-        assert torch.allclose(buffer_data["states"][2], torch.tensor([2.0, 3.0]))
-        assert torch.allclose(buffer_data["actions"][2], torch.tensor([2.0]))
-        assert torch.allclose(buffer_data["rewards"][2], torch.tensor([1.0]))
-        assert torch.allclose(buffer_data["next_states"][2], torch.tensor([3.0, 4.0]))
-        assert torch.allclose(buffer_data["dones"][2], torch.tensor([1.0]))
+        assert torch.allclose(state_dict["states"][2], torch.tensor([2.0, 3.0]))
+        assert torch.allclose(state_dict["actions"][2], torch.tensor([2.0]))
+        assert torch.allclose(state_dict["rewards"][2], torch.tensor([1.0]))
+        assert torch.allclose(state_dict["next_states"][2], torch.tensor([3.0, 4.0]))
+        assert torch.allclose(state_dict["dones"][2], torch.tensor([1.0]))
 
-    def test_save_load(self, filled_buffer: RolloutBuffer) -> None:
-        with tempfile.NamedTemporaryFile(suffix=".pt", delete=False) as temp_file:
-            filepath = temp_file.name
+    def test_save_load(self, filled_buffer: RolloutBuffer, tmp_path) -> None:
+        # Create save path and ensure directory exists
+        save_dir = tmp_path / "buffer_dir"
+        save_dir.mkdir(parents=True, exist_ok=True)
 
-        try:
-            # Save the buffer
-            filled_buffer.save(filepath)
-            assert os.path.exists(filepath)
+        # Save the buffer to a file within the directory
+        buffer_file = save_dir / "buffer_file"
+        buffer_file.mkdir(parents=True, exist_ok=True)
 
-            # Load the buffer
-            loaded_buffer = RolloutBuffer.load(filepath)
+        filled_buffer.save(buffer_file)
 
-            # Check properties
-            assert loaded_buffer.capacity == filled_buffer.capacity
-            assert loaded_buffer.device == filled_buffer.device
-            assert loaded_buffer.position == filled_buffer.position
-            assert loaded_buffer.size == filled_buffer.size
-            assert len(loaded_buffer) == len(filled_buffer)
+        # Check the files exist
+        buffer_metadata_path = buffer_file / "buffer_metadata.json"
+        buffer_state_path = buffer_file / "buffer_state.safetensors"
 
-            # Check experiences by sampling
-            original_batch = filled_buffer.sample()
-            loaded_batch = loaded_buffer.sample()
+        assert buffer_metadata_path.exists(), "buffer_metadata.json doesn't exist"
+        assert buffer_state_path.exists(), "buffer_state.safetensors doesn't exist"
 
-            # With RolloutBuffer, we can compare directly as sampling isn't random
-            assert torch.allclose(original_batch.states, loaded_batch.states)
-            assert torch.allclose(original_batch.actions, loaded_batch.actions)
-            assert torch.allclose(original_batch.rewards, loaded_batch.rewards)
-            assert torch.allclose(original_batch.next_states, loaded_batch.next_states)
-            assert torch.allclose(original_batch.dones, loaded_batch.dones)
+        # Load the metadata
+        with open(buffer_metadata_path, "r") as f:
+            metadata = json.load(f)
 
-        finally:
-            # Clean up
-            if os.path.exists(filepath):
-                os.unlink(filepath)
+        # Load the buffer
+        loaded_buffer = RolloutBuffer.load(buffer_state_path, metadata)
 
-    def test_create_filepath(self) -> None:
-        # Test with string path
-        string_path = "models/checkpoint.pt"
-        buffer_path = RolloutBuffer.create_filepath(string_path)
-        assert buffer_path == Path("models", "checkpoint.buffer.pt")
+        # Check properties
+        assert loaded_buffer.capacity == filled_buffer.capacity
+        assert str(loaded_buffer.device) == str(filled_buffer.device)
+        assert loaded_buffer.position == filled_buffer.position
+        assert loaded_buffer.size == filled_buffer.size
+        assert len(loaded_buffer) == len(filled_buffer)
 
-        # Test with Path
-        path_obj = Path("models/checkpoint.pth")
-        buffer_path = RolloutBuffer.create_filepath(path_obj)
-        assert buffer_path == Path("models", "checkpoint.buffer.pth")
+        # Check experiences by sampling
+        original_batch = filled_buffer.sample()
+        loaded_batch = loaded_buffer.sample()
 
-    def test_save_directory_creation(self, filled_buffer: RolloutBuffer) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            new_dir = os.path.join(temp_dir, "new_subdir", "nested")
-            filepath = os.path.join(new_dir, "buffer.pt")
+        # With RolloutBuffer, we can compare directly as sampling isn't random
+        assert torch.allclose(original_batch.states, loaded_batch.states)
+        assert torch.allclose(original_batch.actions, loaded_batch.actions)
+        assert torch.allclose(original_batch.rewards, loaded_batch.rewards)
+        assert torch.allclose(original_batch.next_states, loaded_batch.next_states)
+        assert torch.allclose(original_batch.dones, loaded_batch.dones)
 
-            # Directory shouldn't exist yet
-            assert not os.path.exists(new_dir)
+    def test_save_directory_creation(
+        self, filled_buffer: RolloutBuffer, tmp_path
+    ) -> None:
+        # Create nested directory path and ensure it exists
+        nested_dir = tmp_path / "new_subdir" / "nested"
+        nested_dir.mkdir(parents=True, exist_ok=True)
 
-            # Save should create the directory
-            filled_buffer.save(filepath)
+        # Create save path in the directory
+        save_path = nested_dir / "buffer_save"
+        save_path.mkdir(parents=True, exist_ok=True)
 
-            # Check directory and file were created
-            assert os.path.exists(new_dir)
-            assert os.path.exists(filepath)
+        # Save should work now
+        filled_buffer.save(save_path)
 
-    def test_empty_after_save(self, filled_buffer: RolloutBuffer) -> None:
-        with tempfile.NamedTemporaryFile(suffix=".pt", delete=False) as temp_file:
-            filepath = temp_file.name
+        # Check files were created
+        assert (save_path / "buffer_metadata.json").exists()
+        assert (save_path / "buffer_state.safetensors").exists()
 
-        try:
-            # Save the buffer
-            filled_buffer.save(filepath)
+    def test_empty_after_save(self, filled_buffer: RolloutBuffer, tmp_path) -> None:
+        # Create a save path
+        save_path = tmp_path / "buffer_save"
+        save_path.mkdir(parents=True, exist_ok=True)
 
-            # Empty buffer
-            filled_buffer.empty()
-            assert len(filled_buffer) == 0
+        # Save the buffer
+        filled_buffer.save(save_path)
+        buffer_state_path = save_path / "buffer_state.safetensors"
+        buffer_metadata_path = save_path / "buffer_metadata.json"
 
-            # Check state dict reflects empty buffer
-            state_dict = filled_buffer.state_dict()
-            assert state_dict["size"] == 0
-            assert state_dict["position"] == 0
+        # Empty buffer
+        filled_buffer.empty()
+        assert len(filled_buffer) == 0
 
-            # Buffer tensors still exist but position and size are reset
-            assert state_dict["buffer"]["states"].shape == (5, 2)
-            assert state_dict["buffer"]["actions"].shape == (5, 1)
+        # Check metadata reflects empty buffer
+        metadata = filled_buffer.metadata()
+        assert metadata["size"] == 0
+        assert metadata["position"] == 0
 
-            # Should be able to reload from file
-            loaded_buffer = RolloutBuffer.load(filepath)
-            assert len(loaded_buffer) == 3  # Original size before emptying
+        # Buffer tensors still exist but position and size are reset
+        state_dict = filled_buffer.state_dict()
+        assert state_dict["states"].shape == (5, 2)
+        assert state_dict["actions"].shape == (5, 1)
 
-            # Add more experiences to emptied buffer
-            filled_buffer.add(
-                state=torch.tensor([10.0, 11.0]),
-                action=torch.tensor([10.0]),
-                reward=5.0,
-                next_state=torch.tensor([11.0, 12.0]),
-                done=False,
-            )
-            assert len(filled_buffer) == 1
+        # Load the metadata from file
+        with open(buffer_metadata_path, "r") as f:
+            saved_metadata = json.load(f)
 
-        finally:
-            # Clean up
-            if os.path.exists(filepath):
-                os.unlink(filepath)
+        # Should be able to reload from file
+        loaded_buffer = RolloutBuffer.load(buffer_state_path, saved_metadata)
+        assert len(loaded_buffer) == 3  # Original size before emptying
 
-    def test_load_and_continue_filling(self) -> None:
+        # Add more experiences to emptied buffer
+        filled_buffer.add(
+            state=torch.tensor([10.0, 11.0]),
+            action=torch.tensor([10.0]),
+            reward=5.0,
+            next_state=torch.tensor([11.0, 12.0]),
+            done=False,
+        )
+        assert len(filled_buffer) == 1
+
+    def test_load_and_continue_filling(self, tmp_path) -> None:
         # Create and fill a buffer
         buffer = RolloutBuffer(capacity=5, state_dim=2, action_dim=1)
         for i in range(3):
@@ -560,50 +580,52 @@ class TestRolloutBuffer:
                 done=(i == 2),
             )
 
-        with tempfile.NamedTemporaryFile(suffix=".pt", delete=False) as temp_file:
-            filepath = temp_file.name
+        # Create save path and ensure it exists
+        save_path = tmp_path / "buffer_save"
+        save_path.mkdir(parents=True, exist_ok=True)
 
-        try:
-            # Save the buffer
-            buffer.save(filepath)
+        # Save the buffer
+        buffer.save(save_path)
 
-            # Load the buffer
-            loaded_buffer = RolloutBuffer.load(filepath)
-            assert len(loaded_buffer) == 3
+        # Load the metadata
+        buffer_metadata_path = save_path / "buffer_metadata.json"
+        buffer_state_path = save_path / "buffer_state.safetensors"
 
-            # Add more experiences
+        with open(buffer_metadata_path, "r") as f:
+            metadata = json.load(f)
+
+        # Load the buffer
+        loaded_buffer = RolloutBuffer.load(buffer_state_path, metadata)
+        assert len(loaded_buffer) == 3
+
+        # Add more experiences
+        loaded_buffer.add(
+            state=torch.tensor([10.0, 11.0]),
+            action=torch.tensor([10.0]),
+            reward=5.0,
+            next_state=torch.tensor([11.0, 12.0]),
+            done=False,
+        )
+
+        assert len(loaded_buffer) == 4
+
+        # Try to add experiences up to capacity
+        loaded_buffer.add(
+            state=torch.tensor([11.0, 12.0]),
+            action=torch.tensor([11.0]),
+            reward=5.5,
+            next_state=torch.tensor([12.0, 13.0]),
+            done=True,
+        )
+
+        assert len(loaded_buffer) == 5
+
+        # Should raise error on next push
+        with pytest.raises(BufferError, match="Buffer full!"):
             loaded_buffer.add(
-                state=torch.tensor([10.0, 11.0]),
-                action=torch.tensor([10.0]),
-                reward=5.0,
-                next_state=torch.tensor([11.0, 12.0]),
+                state=torch.tensor([12.0, 13.0]),
+                action=torch.tensor([12.0]),
+                reward=6.0,
+                next_state=torch.tensor([13.0, 14.0]),
                 done=False,
             )
-
-            assert len(loaded_buffer) == 4
-
-            # Try to add experiences up to capacity
-            loaded_buffer.add(
-                state=torch.tensor([11.0, 12.0]),
-                action=torch.tensor([11.0]),
-                reward=5.5,
-                next_state=torch.tensor([12.0, 13.0]),
-                done=True,
-            )
-
-            assert len(loaded_buffer) == 5
-
-            # Should raise error on next push
-            with pytest.raises(BufferError, match="Buffer full!"):
-                loaded_buffer.add(
-                    state=torch.tensor([12.0, 13.0]),
-                    action=torch.tensor([12.0]),
-                    reward=6.0,
-                    next_state=torch.tensor([13.0, 14.0]),
-                    done=False,
-                )
-
-        finally:
-            # Clean up
-            if os.path.exists(filepath):
-                os.unlink(filepath)

@@ -1,5 +1,6 @@
 from pathlib import Path
 import shutil
+import time
 from typing import Any, Dict, Literal
 import pytest
 from unittest.mock import MagicMock, Mock, patch
@@ -227,55 +228,96 @@ class TestLiquidDDPG:
             done = i == 9
             ddpg.buffer.add(state, action, reward, next_state, done)
 
-        with tempfile.TemporaryDirectory() as temp_dir:
-            filepath = os.path.join(temp_dir, "model.pt")
-            # Save the model with buffer
-            ddpg.save(filepath, buffer=True)
+        # Get the initial buffer size to compare later
+        buffer_size = len(ddpg.buffer)
 
-            # Check both files exist
-            assert os.path.exists(filepath)
-            buffer_path = ddpg.buffer.create_filepath(filepath)
-            assert os.path.exists(buffer_path)
-            config_path = os.path.join(os.path.dirname(filepath), "model_config.json")
-            assert os.path.exists(config_path)
+        # Create a unique temporary directory name
+        unique_id = f"model_save_{id(ddpg)}"
+        temp_dir = tempfile.gettempdir()
+        save_path = Path(temp_dir) / unique_id
+
+        try:
+            # Ensure the directory doesn't exist before starting
+            if save_path.exists():
+                shutil.rmtree(save_path, ignore_errors=True)
+
+            # Save the model with buffer
+            ddpg.save(save_path, buffer=True, config=True)
+
+            # Check files exist
+            model_state_path = save_path / "model_state.safetensors"
+            optim_state_path = save_path / "optim_state.safetensors"
+            buffer_state_path = save_path / "buffer_state.safetensors"
+            metadata_path = save_path / "metadata.json"
+            config_path = save_path.parent / "model_config.json"
+
+            assert model_state_path.exists(), "model_state.safetensors doesn't exist"
+            assert optim_state_path.exists(), "optim_state.safetensors doesn't exist"
+            assert buffer_state_path.exists(), "buffer_state.safetensors doesn't exist"
+            assert metadata_path.exists(), "metadata.json doesn't exist"
+            assert config_path.exists(), "model_config.json doesn't exist"
 
             # Load the model with buffer
-            loaded_ddpg = LiquidDDPG.load(filepath, buffer=True)
+            loaded_ddpg = LiquidDDPG.load(save_path, buffer=True)
 
             # Check buffer properties
-            assert len(loaded_ddpg.buffer) == len(ddpg.buffer)
+            assert len(loaded_ddpg.buffer) == buffer_size
+        finally:
+            # Clean up resources
+            if save_path.exists():
+                # Close any open file handles
+                import gc
+
+                gc.collect()
+                # Try to clean up the directory with retries
+                max_retries = 3
+                for attempt in range(max_retries):
+                    try:
+                        shutil.rmtree(save_path, ignore_errors=True)
+                        if config_path.exists():
+                            os.unlink(config_path)
+                        break
+                    except (PermissionError, OSError):
+                        if attempt < max_retries - 1:
+                            time.sleep(0.1)  # Short delay before retry
+                        continue
 
     def test_load_without_buffer_file(self, ddpg: LiquidDDPG):
         with tempfile.TemporaryDirectory() as temp_dir:
-            filepath = os.path.join(temp_dir, "model.pt")
+            save_path = Path(temp_dir) / "model_save"
 
             # Save model without buffer
-            ddpg.save(filepath, buffer=False)
+            ddpg.save(save_path, buffer=False)
 
             # Try to load with buffer=True, should raise error
+            buffer_state_path = save_path / "buffer_state.safetensors"
+            assert not buffer_state_path.exists(), "Buffer file should not exist"
+
             with pytest.raises(
-                FileNotFoundError, match="Buffer file .* does not exist"
+                FileNotFoundError, match=r"Buffer state .* does not exist"
             ):
-                LiquidDDPG.load(filepath, buffer=True)
+                LiquidDDPG.load(save_path, buffer=True)
 
     def test_save_directory_creation(self, ddpg: LiquidDDPG):
         with tempfile.TemporaryDirectory() as temp_dir:
-            new_dir = os.path.join(temp_dir, "new_subdir", "nested")
-            filepath = os.path.join(new_dir, "model.pt")
+            new_dir = Path(temp_dir) / "new_subdir" / "nested"
+            save_path = new_dir / "model_save"
 
             # Directory shouldn't exist yet
-            assert not os.path.exists(new_dir)
+            assert not new_dir.exists()
 
             # Save should create the directory
-            ddpg.save(filepath)
+            ddpg.save(save_path, config=True)
 
-            # Check directory and file were created
-            assert os.path.exists(new_dir)
-            assert os.path.exists(filepath)
+            # Check directory and files were created
+            assert new_dir.exists()
+            assert (save_path / "model_state.safetensors").exists()
+            assert (save_path / "optim_state.safetensors").exists()
+            assert (save_path / "metadata.json").exists()
 
-            # Check config file was created
-            config_path = os.path.join(new_dir, "model_config.json")
-            assert os.path.exists(config_path)
+            # Check config file was created in the parent directory
+            config_path = save_path.parent / "model_config.json"
+            assert config_path.exists()
 
     def test_load_invalid_file(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -303,14 +345,14 @@ class TestLiquidDDPG:
 
     def test_config_file_creation(self, ddpg: LiquidDDPG):
         with tempfile.TemporaryDirectory() as temp_dir:
-            filepath = os.path.join(temp_dir, "model.pt")
+            save_path = Path(temp_dir) / "model_save"
 
-            # Save the model
-            ddpg.save(filepath)
+            # Save the model with config
+            ddpg.save(save_path, config=True)
 
             # Check config file exists
-            config_path = os.path.join(os.path.dirname(filepath), "model_config.json")
-            assert os.path.exists(config_path)
+            config_path = save_path.parent / "model_config.json"
+            assert config_path.exists()
 
             # Verify config file is valid JSON with expected structure
             with open(config_path, "r") as f:
@@ -318,28 +360,8 @@ class TestLiquidDDPG:
 
             # Verify basic structure
             assert "agent" in config_data
+            assert "model_details" in config_data
             assert "state_dim" in config_data["model_details"]
-
-    def test_checkpoint_keys_validation(self, ddpg: LiquidDDPG):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            filepath = os.path.join(temp_dir, "model.pt")
-
-            # Save the model
-            ddpg.save(filepath)
-
-            # Load the checkpoint and modify it
-            checkpoint = torch.load(filepath)
-
-            # Add an invalid key
-            checkpoint["invalid_key"] = "some_value"
-
-            # Save the modified checkpoint
-            modified_filepath = os.path.join(temp_dir, "modified_model.pt")
-            torch.save(checkpoint, modified_filepath)
-
-            # Attempt to load should raise ValueError about key mismatch
-            with pytest.raises(ValueError, match="Mismatch between checkpoint keys"):
-                LiquidDDPG.load(modified_filepath)
 
     def test_train_with_all_callbacks(
         self, ddpg: LiquidDDPG, env: gym.Env, tmp_path, monkeypatch
@@ -501,3 +523,34 @@ class TestLiquidDDPG:
                             max_steps=5,
                             window_size=1,
                         )
+
+    def test_file_exists_error(self, ddpg: LiquidDDPG):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            save_path = Path(temp_dir) / "model_save"
+
+            # Create directory and model state file to trigger error
+            save_path.mkdir(parents=True, exist_ok=True)
+            model_state_path = save_path / "model_state.safetensors"
+            model_state_path.touch()
+
+            # Now trying to save should raise FileExistsError
+            with pytest.raises(FileExistsError, match=r"A model state already exists"):
+                ddpg.save(save_path)
+
+    def test_invalid_checkpoint_error(self, ddpg: LiquidDDPG):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            save_path = Path(temp_dir) / "model_save"
+            invalid_path = Path(temp_dir) / "invalid_save"
+
+            # Create an invalid safetensors file
+            invalid_path.mkdir(parents=True, exist_ok=True)
+            with open(invalid_path / "model_state.safetensors", "w") as f:
+                f.write("This is not a valid safetensors file")
+            with open(invalid_path / "optim_state.safetensors", "w") as f:
+                f.write("This is not a valid safetensors file")
+            with open(invalid_path / "metadata.json", "w") as f:
+                f.write("{}")
+
+            # Attempt to load should raise an exception
+            with pytest.raises(Exception):
+                LiquidDDPG.load(invalid_path)

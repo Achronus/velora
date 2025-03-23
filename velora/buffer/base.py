@@ -1,13 +1,14 @@
+import json
 from abc import abstractmethod
 from pathlib import Path
 from typing import Any, Dict, Literal, Self
 
 import torch
+from safetensors.torch import load_file, save_file
 
 from velora.buffer.experience import BatchExperience
 
-StateDictKeys = Literal[
-    "buffer",
+MetaDataKeys = Literal[
     "capacity",
     "state_dim",
     "action_dim",
@@ -106,11 +107,11 @@ class BufferBase:
         """
         return self.size
 
-    def state_dict(self) -> Dict[StateDictKeys, Any]:
+    def metadata(self) -> Dict[MetaDataKeys, Any]:
         """
-        Return a dictionary containing the buffers contents. Includes:
+        Gets the metadata of the buffer.
 
-        - `buffer` - serialized arrays of `{states, actions, rewards, next_states, dones}`.
+        Includes:
         - `capacity` - the maximum capacity of the buffer.
         - `state_dim` - state dimension.
         - `action_dim` - action dimension.
@@ -119,16 +120,9 @@ class BufferBase:
         - `device` - the device used for computations.
 
         Returns:
-            state_dict (Dict[str, Any]): a dictionary containing the current state of the buffer.
+            metadata (Dict[str, Any]): the buffers metadata
         """
         return {
-            "buffer": {
-                "states": self.states.cpu(),
-                "actions": self.actions.cpu(),
-                "rewards": self.rewards.cpu(),
-                "next_states": self.next_states.cpu(),
-                "dones": self.dones.cpu(),
-            },
             "capacity": self.capacity,
             "state_dim": self.state_dim,
             "action_dim": self.action_dim,
@@ -137,84 +131,84 @@ class BufferBase:
             "device": str(self.device) if self.device else None,
         }
 
-    def save(self, filepath: str | Path) -> None:
+    def state_dict(self) -> Dict[BufferKeys, torch.Tensor]:
         """
-        Saves a buffers state to a file.
+        Return a dictionary containing the buffers state.
+
+        Includes:
+        - `states` - tensor of states.
+        - `actions` - tensor of actions.
+        - `rewards` - tensor of rewards.
+        - `next_states` - tensor of next states.
+        - `dones` - tensor of dones.
+
+        Returns:
+            state_dict (Dict[str, torch.Tensor]): the current state of the buffer
+        """
+        return {
+            "states": self.states,
+            "actions": self.actions,
+            "rewards": self.rewards,
+            "next_states": self.next_states,
+            "dones": self.dones,
+        }
+
+    def save(self, dirpath: str | Path, prefix: str = "buffer_") -> None:
+        """
+        Saves a buffers `state_dict()` to a `safetensors` file.
+
+        Includes:
+        - `<prefix>metadata.json` - the buffers metadata
+        - `<prefix>state.safetensors` - the buffer state
 
         Parameters:
-            filepath (str | Path): where to save the buffer state
-
-        Example Usage:
-        ```python
-        from velora.buffer import ReplayBuffer
-
-        buffer = ReplayBuffer(capacity=100, device="cpu")
-
-        buffer.save('checkpoints/buffer_100_cpu.pt')
-        ```
+            dirpath (str | Path): the folder path to save the buffer state
+            prefix (str, optional): a name prefix for the files
         """
-        save_path = Path(filepath)
+        save_path = Path(dirpath)
         save_path.parent.mkdir(parents=True, exist_ok=True)
 
-        state_dict = self.state_dict()
-        torch.save(state_dict, save_path)
+        metadata_path = Path(save_path, f"{prefix}metadata").with_suffix(".json")
+        buffer_path = Path(save_path, f"{prefix}state").with_suffix(".safetensors")
+
+        save_file(self.state_dict(), buffer_path)
+
+        with metadata_path.open("w") as f:
+            f.write(json.dumps(self.metadata(), indent=2))
 
     @classmethod
-    def load(cls, filepath: str | Path) -> Self:
+    def load(cls, state_path: str | Path, metadata: Dict[MetaDataKeys, Any]) -> Self:
         """
         Restores the buffer from a saved state.
 
         Parameters:
-            filepath (str | Path): buffer state file location
-
-        Example Usage:
-        ```python
-        from velora.buffer import ReplayBuffer
-
-        buffer = ReplayBuffer.load('checkpoints/buffer_100_cpu.pt')
-        ```
+            state_path (str | Path): the filepath to the buffer state
+            metadata (Dict[str, Any]): a dictionary of metadata already
+                loaded from a `metadata.json` file
 
         Returns:
-            buffer (Self): a new buffer filled instance.
+            buffer (Self): a new buffer instance with the saved state restored
         """
-        state_dict: Dict[StateDictKeys, Any] = torch.load(filepath)
-        device = (
-            torch.device(state_dict["device"])
-            if state_dict["device"] is not None
-            else None
-        )
+        buffer_path = Path(state_path).with_suffix(".safetensors")
+        device = metadata["device"] or "cpu"
 
+        # Create new buffer instance
         buffer = cls(
-            capacity=state_dict["capacity"],
-            state_dim=state_dict["state_dim"],
-            action_dim=state_dict["action_dim"],
-            device=device,
+            capacity=metadata["capacity"],
+            state_dim=metadata["state_dim"],
+            action_dim=metadata["action_dim"],
+            device=torch.device(device) if device else None,
         )
+        buffer.position = metadata["position"]
+        buffer.size = metadata["size"]
 
-        data: Dict[BufferKeys, torch.Tensor] = state_dict["buffer"]
+        # Load buffer state
+        data: Dict[BufferKeys, torch.Tensor] = load_file(buffer_path, device)
 
-        buffer.position = state_dict["position"]
-        buffer.size = state_dict["size"]
-        buffer.states = data["states"].to(buffer.device)
-        buffer.actions = data["actions"].to(buffer.device)
-        buffer.rewards = data["rewards"].to(buffer.device)
-        buffer.next_states = data["next_states"].to(buffer.device)
-        buffer.dones = data["dones"].to(buffer.device)
+        buffer.states = data["states"]
+        buffer.actions = data["actions"]
+        buffer.rewards = data["rewards"]
+        buffer.next_states = data["next_states"]
+        buffer.dones = data["dones"]
 
         return buffer
-
-    @staticmethod
-    def create_filepath(filepath: str | Path) -> Path:
-        """
-        Updates a given `filepath` and converts it into a `buffer` friendly one.
-
-        Parameters:
-            filepath (str | Path): a filepath to convert
-
-        Returns:
-            buffer_path (Path): a buffer friendly filepath in the form `<filepath>.buffer.<filepath_ext>`.
-        """
-        path = Path(filepath)
-        extension = path.name.split(".")[-1]
-        buffer_name = path.name.replace(extension, f"buffer.{extension}")
-        return path.with_name(buffer_name)

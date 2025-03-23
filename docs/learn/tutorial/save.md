@@ -24,28 +24,45 @@ device = set_device()
 env = gym.make("InvertedPendulum-v5")
 
 model = LiquidDDPG(4, 10, 1, device=device)
-model.train(env, 128, n_episodes=100)
+model.train(env, 128, n_episodes=10, window_size=5)
 
-model.save('checkpoints/ddpg/saves/InvertedPendulum_final.pt')
+model.save('checkpoints/ddpg-InvertedPendulum/ep10')
 ```
 
 This code should work 'as is'.
 
-The only thing we need to do is give it a `filepath`. The complete model state will then be saved along with a `model_config.json` file that provides comprehensive details about the trained agent.
+The only thing we need to do is give it a `dirpath` where the last folder contains all the models state files. These include:
 
-By default, we don't save the buffers state. However, if you want to, simply add `buffer=True` and it will store the buffer in a separate file.
+- `metadata.json` - contains the model and optimizer metadata.
+- `model_state.safetensors` - contains the model weights and biases.
+- `optim_state.safetensors` - contains the optimizer states (actor and critic).
+
+Optionally, we can also save the buffer state with `buffer=True`:
+
+- `buffer_state.safetensors` - contains the buffer state.
+- `metadata.json` - extended to include the `buffer` metadata.
 
 ```python
-model.save('checkpoints/ddpg/saves/InvertedPendulum_final.pt', buffer=True)
+model.save('checkpoints/ddpg-InvertedPendulum/ep10', buffer=True)
 ```
 
-The buffer name will be identical to the filename, with a `.buffer` added between the filename and extension. So, with our previous example, the buffer file would save to:
+And/or, optionally, the model config with `config=True` (stored in the `dirpath.parent`):
 
-> `checkpoints/ddpg/saves/InvertedPendulum_final.buffer.pt`
+- `model_config.json` - contains the core details of the agent.
 
-Similarly, the `model_config.json` would save to:
+```python
+model.save('checkpoints/ddpg-InvertedPendulum/ep10', config=True)
+```
 
-> `checkpoints/ddpg/saves/model_config.json`
+??? question "Why the parent directory?"
+
+    The `model_config.json` contains comprehensive details about the agent. It never changes. Therefore, it should only be saved once.
+
+    Typically, you'll save a model state during the training process after `n_episodes` (just like we do with the [SaveCheckpoints](../tutorial/callback.md#model-checkpoints) callback).
+
+    The file is only used to provide an overview of the model so you can easily identify an experiment without having manually load a model's state. So, we store it above the `target` directory with the assumption that you are saving more than once for the same experiment.
+
+Notice how we are using [safetensors [:material-arrow-right-bottom:]](https://github.com/huggingface/safetensors). This helps us maximize tensor security and performance! 😉
 
 ## Loading a Model
 
@@ -54,22 +71,16 @@ To load a model we use the `load` class method:
 ```python
 from velora.models import LiquidDDPG
 
-model = LiquidDDPG.load('checkpoints/ddpg/saves/InvertedPendulum_final.pt')
+model = LiquidDDPG.load('checkpoints/ddpg-InvertedPendulum/ep10')
 ```
 
-Like before, the only thing we need to do is give it a `filepath`. The complete model state will then be loaded into a new model instance.
-
-???+ note "model_config.json"
-
-    The `model_config.json` is not loaded into the model. 
-    
-    This file is only used for quickly checking the details of a trained agent when looking through the `checkpoint` folder.
+Like before, the only thing we need to do is give it a `dirpath`. The complete model state will then be loaded into a new model instance.
 
 Again, we don't load the buffers state by default. `buffer=True` will do that.
 
 ```python
 model = LiquidDDPG.load(
-    'checkpoints/ddpg/saves/InvertedPendulum_final.pt',
+    'checkpoints/ddpg-InvertedPendulum/ep10',
     buffer=True,
 )
 ```
@@ -78,23 +89,7 @@ model = LiquidDDPG.load(
 
     Buffer's can only be loaded if they have previously been saved with the same model state.
 
-    The load method checks for the same `filepath` as the one provided but in buffer format: 
-    
-    > `<filepath>.buffer.<filepath_ext>`
-
-    Theoretically, you could use a different `buffer` from what the has `model` been trained on by simply renaming a buffers filename to match the above format. 
-    
-    We personally haven't tested this but believe it's possible by how we've designed the `buffer` state (separate from `model` state). Feel free to experiment with this, it could create some interesting agent behaviour! 😉
-
-## Filepath Naming Tips
-
-Choosing the right name for a model `checkpoint` is always a difficult one. We encourage you to try different names that work best for you, but have a specific format that could be beneficial.
-
-Here's our recommendation:
-
-- All states should be stored in a `checkpoint` directory.
-- All states should have a clear `folder` for their algorithm.
-- All states should start with their `gymnasium.Env` name and either end in `ep[count]` or `final`.
+    The load method checks for a `buffer_state.safetensors` and a `metadata.json` file with the `buffer` metadata.
 
 ---
 
