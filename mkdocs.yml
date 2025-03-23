@@ -88,7 +88,7 @@ nav:
           - wiring: learn/reference/wiring.md
   - Help: help.md
   - Changelog: 
-      - v0.1.1: changelog/v0.1.1.md
+      - v0.1.2: changelog/v0.1.2.md
       - v0.0.3 (Beta): changelog/v0.0.3.md
       - v0.0.2 (Beta): changelog/v0.0.2.md
       - v0.0.1 (Alpha): changelog/v0.0.1.md
