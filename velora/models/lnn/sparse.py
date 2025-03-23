@@ -57,15 +57,12 @@ class SparseParameter(nn.Parameter):
         else:
             super().__setattr__(name, value)
 
-    def apply_mask(self) -> None:
-        """Applies the sparsity mask to the data."""
-        self.data = self.data * self.mask.to(self.data.device)
-
 
 class SparseLinear(nn.Module):
     """A `torch.nn.Linear` layer with sparsely weighted connections."""
 
     bias: torch.Tensor
+    mask: torch.Tensor
 
     def __init__(
         self,
@@ -89,10 +86,12 @@ class SparseLinear(nn.Module):
 
         self.in_features = in_features
         self.out_features = out_features
-        self.mask = mask.to(device)
+
+        self.register_buffer("mask", mask.to(device).detach())
 
         weight = torch.empty((out_features, in_features), device=device)
-        self.weight = SparseParameter(weight, self.mask)
+        # self.weight = SparseParameter(weight, self.mask)
+        self.weight = nn.Parameter(weight)
 
         if bias:
             self.bias = nn.Parameter(torch.empty(out_features, device=device))
@@ -100,7 +99,9 @@ class SparseLinear(nn.Module):
             self.register_parameter("bias", None)
 
         self.reset_parameters()
-        self.weight.apply_mask()
+
+        with torch.no_grad():
+            self.weight.data.mul_(self.mask)
 
     def reset_parameters(self) -> None:
         """
@@ -125,8 +126,7 @@ class SparseLinear(nn.Module):
         Returns:
             y_pred (torch.Tensor): layer prediction with sparsity applied with shape `(..., out_features)`.
         """
-        self.weight.apply_mask()
-        return F.linear(x, self.weight, self.bias)
+        return F.linear(x, self.weight * self.mask, self.bias)
 
     def extra_repr(self) -> str:
         """String representation of layer parameters."""

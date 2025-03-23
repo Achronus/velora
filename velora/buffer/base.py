@@ -5,7 +5,6 @@ from typing import Any, Dict, Literal, Self
 import torch
 
 from velora.buffer.experience import BatchExperience
-from velora.utils.torch import to_tensor
 
 StateDictKeys = Literal[
     "buffer",
@@ -76,11 +75,11 @@ class BufferBase:
             next_state (torch.Tensor): next state observation
             done (bool): whether the episode ended
         """
-        self.states[self.position] = state.to(torch.float32).to(self.device)
-        self.actions[self.position] = action.to(self.device)
-        self.rewards[self.position] = to_tensor([reward], device=self.device)
-        self.next_states[self.position] = next_state.to(torch.float32).to(self.device)
-        self.dones[self.position] = to_tensor([done], device=self.device)
+        self.states[self.position] = state.to(torch.float32)
+        self.actions[self.position] = action
+        self.rewards[self.position] = reward
+        self.next_states[self.position] = next_state.to(torch.float32)
+        self.dones[self.position] = done
 
         # Update position - deque style
         self.position = (self.position + 1) % self.capacity

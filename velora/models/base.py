@@ -1,10 +1,13 @@
 from abc import abstractmethod
 from pathlib import Path
-from typing import Any, Dict, Self, Tuple
+from typing import TYPE_CHECKING, Any, Dict, Self, Tuple
 
 import gymnasium as gym
 import torch
 import torch.nn as nn
+
+if TYPE_CHECKING:
+    from velora.buffer.base import BufferBase  # pragma: no cover
 
 from velora.models.config import ModuleConfig, RLAgentConfig, TrainConfig
 from velora.models.lnn.ncp import LiquidNCPNetwork
@@ -73,6 +76,10 @@ class RLAgent:
         """
         self.device = device
         self.config: RLAgentConfig | None = None
+        self.buffer: "BufferBase" | None = None
+
+        self.active_params = 0
+        self.total_params = 0
 
     @abstractmethod
     def train(

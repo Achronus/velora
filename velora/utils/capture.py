@@ -1,6 +1,6 @@
-from typing import TYPE_CHECKING
 import warnings
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import gymnasium as gym
 

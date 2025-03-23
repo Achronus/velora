@@ -24,7 +24,7 @@ def to_tensor(
     Returns:
         tensor (torch.Tensor): the updated `torch.Tensor`.
     """
-    return torch.tensor(items).to(dtype).to(device)
+    return torch.tensor(items).to(dtype=dtype, device=device)
 
 
 def stack_tensor(
@@ -47,7 +47,7 @@ def stack_tensor(
     Returns:
         tensor (torch.Tensor): the updated `torch.Tensor`.
     """
-    return torch.stack(items).to(dtype).to(device)
+    return torch.stack(items).to(dtype=dtype, device=device)
 
 
 def soft_update(source: nn.Module, target: nn.Module, *, tau: float = 0.005) -> None:

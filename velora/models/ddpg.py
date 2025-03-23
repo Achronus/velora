@@ -193,13 +193,15 @@ class LiquidDDPG(RLAgent):
         self.critic_optim = optim(self.critic.parameters(), lr=critic_lr)
 
         self.loss = nn.MSELoss()
-        self.buffer = ReplayBuffer(
+        self.buffer: ReplayBuffer = ReplayBuffer(
             buffer_size,
             state_dim,
             action_dim,
             device=self.device,
         )
         self.noise = OUNoise(action_dim, device=device)
+
+        self.step_count = 0
 
         # Init config details
         self.config = RLAgentConfig(
@@ -219,6 +221,9 @@ class LiquidDDPG(RLAgent):
                 loss=self.loss.__class__.__name__,
             ),
         )
+
+        self.actor: DDPGActor = torch.jit.script(self.actor)
+        self.critic: DDPGCritic = torch.jit.script(self.critic)
 
     def _update_target_networks(self, tau: float) -> None:
         """
@@ -364,6 +369,7 @@ class LiquidDDPG(RLAgent):
             self, env, n_episodes, max_steps, window_size, callbacks
         ) as handler:
             for i_ep in range(n_episodes):
+                self.step_count += 1
                 current_ep = i_ep + 1
                 ep_reward = 0.0
                 hidden = None

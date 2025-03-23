@@ -95,6 +95,10 @@ class LiquidNCPNetwork(nn.Module):
             device=device,
         ).to(device)
 
+        self.inter = torch.jit.script(self.inter)
+        self.command = torch.jit.script(self.command)
+        self.motor = torch.jit.script(self.motor)
+
         self.act = nn.Mish()
 
         self._total_params = total_parameters(self)
@@ -149,7 +153,7 @@ class LiquidNCPNetwork(nn.Module):
                 f"Unsupported dimensionality: '{x.shape}'. Should be 2 dimensional with: '(batch_size, features)'."
             )
 
-        x = x.to(torch.float32).to(self.device)
+        x = x.to(dtype=torch.float32, device=self.device)
 
         batch_size, features = x.size()
 
