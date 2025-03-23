@@ -1,6 +1,6 @@
 [project]
 name = "velora"
-version = "0.0.3"
+version = "0.1.0"
 description = "A Liquid Reinforcement Learning (RL) framework."
 authors = [{ name = "Ryan Partridge", email = "rpartridge101@gmail.com>" }]
 license = "MIT License"
