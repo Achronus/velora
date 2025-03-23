@@ -1,61 +1,8 @@
 import math
-from typing import Any, Dict, Self
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
-
-class SparseParameter(nn.Parameter):
-    """
-    A parameter that uses a sparsity mask to set some values to `0`.
-    """
-
-    mask: torch.Tensor
-
-    def __init__(
-        self,
-        data: torch.Tensor,
-        mask: torch.Tensor,
-        requires_grad: bool = True,
-    ) -> None:
-        """
-        Parameters:
-            data (torch.Tensor): the data to store as a parameter
-            mask (torch.Tensor): the sparsity mask
-            requires_grad (bool, optional): a flag to enable gradient computations
-        """
-        # __new__ handles the initialization
-        pass  # pragma: no cover
-
-    def __new__(
-        cls, data: torch.Tensor, mask: torch.Tensor, requires_grad: bool = True
-    ):
-        mask = mask.to(data.device).detach()
-        instance = super().__new__(cls, data * mask, requires_grad)
-
-        instance.mask = mask.clone().detach()
-        return instance
-
-    def __deepcopy__(self, memo: Dict[int, Any]) -> Self:
-        """Handle deep copying of the parameter including its mask."""
-        if id(self) in memo:
-            return memo[id(self)]  # pragma: no cover
-        else:
-            result = type(self)(
-                self.data.clone(memory_format=torch.preserve_format),
-                self.mask.clone(),  # Clone the mask too
-                self.requires_grad,
-            )
-            memo[id(self)] = result
-            return result
-
-    def __setattr__(self, name: str, value: Any) -> None:
-        if name == "data":
-            value: torch.Tensor = value
-            super().__setattr__(name, value * self.mask.to(value.device))
-        else:
-            super().__setattr__(name, value)
 
 
 class SparseLinear(nn.Module):
