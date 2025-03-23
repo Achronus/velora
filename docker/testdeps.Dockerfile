@@ -26,7 +26,8 @@ RUN uv pip install --no-cache-dir --system \
     gymnasium[classic-control,mujoco,other]==1.1.1 \
     plotly==6.0.0 \
     sqlmodel==0.0.24 \
-    comet-ml==3.49.3
+    comet-ml==3.49.3 \
+    safetensors==0.5.3
 
 # Install CPU-only PyTorch
 RUN uv pip install --no-cache-dir --system \

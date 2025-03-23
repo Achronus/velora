@@ -10,6 +10,10 @@ For our example, we'll use [`LiquidDDPG`](../tutorial/agents/ddpg.md).
 
 ## Saving a Model
 
+???+ api "API Docs"
+
+    [`velora.models.RLAgent.save(dirpath)`](../reference/models/base.md#velora.models.base.RLAgent.save)
+
 To save a model we use the model instance's `save` method:
 
 ```python
@@ -65,6 +69,10 @@ model.save('checkpoints/ddpg-InvertedPendulum/ep10', config=True)
 Notice how we are using [safetensors [:material-arrow-right-bottom:]](https://github.com/huggingface/safetensors). This helps us maximize tensor security and performance! 😉
 
 ## Loading a Model
+
+???+ api "API Docs"
+
+    [`velora.models.RLAgent.load(dirpath)`](../reference/models/base.md#velora.models.base.RLAgent.load)
 
 To load a model we use the `load` class method:
 

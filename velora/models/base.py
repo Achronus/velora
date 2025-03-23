@@ -143,6 +143,7 @@ class RLAgent:
             `model_config.json` is stored in the `dirpath.parent`.
 
         Includes:
+
         - `model_config.json` - contains the core details of the agent (optional)
         - `metadata.json` - contains the model, optimizer and buffer (optional) metadata
         - `model_state.safetensors` - contains the model weights and biases
@@ -165,6 +166,7 @@ class RLAgent:
         Also, loads the original training buffer if `buffer=True`.
 
         These files must exist in the `dirpath`:
+
         - `metadata.json` - contains the model, optimizer and buffer (optional) metadata
         - `model_state.safetensors` - contains the model weights and biases
         - `optim_state.safetensors` - contains the optimizer states (actor and critic)
