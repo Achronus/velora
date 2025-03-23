@@ -202,6 +202,8 @@ class LiquidDDPG(RLAgent):
         self.noise = OUNoise(action_dim, device=device)
 
         self.step_count = 0
+        self.active_params = self.actor.ncp.active_params
+        self.total_params = self.actor.ncp.total_params
 
         # Init config details
         self.config = RLAgentConfig(
@@ -354,7 +356,7 @@ class LiquidDDPG(RLAgent):
 
         # Display console details
         training_info(
-            self.__class__.__name__,
+            self,
             env.spec.id,
             n_episodes,
             batch_size,

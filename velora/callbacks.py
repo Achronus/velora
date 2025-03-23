@@ -3,6 +3,8 @@ from abc import abstractmethod
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Tuple, get_args
 
+from velora.utils.format import number_to_short
+
 try:
     from typing import override
 except ImportError:  # pragma: no cover
@@ -162,7 +164,7 @@ class SaveCheckpoints(TrainCallback):
         if state.status == "episode" and ep_idx != state.total_episodes:
             if ep_idx % self.frequency == 0:
                 should_save = True
-                filename += f"ep{ep_idx}"
+                filename += f"ep{number_to_short(ep_idx)}"
 
         # Perform final checkpoint save
         elif state.status == "complete":
@@ -194,7 +196,7 @@ class SaveCheckpoints(TrainCallback):
         checkpoint_path = Path(self.filepath, f"{filename}.pt")
 
         agent.save(checkpoint_path, buffer=buffer)
-        print(f"Checkpoint saved at episode {ep}: {checkpoint_path}")
+        print(f"Checkpoint saved at episode {number_to_short(ep)}: {checkpoint_path}")
 
         if buffer:
             buffer_path = Path(self.filepath, f"{filename}.buffer.pt")
