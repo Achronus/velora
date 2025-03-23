@@ -1,6 +1,6 @@
 ![Logo](https://raw.githubusercontent.com/Achronus/velora/main/docs/assets/imgs/main.jpg)
 
-[![codecov](https://codecov.io/gh/Achronus/velora/graph/badge.svg?token=OF7WP5Q9PT)](https://codecov.io/gh/Achronus/velora)
+[![codecov](https://codecov.io/gh/Achronus/velora/graph/badge.svg?token=OF7WP5Q9PT)](https://codecov.io/gh/Achronus/velora) 
 ![Python Version](https://img.shields.io/pypi/pyversions/velora)
 ![License](https://img.shields.io/github/license/Achronus/velora)
 ![Issues](https://img.shields.io/github/issues/Achronus/velora)
