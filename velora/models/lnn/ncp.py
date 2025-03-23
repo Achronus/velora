@@ -95,10 +95,6 @@ class LiquidNCPNetwork(nn.Module):
             device=device,
         ).to(device)
 
-        self.inter = torch.jit.script(self.inter)
-        self.command = torch.jit.script(self.command)
-        self.motor = torch.jit.script(self.motor)
-
         self.act = nn.Mish()
 
         self._total_params = total_parameters(self)
@@ -107,7 +103,7 @@ class LiquidNCPNetwork(nn.Module):
     @property
     def total_params(self) -> int:
         """
-        Returns the network's total parameter count.
+        Gets the network's total parameter count.
 
         Returns:
             count (int): the total parameter count.
@@ -117,7 +113,7 @@ class LiquidNCPNetwork(nn.Module):
     @property
     def active_params(self) -> int:
         """
-        Returns the network's activate parameter count.
+        Gets the network's active parameter count.
 
         Returns:
             count (int): the active parameter count.

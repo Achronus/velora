@@ -76,6 +76,7 @@ def hard_update(source: nn.Module, target: nn.Module) -> None:
         target_param.data.copy_(param.data)
 
 
+@torch.jit.ignore
 def total_parameters(model: nn.Module) -> int:
     """
     Calculates the total number of parameters used in a PyTorch `nn.Module`.
@@ -89,6 +90,7 @@ def total_parameters(model: nn.Module) -> int:
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
 
+@torch.jit.ignore
 def active_parameters(model: nn.Module) -> int:
     """
     Calculates the active number of parameters used in a PyTorch `nn.Module`.
@@ -103,6 +105,7 @@ def active_parameters(model: nn.Module) -> int:
     return sum((p != 0).sum().item() for p in model.parameters() if p.requires_grad)
 
 
+@torch.jit.ignore
 def summary(module: nn.Module) -> Dict[str, str]:
     """
     Outputs a summary of a module and all it's sub-modules as a dictionary.
