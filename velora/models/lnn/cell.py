@@ -22,7 +22,7 @@ class NCPLiquidCell(nn.Module):
     $$
     """
 
-    sparsity_mask = torch.Tensor
+    sparsity_mask: torch.Tensor
 
     def __init__(
         self,
