@@ -359,6 +359,7 @@ class LiquidDDPG(RLAgent):
             self.device,
         )
 
+        self.noise.reset()
         self.buffer.warm(self, env.spec.id, batch_size)
 
         with TrainHandler(
@@ -370,6 +371,7 @@ class LiquidDDPG(RLAgent):
                 hidden = None
 
                 state, _ = handler.env.reset()
+                self.noise.reset()
 
                 for i_step in range(max_steps):
                     current_step = i_step + 1
@@ -378,6 +380,7 @@ class LiquidDDPG(RLAgent):
                         state,
                         hidden,
                         noise_scale=noise_scale,
+                        train_mode=True,
                     )
                     next_state, reward, terminated, truncated, info = handler.env.step(
                         action
@@ -403,12 +406,13 @@ class LiquidDDPG(RLAgent):
                         )
                         break
 
-                if current_ep % window_size == 0 or handler.stop():
+                if current_ep % window_size == 0:
                     handler.metrics.info(current_ep)
 
                 handler.episode(current_ep, ep_reward)
 
                 if handler.stop():
+                    handler.metrics.info(current_ep)
                     break
 
     @override
@@ -418,6 +422,7 @@ class LiquidDDPG(RLAgent):
         hidden: torch.Tensor | None = None,
         *,
         noise_scale: float = 0.3,
+        train_mode: bool = False,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Makes an action prediction using the Actor network with exploration noise.
@@ -427,6 +432,7 @@ class LiquidDDPG(RLAgent):
             hidden (torch.Tensor, optional): the current hidden state
             noise_scale (float, optional): the exploration noise added when
                 selecting an action
+            train_mode (bool, optional): whether the model is in training model
 
         Returns:
             action (torch.Tensor): the action prediction on the given state
@@ -437,7 +443,7 @@ class LiquidDDPG(RLAgent):
             state = state.unsqueeze(0) if state.dim() < 2 else state
             action, hidden = self.actor(state, hidden)
 
-            if noise_scale > 0:
+            if train_mode and noise_scale > 0:
                 # Exploration noise
                 noise = self.noise.sample() * noise_scale
                 action = torch.clamp(action + noise, min=-1, max=1)

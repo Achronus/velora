@@ -97,7 +97,7 @@ class ReplayBuffer(BufferBase):
         state, _ = env.reset()
 
         while not len(self) >= n_samples:
-            action, hidden = agent.predict(state, hidden)
+            action, hidden = agent.predict(state, hidden, train_mode=True)
             next_state, reward, terminated, truncated, _ = env.step(action)
             done = terminated or truncated
 
