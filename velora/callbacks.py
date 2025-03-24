@@ -188,7 +188,6 @@ class SaveCheckpoints(TrainCallback):
         """
         checkpoint_path = Path(self.filepath, dirname)
         agent.save(checkpoint_path, buffer=buffer, config=True)
-        print(f"Checkpoint saved at: {checkpoint_path}")
 
     def config(self) -> Tuple[str, Dict[str, Any]]:
         return self.__class__.__name__, {
@@ -198,7 +197,10 @@ class SaveCheckpoints(TrainCallback):
         }
 
     def info(self) -> str:
-        return f"'{self.__class__.__name__}' enabled with 'dirname={self.dirname}', 'frequency={self.frequency}' and 'buffer={self.buffer}'."
+        return (
+            f"'{self.__class__.__name__}' enabled with 'frequency={self.frequency}' and 'buffer={self.buffer}'.\n"
+            f"    Files will be saved in the 'checkpoints/{self.dirname}/saves' directory."
+        )
 
 
 class RecordVideos(TrainCallback):
@@ -282,7 +284,10 @@ class RecordVideos(TrainCallback):
         }
 
     def info(self) -> str:
-        return f"'{self.__class__.__name__}' enabled with 'dirname={self.dirname}', 'method={str(self.method)}' and 'frequency={self.frequency}'."
+        return (
+            f"'{self.__class__.__name__}' enabled with 'method={str(self.method)}' and 'frequency={self.frequency}'.\n"
+            f"    Files will be saved in the 'checkpoints/{self.dirname}/videos' directory."
+        )
 
 
 class CometAnalytics(TrainCallback):

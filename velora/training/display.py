@@ -7,8 +7,8 @@ if TYPE_CHECKING:
     from velora.models.base import RLAgent  # pragma: no cover
 
 NAME_STR = """
-__     __   _                 
-\\ \\   / /__| | ___  _ __ __ _ 
+__     __   _
+\\ \\   / /__| | ___  _ __ __ _
  \\ \\ / / _ \\ |/ _ \\| '__/ _` |
   \\ V /  __/ | (_) | | | (_| |
    \\_/ \\___|_|\\___/|_|  \\__,_|
