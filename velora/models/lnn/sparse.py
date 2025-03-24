@@ -33,6 +33,7 @@ class SparseLinear(nn.Module):
 
         self.in_features = in_features
         self.out_features = out_features
+        self.device = device
 
         self.register_buffer("mask", mask.to(device).detach())
 
@@ -61,6 +62,15 @@ class SparseLinear(nn.Module):
             fan_in, _ = nn.init._calculate_fan_in_and_fan_out(self.weight)
             bound = 1 / math.sqrt(fan_in) if fan_in > 0 else 0
             nn.init.uniform_(self.bias, -bound, bound)
+
+    def update_mask(self, mask: torch.Tensor) -> None:
+        """
+        Updates the sparsity mask with a new one.
+
+        Parameters:
+            mask (torch.Tensor): new mask
+        """
+        self.mask = mask.to(self.device).detach()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """

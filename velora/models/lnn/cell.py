@@ -22,6 +22,8 @@ class NCPLiquidCell(nn.Module):
     $$
     """
 
+    sparsity_mask = torch.Tensor
+
     def __init__(
         self,
         in_features: int,
@@ -47,7 +49,7 @@ class NCPLiquidCell(nn.Module):
         self.device = device
 
         # Absolute to maintain masking (-1 -> 1)
-        self.sparsity_mask = self._prep_mask(mask.to(device))
+        self.register_buffer("sparsity_mask", self._prep_mask(mask.to(device)))
 
         self.tanh = nn.Tanh()  # Bounded: [-1, 1]
         self.sigmoid = nn.Sigmoid()  # Bounded: [0, 1]
@@ -100,7 +102,7 @@ class NCPLiquidCell(nn.Module):
         """
         n_extras = mask.shape[1]
         extra_nodes = torch.ones((n_extras, n_extras), device=self.device)
-        mask = torch.concatenate([mask, extra_nodes])
+        mask = torch.concatenate([mask.detach(), extra_nodes])
         return torch.abs(mask.T).to(self.device)
 
     def _new_hidden(
@@ -127,6 +129,15 @@ class NCPLiquidCell(nn.Module):
         f_head = 1.0 - gate_out  # σ(-f(x, I, θf), t)
 
         return g_head * f_head + gate_out * h_head
+
+    def update_mask(self, mask: torch.Tensor) -> None:
+        """
+        Updates the sparsity mask with a new one.
+
+        Parameters:
+            mask (torch.Tensor): new mask
+        """
+        self.sparsity_mask = self._prep_mask(mask.to(self.device))
 
     def forward(
         self, x: torch.Tensor, hidden: torch.Tensor
