@@ -123,7 +123,12 @@ class RLAgent:
 
     @abstractmethod
     def predict(
-        self, state: torch.Tensor, hidden: torch.Tensor, *args, **kwargs
+        self,
+        state: torch.Tensor,
+        hidden: torch.Tensor,
+        train_mode: bool = False,
+        *args,
+        **kwargs,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         pass  # pragma: no cover
 

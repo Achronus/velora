@@ -184,8 +184,14 @@ class LiquidDDPG(RLAgent):
         self.actor_target = deepcopy(self.actor)
         self.critic_target = deepcopy(self.critic)
 
+        critic_extras = (
+            dict(weight_decay=1e-2) if isinstance(optim, torch.optim.Adam) else {}
+        )
+
         self.actor_optim = optim(self.actor.parameters(), lr=actor_lr)
-        self.critic_optim = optim(self.critic.parameters(), lr=critic_lr)
+        self.critic_optim = optim(
+            self.critic.parameters(), lr=critic_lr, **critic_extras
+        )
 
         self.loss = nn.MSELoss()
         self.buffer: ReplayBuffer = ReplayBuffer(
