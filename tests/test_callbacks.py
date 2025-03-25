@@ -296,14 +296,13 @@ class TestSaveCheckpoints:
 
     def test_save_checkpoint_method(self, mock_agent):
         """Test the save_checkpoint method directly."""
-        callback = SaveCheckpoints("model_dir")
+        callback = SaveCheckpoints("model_dir", buffer=True)
 
         # Mock the print function to avoid output
         with patch("builtins.print"):
             callback.save_checkpoint(
                 mock_agent,
                 "test_custom",
-                buffer=True,
             )
 
         assert mock_agent.save.call_count == 1

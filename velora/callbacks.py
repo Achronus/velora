@@ -158,7 +158,6 @@ class SaveCheckpoints(TrainCallback):
 
         should_save = False
         filename = f"{state.env.spec.name}_"
-        buffer = False
 
         # Save checkpoint at specified frequency
         if state.status == "episode" and ep_idx != state.total_episodes:
@@ -170,24 +169,22 @@ class SaveCheckpoints(TrainCallback):
         elif state.status == "complete":
             should_save = True
             filename += "final"
-            buffer = self.buffer
 
         if should_save:
-            self.save_checkpoint(state.agent, filename, buffer)
+            self.save_checkpoint(state.agent, filename)
 
         return state
 
-    def save_checkpoint(self, agent: RLAgent, dirname: str, buffer: bool) -> None:
+    def save_checkpoint(self, agent: RLAgent, dirname: str) -> None:
         """
         Saves a checkpoint at a given episode with the given suffix.
 
         Parameters:
             agent (RLAgent): the agent being trained
             dirname (str): the checkpoint directory name
-            buffer (bool): whether to save the buffer state
         """
         checkpoint_path = Path(self.filepath, dirname)
-        agent.save(checkpoint_path, buffer=buffer, config=True)
+        agent.save(checkpoint_path, buffer=self.buffer, config=True)
 
     def config(self) -> Tuple[str, Dict[str, Any]]:
         return self.__class__.__name__, {
@@ -218,6 +215,7 @@ class RecordVideos(TrainCallback):
         *,
         method: RecordMethodLiteral = "episode",
         frequency: int = 100,
+        force: bool = False,
     ) -> None:
         """
         Parameters:
@@ -231,6 +229,8 @@ class RecordVideos(TrainCallback):
                 When `episode` records episodically. When `step` records during
                 training steps.
             frequency (int, optional): the `episode` or `step` record frequency
+            force (bool, optional): enables file overwriting, ignoring existing
+                video files. Useful for continuing model training
         """
         if method not in get_args(RecordMethodLiteral):
             raise ValueError(
@@ -243,7 +243,7 @@ class RecordVideos(TrainCallback):
 
         self.dirpath = Path("checkpoints", dirname, "videos")
 
-        if self.dirpath.exists():
+        if not force and self.dirpath.exists():
             raise FileExistsError(
                 f"Files already exist in the '{self.dirpath.parent}' directory! Either change the 'dirname' or delete/move the folder and its contents."
             )
@@ -311,6 +311,7 @@ class CometAnalytics(TrainCallback):
         experiment_name: str | None = None,
         *,
         tags: List[str] | None = None,
+        experiment_key: str | None = None,
     ) -> None:
         """
         Parameters:
@@ -318,10 +319,13 @@ class CometAnalytics(TrainCallback):
                 experiment to
             experiment_name (str, optional): the name of this experiment run.
                 If `None`, automatically creates the name using the format
-                `<agent_classname>_<env_name>_<n_episodes>ep`
+                `<agent_classname>_<env_name>_<n_episodes>ep`. Ignored when
+                using `experiment_key`
             tags (List[str], optional): a list of tags associated with the
                 experiment. If `None` adds the `agent_classname` and `env_name`
-                by default
+                by default. Ignored when using `experiment_key`
+            experiment_key (str, optional): an existing Comet ML experiment key.
+                Used for continuing an experiment
         """
         try:
             from comet_ml import Experiment
@@ -337,6 +341,8 @@ class CometAnalytics(TrainCallback):
             )
 
         self.experiment: Experiment | None = None
+        self.experiment_key = experiment_key
+
         self.state = AnalyticsState(
             project_name=project_name,
             experiment_name=experiment_name,
@@ -401,21 +407,36 @@ class CometAnalytics(TrainCallback):
         Parameters:
             state (TrainState): the current training state
         """
-        from comet_ml import Experiment
+        from comet_ml import Experiment, ExistingExperiment
 
-        self.experiment = Experiment(
-            api_key=os.getenv("COMET_API_KEY", None),
-            project_name=state.analytics_state.project_name,
-            auto_param_logging=False,
-            auto_metric_logging=False,
-            auto_output_logging=False,
-            log_graph=False,
-            display_summary_level=0,
-            disabled=bool(os.getenv("VELORA_TEST_MODE", "").lower()) in ("true", "1"),
-        )
+        if self.experiment_key is not None:
+            # Continue existing experiment
+            self.experiment = ExistingExperiment(
+                api_key=os.getenv("COMET_API_KEY", None),
+                project_name=state.analytics_state.project_name,
+                experiment_key=self.experiment_key,
+                disabled=bool(os.getenv("VELORA_TEST_MODE", "").lower())
+                in ("true", "1"),
+                log_env_cpu=True,
+                log_env_gpu=True,
+                log_env_details=True,
+            )
+        else:
+            # Start new experiment
+            self.experiment = Experiment(
+                api_key=os.getenv("COMET_API_KEY", None),
+                project_name=state.analytics_state.project_name,
+                auto_param_logging=False,
+                auto_metric_logging=False,
+                auto_output_logging=False,
+                log_graph=False,
+                display_summary_level=0,
+                disabled=bool(os.getenv("VELORA_TEST_MODE", "").lower())
+                in ("true", "1"),
+            )
 
-        self.experiment.set_name(state.analytics_state.experiment_name)
-        self.experiment.add_tags(state.analytics_state.tags)
+            self.experiment.set_name(state.analytics_state.experiment_name)
+            self.experiment.add_tags(state.analytics_state.tags)
 
     def config(self) -> Tuple[str, Dict[str, Any]]:
         return self.__class__.__name__, {
