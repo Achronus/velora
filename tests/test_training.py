@@ -14,7 +14,7 @@ from velora.training.handler import TrainHandler
 from velora.training.metrics import (
     StepStorage,
     MovingMetric,
-    TrainMetrics,
+    EpisodeTrainMetrics,
 )
 
 
@@ -170,11 +170,11 @@ class TestMovingMetric:
         assert len(metric) == 3
 
 
-class TestTrainMetrics:
+class TestEpisodeTrainMetrics:
     @pytest.fixture
-    def metrics(self, experiment) -> TrainMetrics:
+    def metrics(self, experiment) -> EpisodeTrainMetrics:
         session, _ = experiment
-        return TrainMetrics(
+        return EpisodeTrainMetrics(
             session,
             window_size=10,
             n_episodes=100,
@@ -204,7 +204,7 @@ class TestTrainMetrics:
 
     def test_init(self, experiment):
         session, _ = experiment
-        metrics = TrainMetrics(
+        metrics = EpisodeTrainMetrics(
             session,
             window_size=10,
             n_episodes=100,
@@ -222,7 +222,9 @@ class TestTrainMetrics:
         assert isinstance(metrics._current_losses, StepStorage)
         assert metrics._current_losses.capacity == 200
 
-    def test_start_experiment(self, metrics: TrainMetrics, mock_config: RLAgentConfig):
+    def test_start_experiment(
+        self, metrics: EpisodeTrainMetrics, mock_config: RLAgentConfig
+    ):
         """Test starting an experiment."""
         # Start the experiment
         metrics.start_experiment(mock_config)
@@ -236,7 +238,7 @@ class TestTrainMetrics:
         assert experiment.agent == mock_config.agent
         assert experiment.env == mock_config.env
 
-    def test_add_step(self, metrics: TrainMetrics):
+    def test_add_step(self, metrics: EpisodeTrainMetrics):
         """Test adding step metrics."""
         # Fill in test values
         critic_loss = torch.tensor(0.8)
@@ -253,7 +255,7 @@ class TestTrainMetrics:
         assert metrics._current_losses.position == 1
         assert metrics._current_losses.size == 1
 
-    def test_add_episode(self, metrics: TrainMetrics, experiment):
+    def test_add_episode(self, metrics: EpisodeTrainMetrics, experiment):
         """Test adding episode metrics."""
         # Setup - start an experiment first
         session, experiment_id = experiment
@@ -294,7 +296,7 @@ class TestTrainMetrics:
         assert metrics._current_losses.position == 0
         assert metrics._current_losses.size == 0
 
-    def test_add_episode_without_experiment(self, metrics: TrainMetrics):
+    def test_add_episode_without_experiment(self, metrics: EpisodeTrainMetrics):
         """Test adding episode metrics without first creating an experiment."""
         # Experiment ID is None (not set)
         with pytest.raises(RuntimeError) as excinfo:
@@ -304,7 +306,7 @@ class TestTrainMetrics:
 
         assert "An experiment must be created first" in str(excinfo.value)
 
-    def test_reward_moving_avg(self, metrics: TrainMetrics):
+    def test_reward_moving_avg(self, metrics: EpisodeTrainMetrics):
         """Test calculating reward moving average."""
         # Add some rewards
         metrics._ep_rewards.add(torch.tensor(80.0))
@@ -314,7 +316,7 @@ class TestTrainMetrics:
         avg = metrics.reward_moving_avg()
         assert torch.isclose(torch.tensor(avg), torch.tensor(17.0)), avg
 
-    def test_reward_moving_std(self, metrics: TrainMetrics):
+    def test_reward_moving_std(self, metrics: EpisodeTrainMetrics):
         """Test calculating reward moving standard deviation."""
         # Add some rewards
         metrics._ep_rewards.add(torch.tensor(80.0))
@@ -324,7 +326,7 @@ class TestTrainMetrics:
         std = metrics.reward_moving_std()
         assert torch.isclose(torch.tensor(std), torch.tensor(35.91656)), std
 
-    def test_reward_moving_max(self, metrics: TrainMetrics):
+    def test_reward_moving_max(self, metrics: EpisodeTrainMetrics):
         """Test calculating reward moving max."""
         # Add some rewards
         metrics._ep_rewards.add(torch.tensor(80.0))
@@ -334,7 +336,7 @@ class TestTrainMetrics:
         max_reward = metrics.reward_moving_max()
         assert torch.isclose(torch.tensor(max_reward), torch.tensor(90.0))
 
-    def test_info(self, metrics: TrainMetrics):
+    def test_info(self, metrics: EpisodeTrainMetrics):
         """Test info method that outputs to console."""
         # Setup
         metrics._ep_lengths = torch.zeros(

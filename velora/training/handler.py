@@ -15,13 +15,14 @@ from velora.metrics.db import get_db_engine
 from velora.models.base import RLAgent
 from velora.state import TrainState
 from velora.time import ElapsedTime
-from velora.training.metrics import TrainMetrics
+from velora.training.metrics import EpisodeTrainMetrics
 from velora.utils.capture import record_last_episode
 
 
 class TrainHandler:
     """
-    A context manager for handling an agents training state.
+    A context manager for handling an agents training state. Compatible with single
+    environments.
     """
 
     def __init__(
@@ -36,7 +37,7 @@ class TrainHandler:
         """
         Parameters:
             agent (RLAgent): the agent being trained
-            env (Gymnasium.Env): the environment to train the agent on
+            env (gym.Env): the environment to train the agent on
             n_episodes (int): the total number of training episodes
             max_steps (int): maximum number of steps in an episode
             window_size (int): episode window size rate
@@ -58,15 +59,15 @@ class TrainHandler:
 
         self.engine = get_db_engine()
         self.session: Session | None = None
-        self._metrics: TrainMetrics | None = None
+        self._metrics: EpisodeTrainMetrics | None = None
 
     @property
-    def metrics(self) -> TrainMetrics:
+    def metrics(self) -> EpisodeTrainMetrics:
         """
         Training metric class instance.
 
         Returns:
-            metrics (TrainMetrics): current training metric state.
+            metrics (EpisodeTrainMetrics): current training metric state.
         """
         return self._metrics
 
@@ -78,7 +79,7 @@ class TrainHandler:
             self (Self): the initialized context.
         """
         self.session = Session(self.engine)
-        self._metrics = TrainMetrics(
+        self._metrics = EpisodeTrainMetrics(
             self.session,
             self.window_size,
             self.n_episodes,

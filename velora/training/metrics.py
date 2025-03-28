@@ -165,10 +165,10 @@ class MovingMetric:
         return self.size
 
 
-class TrainMetrics:
+class EpisodeTrainMetrics:
     """
-    A utility class for working with and storing training metrics for monitoring
-    an agents training performance.
+    A utility class for working with and storing episodic training metrics for
+    monitoring an agents training performance.
     """
 
     def __init__(

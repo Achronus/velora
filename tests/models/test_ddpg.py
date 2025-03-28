@@ -410,8 +410,10 @@ class TestLiquidDDPG:
 
                 try:
                     # Skip the db operations completely
-                    with patch("velora.training.metrics.TrainMetrics.add_episode"):
-                        with patch("velora.training.metrics.TrainMetrics.info"):
+                    with patch(
+                        "velora.training.metrics.EpisodeTrainMetrics.add_episode"
+                    ):
+                        with patch("velora.training.metrics.EpisodeTrainMetrics.info"):
                             # Patch TrainHandler.episode to set ep_reward on the state
                             # Include the correct signature with ep_reward parameter
                             def patched_episode(
@@ -505,8 +507,8 @@ class TestLiquidDDPG:
             ),
         ):
             # Skip database operations by patching add_episode
-            with patch("velora.training.metrics.TrainMetrics.add_episode"):
-                with patch("velora.training.metrics.TrainMetrics.info"):
+            with patch("velora.training.metrics.EpisodeTrainMetrics.add_episode"):
+                with patch("velora.training.metrics.EpisodeTrainMetrics.info"):
                     # Prepare a patched episode method with the correct signature
                     def mock_episode(self, current_ep, ep_reward=None, *args, **kwargs):
                         # Set ep_reward directly on the state
