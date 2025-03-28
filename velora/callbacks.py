@@ -245,7 +245,7 @@ class RecordVideos(TrainCallback):
 
         if not force and self.dirpath.exists():
             raise FileExistsError(
-                f"Files already exist in the '{self.dirpath.parent}' directory! Either change the 'dirname' or delete/move the folder and its contents."
+                f"Files already exist in the '{self.dirpath.parent}' directory! Either change the 'dirname', delete/move the folder and its contents, or use 'force=True' to allow overwriting."
             )
 
         def trigger(t: int) -> bool:
@@ -407,7 +407,7 @@ class CometAnalytics(TrainCallback):
         Parameters:
             state (TrainState): the current training state
         """
-        from comet_ml import Experiment, ExistingExperiment
+        from comet_ml import ExistingExperiment, Experiment
 
         if self.experiment_key is not None:
             # Continue existing experiment

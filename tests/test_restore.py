@@ -4,7 +4,12 @@ import pytest
 import torch
 
 from velora.models.ddpg import LiquidDDPG
-from velora.utils.restore import load_model, optim_to_tensor, optim_from_tensor
+from velora.utils.restore import (
+    load_model,
+    optim_to_tensor,
+    optim_from_tensor,
+    save_model,
+)
 
 
 def test_optim_to_tensor():
@@ -120,3 +125,51 @@ class TestLoadModel:
             # Attempt to load should raise FileNotFoundError
             with pytest.raises(FileNotFoundError, match="Metadata .* does not exist"):
                 load_model(LiquidDDPG, save_path)
+
+
+class TestSaveModel:
+    @pytest.fixture
+    def test_agent(self) -> LiquidDDPG:
+        return LiquidDDPG(
+            state_dim=4,
+            n_neurons=16,
+            action_dim=2,
+            device="cpu",
+        )
+
+    def test_force_flag(self, tmp_path: Path, test_agent: LiquidDDPG):
+        # Define a checkpoint path in the temporary directory
+        checkpoint_path = tmp_path / "test_model"
+
+        # First save should work without force
+        save_model(test_agent, checkpoint_path, buffer=True, config=True)
+
+        # Verify files were created
+        assert (checkpoint_path / "model_state.safetensors").exists()
+        assert (checkpoint_path / "metadata.json").exists()
+        assert (checkpoint_path / "buffer_state.safetensors").exists()
+        assert (checkpoint_path.parent / "model_config.json").exists()
+
+        # Without force, trying to save again should raise an error
+        with pytest.raises(FileExistsError):
+            save_model(test_agent, checkpoint_path, buffer=True, config=True)
+
+        # Change something in the agent to verify the save is actually updated
+        test_agent.noise.reset()  # Reset noise to change internal state
+        test_agent.actor_optim.zero_grad()  # Change optimizer state
+
+        # With force=True, saving should succeed and overwrite
+        save_model(test_agent, checkpoint_path, buffer=True, config=True, force=True)
+
+        # Load the agent back to verify it saved properly
+        loaded_agent = LiquidDDPG.load(checkpoint_path, buffer=True)
+
+        # Verify the agent was loaded successfully
+        assert loaded_agent.state_dim == test_agent.state_dim
+        assert loaded_agent.action_dim == test_agent.action_dim
+        assert loaded_agent.n_neurons == test_agent.n_neurons
+
+        # Compare some parameters to ensure they match
+        test_params = list(test_agent.actor.parameters())[0]
+        loaded_params = list(loaded_agent.actor.parameters())[0]
+        assert torch.allclose(test_params, loaded_params)

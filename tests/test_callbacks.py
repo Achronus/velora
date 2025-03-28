@@ -445,6 +445,27 @@ class TestRecordVideos:
                     # Directory not empty or already removed, ignore
                     pass
 
+    def test_force_flag(self):
+        # Create a temporary test directory structure
+        dirname = "test_record_videos_dir"
+        test_path = Path("checkpoints", dirname, "videos")
+
+        # Ensure the parent directories exist
+        test_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Create the videos directory that will cause the error
+        test_path.mkdir(parents=True, exist_ok=True)
+
+        # Verify that the callback raises FileExistsError when initializing without force
+        with pytest.raises(
+            FileExistsError,
+            match=f"Files already exist in the '.*{dirname}.*' directory",
+        ):
+            RecordVideos(dirname=dirname, method="episode", frequency=100)
+
+        # With force=True, it should not raise an error
+        _ = RecordVideos(dirname=dirname, method="episode", frequency=100, force=True)
+
 
 class TestCometAnalytics:
     @pytest.fixture

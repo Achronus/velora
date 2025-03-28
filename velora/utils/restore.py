@@ -105,6 +105,7 @@ def save_model(
     *,
     buffer: bool = False,
     config: bool = False,
+    force: bool = False,
 ) -> None:
     """
     Saves the current model state into `safetensors` and `json` files.
@@ -126,6 +127,8 @@ def save_model(
             consist of `folder` names. E.g., `<folder>/<folder>`
         buffer (bool, optional): a flag for storing the buffer state
         config (bool, optional): a flag for storing the model's config
+        force (bool, optional): enables file overwriting, ignoring existing state
+            files. Useful for continuing model training
     """
     save_path = Path(dirpath)
     save_path.mkdir(parents=True, exist_ok=True)
@@ -136,9 +139,9 @@ def save_model(
     optim_state_path = Path(save_path, "optim_state").with_suffix(".safetensors")
     buffer_state_path = Path(save_path, "buffer_state").with_suffix(".safetensors")
 
-    if model_state_path.exists():
+    if not force and model_state_path.exists():
         raise FileExistsError(
-            f"A model state already exists in the '{save_path}' directory! Either change the 'dirpath' or delete the folders contents."
+            f"A model state already exists in the '{save_path}' directory! Either change the 'dirpath', delete the folders contents, or use 'force=True' to allow overwriting."
         )
 
     model_tuples = [
