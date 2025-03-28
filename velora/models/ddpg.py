@@ -202,8 +202,10 @@ class LiquidDDPG(RLAgent):
         )
         self.noise = OUNoise(action_dim, device=device)
 
-        self.active_params = self.actor.ncp.active_params
-        self.total_params = self.actor.ncp.total_params
+        self.active_params = (
+            self.actor.ncp.active_params + self.critic.ncp.active_params
+        )
+        self.total_params = self.actor.ncp.total_params + self.critic.ncp.total_params
 
         # Init config details
         self.config = RLAgentConfig(
