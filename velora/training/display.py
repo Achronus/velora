@@ -25,7 +25,8 @@ def training_info(
     device: str,
 ) -> None:
     """
-    Display's starting information to the console for a training run.
+    Display's starting information to the console for a training run. Focuses
+    on episodic models.
 
     Parameters:
         agent (RLAgent): the agent being trained
@@ -55,6 +56,61 @@ def training_info(
     output += f"Training '{agent.__class__.__name__}' agent on '{env_id}' for '{number_to_short(n_episodes)}' episodes.\n"
     output += f"Using '{agent.buffer.__class__.__name__}' with 'capacity={number_to_short(agent.buffer.capacity)}'.\n"
     output += f"Sampling episodes with '{batch_size=}'.\n"
+    output += f"Running computations on device '{device}'.\n"
+    output += f"Moving averages computed based on 'window_size={number_to_short(window_size)}'.\n"
+    output += f"Using networks with '{params_str}' active parameters.\n"
+    output += "---------------------------------"
+
+    print(output)
+
+
+def vec_training_info(
+    agent: "RLAgent",
+    env_id: str,
+    n_envs: int,
+    n_steps: int,
+    batch_size: int,
+    n_mini_batches: int,
+    window_size: int,
+    callbacks: List["TrainCallback"],
+    device: str,
+) -> None:
+    """
+    Display's starting information to the console for a training run. Focuses on
+    rollout models.
+
+    Parameters:
+        agent (RLAgent): the agent being trained
+        env_id (str): the environment ID
+        n_envs (int): number of vectorized environments
+        n_steps (int): maximum number of training steps
+        batch_size (int): number of samples per mini-batch
+        n_mini_batches (int): number of mini batches
+        window_size (int): moving average window size
+        callbacks (List[TrainCallback]): applied training callbacks
+        device (str): the device to perform computations on
+    """
+    output = NAME_STR.strip()
+    params_str = f"{agent.active_params:,}/{agent.total_params:,}"
+
+    if agent.active_params > 10_000:
+        active, total = (
+            number_to_short(agent.active_params),
+            number_to_short(agent.total_params),
+        )
+        params_str += f"({active}/{total})"
+
+    total_updates = number_to_short(n_steps // batch_size)
+
+    cb_str = "\n\nActive Callbacks:"
+    cb_str += "\n---------------------------------\n"
+    cb_str += "\n".join(cb.info().lstrip() for cb in callbacks)
+    cb_str += "\n---------------------------------\n"
+
+    output += cb_str if callbacks else "\n\n"
+    output += f"Training '{agent.__class__.__name__}' agent on '{env_id}' for '{number_to_short(n_steps)}' steps and '{total_updates}' policy updates.\n"
+    output += f"Using '{agent.buffer.__class__.__name__}' with 'capacity={number_to_short(agent.buffer.capacity)}' and '{n_mini_batches}' mini-batches with '{batch_size=}'.\n"
+    output += f"Using '{n_envs}' vectorized environments.\n"
     output += f"Running computations on device '{device}'.\n"
     output += f"Moving averages computed based on 'window_size={number_to_short(window_size)}'.\n"
     output += f"Using networks with '{params_str}' active parameters.\n"

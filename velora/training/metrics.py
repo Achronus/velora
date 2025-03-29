@@ -6,7 +6,7 @@ if TYPE_CHECKING:
 import torch
 from sqlmodel import Session
 
-from velora.metrics.models import Episode, Experiment
+from velora.metrics.models import Episode, Experiment, Update
 from velora.utils.format import number_to_short
 
 
@@ -339,6 +339,162 @@ class EpisodeTrainMetrics:
         has been created first.
 
         Used in `add_step` and `add_episode`.
+        """
+        if not self.experiment_id:
+            raise RuntimeError(
+                "An experiment must be created first!\nCreate one with the '<TrainHandler_instance>.metrics.add_experiment()' method."
+            )
+
+
+class RolloutTrainMetrics:
+    """
+    A utility class for working with and storing rollout training metrics for
+    monitoring an agents training performance.
+    """
+
+    def __init__(
+        self,
+        session: Session,
+        window_size: int,
+        n_steps: int,
+        total_updates: int,
+        *,
+        device: torch.device | None = None,
+    ) -> None:
+        """
+        Parameters:
+            session (sqlmodel.Session): current metric database session
+            window_size (int): moving average window size
+            n_steps (int): maximum number of training steps
+            total_updates (int): the total policy updates to perform
+            device (torch.device, optional): the device to perform computations on
+        """
+        self.session = session
+        self.window_size = window_size
+        self.total_updates = total_updates
+        self.n_steps = n_steps
+        self.device = device
+
+        self._rewards = MovingMetric(window_size, device=device)
+
+        self._critic_loss: torch.Tensor = torch.zeros(1, device=self.device)
+        self._actor_loss: torch.Tensor = torch.zeros(1, device=self.device)
+
+        self.experiment_id: int | None = None
+
+    def start_experiment(self, config: "RLAgentConfig") -> None:
+        """
+        Confirms the start of a metric experiment by adding it to the database and
+        storing its unique ID locally.
+
+        Parameters:
+            config (RLAgentConfig): an RLAgent config model
+        """
+        exp = Experiment(
+            agent=config.agent,
+            env=config.env,
+            config=config.model_dump_json(),
+        )
+
+        self.session.add(exp)
+        self.session.commit()
+
+        self.session.refresh(exp)
+        self.experiment_id = exp.id
+
+    def add_update(
+        self,
+        update_idx: int,
+        reward: torch.Tensor,
+        actor_loss: torch.Tensor,
+        critic_loss: torch.Tensor,
+    ) -> None:
+        """
+        Adds a rollout's update metrics to the database.
+
+        Parameters:
+            update_idx (int): the current rollout update index
+            reward (torch.Tensor): step reward
+            actor_loss (torch.Tensor): Actor loss
+            critic_loss (torch.Tensor): Critic loss
+        """
+        self._exp_created_check()
+
+        self._rewards.add(reward.to(self.device))
+        self._actor_loss = actor_loss
+        self._critic_loss = critic_loss
+
+        moving_avg = self.reward_moving_avg()
+        moving_std = self.reward_moving_std()
+
+        ep = Update(
+            experiment_id=self.experiment_id,
+            update_num=update_idx,
+            reward=reward.item(),
+            reward_moving_avg=moving_avg,
+            reward_moving_std=moving_std,
+            actor_loss=self._actor_loss.item(),
+            critic_loss=self._critic_loss.item(),
+        )
+        self.session.add(ep)
+        self.session.commit()
+
+    def reward_moving_avg(self) -> float:
+        """
+        Calculates the average moving reward.
+
+        Returns:
+            avg (float): the average moving reward.
+        """
+        return self._rewards.mean().item()
+
+    def reward_moving_std(self) -> float:
+        """
+        Calculates the average reward moving standard deviation.
+
+        Returns:
+            avg (float): the average moving standard deviation.
+        """
+        return self._rewards.std().item()
+
+    def reward_moving_max(self) -> float:
+        """
+        Calculates the highest reward for the window.
+
+        Returns:
+            max (float): the highest reward in the window.
+        """
+        return self._rewards.max().item()
+
+    def info(self, current_step: int, update_idx: int) -> None:
+        """
+        Outputs basic information to the console.
+
+        Parameters:
+            current_step (int): the current step index
+            update_idx (int): the current update index
+        """
+        step = number_to_short(current_step)
+        total_steps = number_to_short(self.n_steps)
+
+        update_idx = number_to_short(update_idx)
+        total_updates = number_to_short(self.total_updates)
+
+        print(
+            f"Updates: {update_idx}/{total_updates}, "
+            f"Steps: {step}/{total_steps}, "
+            f"Reward Avg: {self.reward_moving_avg():.2f}, "
+            f"Reward Max: {self.reward_moving_max():.2f}, "
+            f"Critic Loss: {self._critic_loss.item():.2f}, "
+            f"Actor Loss: {self._actor_loss.item():.2f}"
+        )
+
+    def _exp_created_check(self) -> None:
+        """
+        Helper method. Performs error handling for checking if an experiment
+        has been created first.
+
+        Used in `add_step`.
         """
         if not self.experiment_id:
             raise RuntimeError(

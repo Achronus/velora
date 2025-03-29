@@ -1,6 +1,6 @@
 from abc import abstractmethod
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, Self, Tuple
+from typing import TYPE_CHECKING, Any, Dict, Literal, Self, Tuple
 
 import gymnasium as gym
 import torch
@@ -12,7 +12,12 @@ from velora.utils.torch import summary
 if TYPE_CHECKING:
     from velora.buffer.base import BufferBase  # pragma: no cover
 
-from velora.models.config import ModuleConfig, RLAgentConfig, TrainConfig
+from velora.models.config import (
+    ModuleConfig,
+    RLAgentConfig,
+    RolloutTrainConfig,
+    TrainConfig,
+)
 from velora.models.lnn.ncp import LiquidNCPNetwork
 
 
@@ -112,7 +117,6 @@ class RLAgent:
     def train(
         self,
         env: gym.Env,
-        batch_size: int,
         n_episodes: int,
         max_steps: int,
         window_size: int,
@@ -187,17 +191,23 @@ class RLAgent:
         """
         pass  # pragma: no cover
 
-    def _set_train_params(self, params: Dict[str, Any]) -> TrainConfig:
+    def _set_train_params(
+        self,
+        params: Dict[str, Any],
+        type: Literal["episode", "rollout"] = "episode",
+    ) -> TrainConfig | RolloutTrainConfig:
         """
         Helper method. Sets the `train_params` given a dictionary of training parameters.
 
         Parameters:
             params (Dict[str, Any]): a dictionary of training parameters
+            type (Literal["episode", "rollout"], optional): the type of train
+                config
 
         Returns:
-            config (TrainConfig): a training config model
+            config (TrainConfig | RolloutTrainConfig): a training config model
         """
-        return TrainConfig(
+        params = dict(
             callbacks=(
                 dict(cb.config() for cb in params["callbacks"])
                 if params["callbacks"]
@@ -207,3 +217,8 @@ class RLAgent:
                 k: v for k, v in params.items() if k not in ["self", "env", "callbacks"]
             },
         )
+
+        if type == "episode":
+            return TrainConfig(**params)
+
+        return RolloutTrainConfig(**params)

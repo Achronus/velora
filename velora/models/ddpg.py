@@ -160,7 +160,7 @@ class LiquidDDPG(RLAgent):
             action_dim (int): number of outputs (motor nodes)
             optim (Type[torch.optim.Optimizer], optional): the type of `PyTorch`
                 optimizer to use
-            buffer_size (int, optional): the maximum size of the ReplayBuffer
+            buffer_size (int, optional): the maximum size of the `ReplayBuffer`
             actor_lr (float, optional): the actor optimizer learning rate
             critic_lr (float, optional): the critic optimizer learning rate
             device (torch.device, optional): the device to perform computations on

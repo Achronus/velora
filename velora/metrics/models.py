@@ -24,6 +24,7 @@ class Experiment(SQLModel, table=True):
 
     # Relationships
     episodes: List["Episode"] = Relationship(back_populates="experiment")
+    updates: List["Update"] = Relationship(back_populates="experiment")
 
 
 class Episode(SQLModel, table=True):
@@ -70,3 +71,48 @@ class Episode(SQLModel, table=True):
 
     # Relationships
     experiment: Experiment = Relationship(back_populates="episodes")
+
+
+class Update(SQLModel, table=True):
+    """
+    Rollout-level metrics for tracking update step rewards and agent performance.
+
+    Attributes:
+        id (int): a unique identifier for the step
+        experiment_id (int): the experiment ID associated to the update
+        update_num (int): the rollout update index
+        reward (float): the step reward (return)
+        reward_moving_avg (float): the step reward moving average based on a
+            window size
+        reward_moving_std (float): the step reward moving standard deviation
+            based on a window size
+        actor_loss (float): the average Actor loss for the step
+        critic_loss (float): the average Critic loss for the step
+        created_at (datetime): the date and time when the the entry was created
+    """
+
+    id: int | None = Field(default=None, primary_key=True)
+    experiment_id: int = Field(foreign_key="experiment.id", index=True)
+    update_num: int = Field(index=True)
+
+    # Core metrics
+    reward: float
+
+    # Statistical metrics
+    reward_moving_avg: float
+    reward_moving_std: float
+
+    # Loss metrics
+    actor_loss: float
+    critic_loss: float
+
+    # Behaviour metrics
+    # explore_rate: float
+    # exploit_mean: float
+    # exploit_std: float
+
+    # Timestamps
+    created_at: datetime = Field(default_factory=datetime.now)
+
+    # Relationships
+    experiment: Experiment = Relationship(back_populates="updates")

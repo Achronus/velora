@@ -3,10 +3,12 @@ try:
 except ImportError:  # pragma: no cover
     from typing_extensions import override  # pragma: no cover
 
+from typing import List
+
 import torch
 
 from velora.buffer.base import BufferBase
-from velora.buffer.experience import BatchExperience
+from velora.buffer.experience import RolloutBatchExperience
 from velora.models.config import BufferConfig
 
 
@@ -35,6 +37,9 @@ class RolloutBuffer(BufferBase):
         """
         super().__init__(capacity, state_dim, action_dim, device=device)
 
+        self.log_probs = torch.zeros((capacity, 1), device=device)
+        self.values = torch.zeros((capacity, 1), device=device)
+
     def config(self) -> BufferConfig:
         """
         Creates a buffer config model.
@@ -52,37 +57,87 @@ class RolloutBuffer(BufferBase):
     @override
     def add(
         self,
-        state: torch.Tensor,
-        action: torch.Tensor,
-        reward: float,
-        next_state: torch.Tensor,
-        done: bool,
+        states: torch.Tensor,
+        actions: torch.Tensor,
+        rewards: torch.Tensor,
+        next_states: torch.Tensor,
+        dones: torch.Tensor,
+        log_probs: torch.Tensor,
+        values: torch.Tensor,
     ) -> None:
+        """
+        Adds a set of experience to the buffer. Useful for vectorized environments.
+
+        Parameters:
+            states (torch.Tensor): current state observations
+            actions (torch.Tensor): actions taken
+            rewards (torch.Tensor): rewards received
+            next_states (torch.Tensor): next state observations
+            dones (torch.Tensor): episode completions
+            log_probs (torch.Tensor): log probabilities
+            values (torch.Tensor): state values
+        """
         if len(self) == self.capacity:
             raise BufferError("Buffer full! Use the 'empty()' method first.")
 
-        super().add(state, action, reward, next_state, done)
+        n_items = states.shape[0]
+        end_idx = self.position + n_items
+
+        self.states[self.position : end_idx] = states.to(torch.float32)
+        self.actions[self.position : end_idx] = actions
+        self.rewards[self.position : end_idx] = rewards.unsqueeze(-1)
+        self.next_states[self.position : end_idx] = next_states.to(torch.float32)
+        self.dones[self.position : end_idx] = dones.unsqueeze(-1)
+        self.log_probs[self.position : end_idx] = log_probs
+        self.values[self.position : end_idx] = values
+
+        # Update position - deque style
+        self.position = (self.position + n_items) % self.capacity
+        self.size = min(self.size + n_items, self.capacity)
 
     @override
-    def sample(self) -> BatchExperience:
+    def sample(self, batch_size: int) -> List[RolloutBatchExperience]:
         """
-        Returns the entire rollout buffer as a batch of experience.
+        Returns the entire rollout buffer as a list of mini-batches of experience.
+        Randomly shuffles samples first.
+
+        Parameters:
+            batch_size (int): number of samples per mini-batch
 
         Returns:
-            batch (BatchExperience): an object of samples with the attributes (`states`, `actions`, `rewards`, `next_states`, `dones`).
+            mini_batches (List[RolloutBatchExperience]): a list of objects of samples with the attributes (`states`, `actions`, `rewards`, `next_states`, `dones`, `log_probs`, `values`).
 
                 All items have the same shape `(batch_size, features)`.
         """
         if len(self) == 0:
             raise BufferError("Buffer is empty!")
 
-        return BatchExperience(
-            states=self.states,
-            actions=self.actions,
-            rewards=self.rewards,
-            next_states=self.next_states,
-            dones=self.dones,
-        )
+        if len(self) != self.capacity:
+            raise BufferError(
+                f"Buffer must be filled first! ({len(self)}/{self.capacity})"
+            )
+
+        indices = torch.randperm(self.capacity, device=self.device)
+        n_batches = self.capacity // batch_size
+
+        mini_batches = []
+        for i in range(n_batches):
+            start_idx = i * batch_size
+            end_idx = (i + 1) * batch_size if i < n_batches - 1 else self.capacity
+            batch_indices = indices[start_idx:end_idx]
+
+            mini_batch = RolloutBatchExperience(
+                states=self.states[batch_indices],
+                actions=self.actions[batch_indices],
+                rewards=self.rewards[batch_indices],
+                next_states=self.next_states[batch_indices],
+                dones=self.dones[batch_indices],
+                log_probs=self.log_probs[batch_indices],
+                values=self.values[batch_indices],
+            )
+            mini_batches.append(mini_batch)
+
+        return mini_batches
 
     def empty(self) -> None:
         """Empties the buffer."""
@@ -95,3 +150,9 @@ class RolloutBuffer(BufferBase):
         self.rewards.zero_()
         self.next_states.zero_()
         self.dones.zero_()
+        self.log_probs.zero_()
+        self.values.zero_()
+
+    def is_full(self) -> bool:
+        """Checks if the buffer is full."""
+        return len(self) == self.capacity

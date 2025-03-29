@@ -7,7 +7,7 @@ from sqlmodel import Session
 
 from velora.models.base import RLAgent
 
-StatusLiteral = Literal["start", "episode", "step", "complete"]
+StatusLiteral = Literal["start", "episode", "step", "update", "complete"]
 RecordMethodLiteral = Literal["episode", "step"]
 
 
@@ -69,15 +69,18 @@ class TrainState:
 
     Parameters:
         agent (RLAgent): the agent being trained
-        env (gymnasium.Env): the environment used for training
+        env (gymnasium.Env | gym.vector.VectorEnv): the single or vectorized
+            environments used during training
         session (sqlmodel.Session): the current metric database session
         experiment_id (int): the current experiment's unique ID
-        total_episodes (int): total number of training episodes
-        status (Literal["start", "episode", "step", "complete"], optional): the current stage of training.
+        total_episodes (int, optional): total number of training episodes
+        total_steps (int, optional): total number of training steps
+        status (Literal["start", "episode", "step", "update", "complete"], optional): the current stage of training.
 
             - `start` - before training starts.
             - `episode` - inside the episode loop.
-            - `step` - inside the training loop.
+            - `step` - inside the timestep loop.
+            - `update` - inside the rollout update loop.
             - `complete` - completed training.
 
         current_ep (int, optional): the current episode index
@@ -89,10 +92,11 @@ class TrainState:
     """
 
     agent: RLAgent
-    env: gym.Env
+    env: gym.Env | gym.vector.VectorEnv
     session: Session
     experiment_id: int
-    total_episodes: int
+    total_episodes: int = 0
+    total_steps: int = 0
     status: StatusLiteral = "start"
     current_ep: int = 0
     current_step: int = 0
@@ -113,16 +117,17 @@ class TrainState:
         Updates the training state. When any input is `None`, uses existing value.
 
         Parameters:
-            status (Literal["start", "episode", "step", "complete"], optional): the current stage of training.
+            status (Literal["start", "episode", "step", "update", "complete"], optional): the current stage of training.
 
                 - `start` - before training start.
                 - `episode` - inside the episode loop.
-                - `step` - inside the training loop.
+                - `step` - inside the timestep loop.
+                - `update` - inside the rollout update loop.
                 - `complete` - completed training.
 
             current_ep (int, optional): the current episode index
             current_step (int, optional): the current training timestep
-            ep_reward (float, optional): the current episode reward
+            ep_reward (float, optional): the current episode or rollout update reward
         """
         self.status = status if status else self.status
         self.current_ep = current_ep if current_ep else self.current_ep

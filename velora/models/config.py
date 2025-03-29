@@ -37,7 +37,7 @@ class TorchConfig(BaseModel):
 
 class TrainConfig(BaseModel):
     """
-    A config model for training parameter details.
+    A config model for episodic training parameter details.
 
     Attributes:
         batch_size: the size of the training batch
@@ -60,6 +60,27 @@ class TrainConfig(BaseModel):
     gamma: float
     tau: float | None = None
     noise_scale: float | None = None
+    callbacks: Dict[str, Any] | None = None
+
+
+class RolloutTrainConfig(BaseModel):
+    """
+    A config model for rollout training parameter details.
+
+    Attributes:
+        batch_size: the size of the training batch
+        n_steps: the maximum number of training steps
+        n_updates: the number of policy updates per batch
+        window_size: the step rate for calculating the reward moving average
+        gamma: the reward discount factor
+        callbacks: a dictionary of callback details
+    """
+
+    batch_size: int
+    n_steps: int
+    n_updates: int
+    window_size: int
+    gamma: float
     callbacks: Dict[str, Any] | None = None
 
 
@@ -98,7 +119,7 @@ class ModelDetails(BaseModel):
     state_dim: int
     n_neurons: int
     action_dim: int
-    target_networks: bool
+    target_networks: bool = False
     action_noise: Literal["OUNoise"] | None = None
     actor: ModuleConfig
     critic: ModuleConfig
@@ -122,9 +143,9 @@ class RLAgentConfig(BaseModel):
     model_details: ModelDetails
     buffer: BufferConfig
     torch: TorchConfig
-    train_params: TrainConfig | None = None
+    train_params: TrainConfig | RolloutTrainConfig | None = None
 
-    def update(self, env: str, train_params: TrainConfig) -> Self:
+    def update(self, env: str, train_params: TrainConfig | RolloutTrainConfig) -> Self:
         """
         Updates the training details of the model.
 
