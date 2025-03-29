@@ -2,9 +2,9 @@ from typing import TYPE_CHECKING, List, Tuple, Type
 
 from velora.buffer.experience import RolloutBatchExperience
 from velora.buffer.rollout import RolloutBuffer
+from velora.utils.compute import get_mini_batch_size, closest_divisible
 from velora.models.base import NCPModule, RLAgent
 from velora.models.config import ModelDetails, RLAgentConfig, TorchConfig
-from velora.utils.compute import closest_divisible, get_mini_batch_size
 
 try:
     from typing import override
@@ -293,56 +293,56 @@ class LiquidPPO(RLAgent):
         self.actor_optim.param_groups[0]["lr"] = actor_new_lr
         self.critic_optim.param_groups[0]["lr"] = critic_new_lr
 
+    @staticmethod
+    @torch.jit.script
     def _compute_advantages(
-        self,
-        batch: RolloutBatchExperience,
+        next_values: torch.Tensor,
+        rewards: torch.Tensor,
+        values: torch.Tensor,
+        dones: torch.Tensor,
         gamma: float,
         gae_lambda: float,
+        device: torch.device,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Helper method. Computes advantages using Generalized Advantage
         Estimation (GAE).
 
         Parameters:
-            batch (RolloutBatchExperience): an object containing a batch of
-                experience from the buffer
+            next_values (torch.Tensor): next values from the Critic
+            rewards (torch.Tensor): batch rewards
+            values (torch.Tensor): batch values
+            dones (torch.Tensor): batch dones
             gamma (float): the reward discount factor
             gae_lambda (float): the GAE smoothing parameter
+            device (torch.device): the device to perform computations on
 
         Returns:
             advantages (torch.Tensor): the calculated advantages.
             returns (torch.Tensor): the calculated returns (for value function update).
         """
-        with torch.no_grad():
-            next_values, _ = self.critic(batch.next_states)
+        # Create mask for non-terminals
+        non_terminals = 1.0 - dones
 
-            rewards = batch.rewards
-            values = batch.values
-            dones = batch.dones
+        # Compute delta terms: δt = rt + γVt+1 - Vt (TD error)
+        deltas = rewards + gamma * next_values * non_terminals - values
+        discount = gamma * gae_lambda
 
-            # Create mask for non-terminals
-            non_terminals = 1.0 - dones
+        advantages = torch.zeros_like(rewards, device=device)
+        last_gae = torch.zeros(1, device=device)
+        batch_size = rewards.size(0)
 
-            # Compute delta terms: δt = rt + γVt+1 - Vt (TD error)
-            deltas = rewards + gamma * next_values * non_terminals - values
-            advantages = torch.zeros_like(rewards, device=self.device)
-            discount = gamma * gae_lambda
+        # Process in reverse order (GAE)
+        for t in range(batch_size - 1, -1, -1):
+            last_gae = deltas[t] + discount * non_terminals[t] * last_gae
+            advantages[t] = last_gae
 
-            last_gae = torch.zeros(1, device=self.device)
-            batch_size = rewards.size(0)
+        returns = advantages + values
 
-            # TODO: try compile this
-            # Process in reverse order (GAE)
-            for t in range(batch_size - 1, -1, -1):
-                last_gae = deltas[t] + discount * non_terminals[t] * last_gae
-                advantages[t] = last_gae
+        # Normalize advantages
+        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
-            returns = advantages + values
-
-            # Normalize advantages
-            advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
-
-            return advantages, returns
+        return advantages, returns
 
     def _update_actor(
         self,
@@ -441,7 +441,17 @@ class LiquidPPO(RLAgent):
             critic_loss (torch.Tensor): the critic loss.
             actor_loss (torch.Tensor): the actor loss.
         """
-        advantages, returns = self._compute_advantages(batch, gamma, gae_lambda)
+        with torch.no_grad():
+            next_values, _ = self.critic(batch.next_states)
+            advantages, returns = self._compute_advantages(
+                next_values,
+                batch.rewards,
+                batch.values,
+                batch.dones,
+                gamma,
+                gae_lambda,
+                self.device,
+            )
 
         actor_loss = self._update_actor(
             batch,
