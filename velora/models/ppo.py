@@ -2,9 +2,9 @@ from typing import TYPE_CHECKING, List, Tuple, Type
 
 from velora.buffer.experience import RolloutBatchExperience
 from velora.buffer.rollout import RolloutBuffer
-from velora.utils.compute import get_mini_batch_size, closest_divisible
 from velora.models.base import NCPModule, RLAgent
 from velora.models.config import ModelDetails, RLAgentConfig, TorchConfig
+from velora.utils.compute import closest_divisible, get_mini_batch_size
 
 try:
     from typing import override
@@ -15,12 +15,53 @@ import gymnasium as gym
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from torch.nn.parallel import parallel_apply
 
 if TYPE_CHECKING:
     from velora.callbacks import TrainCallback  # pragma: no cover
 
 from velora.training.display import vec_training_info
 from velora.training.handler import VecTrainHandler
+
+
+ParallelResults = List[Tuple[torch.Tensor, torch.Tensor]]
+
+class ParallelLossModule(nn.Module):
+    """
+    A module for computing the PPO loss in parallel.
+    """
+
+    def __init__(self, agent: "LiquidPPO") -> None:
+        """
+        Parameters:
+            agent (LiquidPPO): the agent being trained
+        """
+        super().__init__()
+
+        self.agent = agent
+
+    def forward(
+        self,
+        batch: RolloutBatchExperience,
+        gamma: float,
+        gae_lambda: float,
+        clip_ratio: float,
+        entropy_coef: float,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Uses the agent to compute the losses in parallel.
+
+        Returns:
+            actor_loss (torch.Tensor): the Actor loss.
+            critic_loss (torch.Tensor): the Critic loss.
+        """
+        return self.agent._train_step(
+            batch,
+            gamma,
+            gae_lambda,
+            clip_ratio,
+            entropy_coef,
+        )
 
 
 class PPOActor(NCPModule):
@@ -278,6 +319,10 @@ class LiquidPPO(RLAgent):
         self.actor: PPOActor = torch.jit.script(self.actor)
         self.critic: PPOCritic = torch.jit.script(self.critic)
 
+        # Pre-allocate tensors (updated during training init)
+        self._advantages: torch.Tensor | None = None
+        self._last_gae = torch.zeros(1, device=device)
+
     def _anneal_lr(self, i_update: int, total_updates: int) -> None:
         """
         Helper method. Performs learning rate annealing on the network optimizers.
@@ -302,7 +347,8 @@ class LiquidPPO(RLAgent):
         dones: torch.Tensor,
         gamma: float,
         gae_lambda: float,
-        device: torch.device,
+        last_gae: torch.Tensor,
+        advantages: torch.Tensor,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Helper method. Computes advantages using Generalized Advantage
@@ -315,7 +361,8 @@ class LiquidPPO(RLAgent):
             dones (torch.Tensor): batch dones
             gamma (float): the reward discount factor
             gae_lambda (float): the GAE smoothing parameter
-            device (torch.device): the device to perform computations on
+            last_gae (torch.Tensor): last GAE initial tensor
+            advantages (torch.Tensor): advantages initial tensor
 
         Returns:
             advantages (torch.Tensor): the calculated advantages.
@@ -328,8 +375,6 @@ class LiquidPPO(RLAgent):
         deltas = rewards + gamma * next_values * non_terminals - values
         discount = gamma * gae_lambda
 
-        advantages = torch.zeros_like(rewards, device=device)
-        last_gae = torch.zeros(1, device=device)
         batch_size = rewards.size(0)
 
         # Process in reverse order (GAE)
@@ -344,16 +389,15 @@ class LiquidPPO(RLAgent):
 
         return advantages, returns
 
-    def _update_actor(
+    def _compute_actor_loss(
         self,
         batch: RolloutBatchExperience,
         advantages: torch.Tensor,
         clip_ratio: float,
         entropy_coef: float,
-        grad_clip: float,
     ) -> torch.Tensor:
         """
-        Helper method. Performs an Actor network update.
+        Helper method. Computes the Actor loss.
 
         Parameters:
             batch (RolloutBatchExperience): an object containing a batch of
@@ -361,7 +405,6 @@ class LiquidPPO(RLAgent):
             advantages (torch.Tensor): advantage values
             clip_ratio (float): the surrogate clipping ratio
             entropy_coef (float): entropy exploration coefficient
-            grad_clip (float): max norm gradient clip
 
         Returns:
             loss (torch.Tensor): the Actor's loss value.
@@ -379,42 +422,25 @@ class LiquidPPO(RLAgent):
         entropy_loss = -entropy.mean() * entropy_coef
 
         # Total loss
-        actor_loss: torch.Tensor = policy_loss + entropy_loss
+        return policy_loss + entropy_loss
 
-        # Compute gradients and update network
-        self.actor_optim.zero_grad()
-        actor_loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=grad_clip)
-        self.actor_optim.step()
-
-        return actor_loss
-
-    def _update_critic(
+    def _compute_critic_loss(
         self,
         states: torch.Tensor,
         returns: torch.Tensor,
-        grad_clip: float,
     ) -> torch.Tensor:
         """
-        Helper method. Performs a Critic network update.
+        Helper method. Computes the Critic loss.
 
         Parameters:
             states (torch.Tensor): current mini-batch states
             returns (torch.Tensor): the calculated returns (advantages + values)
-            grad_clip (float): max norm gradient clip
 
         Returns:
             loss (torch.Tensor): the Critic's loss value.
         """
         values, _ = self.critic(states)
-        critic_loss: torch.Tensor = self.loss(values, returns)
-
-        self.critic_optim.zero_grad()
-        critic_loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=grad_clip)
-        self.critic_optim.step()
-
-        return critic_loss
+        return self.loss(values, returns)
 
     def _train_step(
         self,
@@ -423,7 +449,6 @@ class LiquidPPO(RLAgent):
         gae_lambda: float,
         clip_ratio: float,
         entropy_coef: float,
-        grad_clip: float,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Helper method. Performs a single policy update (training) step.
@@ -435,7 +460,6 @@ class LiquidPPO(RLAgent):
             gae_lambda (float): the GAE smoothing parameter
             clip_ratio (float): the surrogate clipping ratio
             entropy_coef (float): entropy exploration coefficient
-            grad_clip (float): max norm gradient clip
 
         Returns:
             critic_loss (torch.Tensor): the critic loss.
@@ -450,19 +474,42 @@ class LiquidPPO(RLAgent):
                 batch.dones,
                 gamma,
                 gae_lambda,
-                self.device,
+                self._last_gae,
+                self._advantages,
             )
 
-        actor_loss = self._update_actor(
+        actor_loss = self._compute_actor_loss(
             batch,
             advantages,
             clip_ratio,
             entropy_coef,
-            grad_clip,
         )
-        critic_loss = self._update_critic(batch.states, returns, grad_clip)
+        critic_loss = self._compute_critic_loss(batch.states, returns)
 
         return critic_loss, actor_loss
+
+    def _gradient_step(
+        self,
+        actor_loss: torch.Tensor,
+        critic_loss: torch.Tensor,
+        grad_clip: float,
+    ) -> None:
+        """
+        Helper method. Performs a gradient update step.
+
+        Parameters:
+            actor_loss (torch.Tensor): the Actor loss
+            critic_loss (torch.Tensor): the Critic loss
+            grad_clip (float): max norm gradient clip
+        """
+        critic_loss.backward()
+        actor_loss.backward()
+
+        torch.nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=grad_clip)
+        torch.nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=grad_clip)
+
+        self.actor_optim.step()
+        self.critic_optim.step()
 
     @override
     def train(
@@ -473,6 +520,7 @@ class LiquidPPO(RLAgent):
         n_steps: int = 1_000_000,
         n_updates: int = 10,
         callbacks: List["TrainCallback"] | None = None,
+        display_count: int = 10,
         window_size: int = 100,
         gamma: float = 0.99,
         gae_lambda: float = 0.95,
@@ -491,9 +539,10 @@ class LiquidPPO(RLAgent):
             n_updates (int, optional): the number of policy updates per batch
             callbacks (List[TrainCallback], optional): a list of training callbacks
                 that are applied during the training process
-            window_size (int, optional): controls the step rate for displaying
-                information to the console and for calculating the reward moving
-                average
+            display_count (int, optional): controls the console display count for
+                monitoring training progress
+            window_size (int, optional): controls the step rate for calculating
+                the reward moving average
             gamma (float, optional): the reward discount factor
             gae_lambda (float, optional): the GAE smoothing parameter
             clip_ratio (float, optional): the surrogate clipping ratio
@@ -533,6 +582,11 @@ class LiquidPPO(RLAgent):
             callbacks or [],
             self.device,
         )
+
+        self._advantages = torch.zeros((batch_size, 1), device=self.device)
+
+        update_module = ParallelLossModule(self)
+        modules = [update_module for _ in range(n_mini_batches)]
 
         with VecTrainHandler(
             self, envs, n_steps, batch_size, window_size, callbacks
@@ -584,29 +638,30 @@ class LiquidPPO(RLAgent):
                 # Buffer filled, update policy
                 for i in range(n_updates):
                     self._anneal_lr(i, total_updates)
-                    mini_batches = self.buffer.sample(batch_size)
 
-                    for batch in mini_batches:
-                        critic_loss, actor_loss = self._train_step(
-                            batch,
-                            gamma,
-                            gae_lambda,
-                            clip_ratio,
-                            entropy_coef,
-                            grad_clip,
-                        )
+                    inputs = [
+                        (batch, gamma, gae_lambda, clip_ratio, entropy_coef)
+                        for batch in self.buffer.sample(batch_size)
+                    ]
+                    devices = [self.device for _ in range(n_mini_batches)]
 
-                        reward = batch.rewards.mean()
+                    results: ParallelResults = parallel_apply(
+                        modules, inputs, devices=devices
+                    )
+
+                    for critic_loss, actor_loss in results:
+                        self._gradient_step(actor_loss, critic_loss, grad_clip)
+
                         handler.metrics.add_update(
                             i_update,
-                            reward,
+                            torch.tensor(0.0, device=self.device),
                             actor_loss,
                             critic_loss,
                         )
                         handler.update(i_update)
 
-                if i_update % window_size == 0 or handler.stop():
-                    handler.metrics.info(current_step, i_update)
+                if i_update % display_count == 0 or handler.stop():
+                    handler.metrics.info(i_update)
 
                 if handler.stop():
                     break

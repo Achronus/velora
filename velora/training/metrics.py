@@ -466,23 +466,18 @@ class RolloutTrainMetrics:
         """
         return self._rewards.max().item()
 
-    def info(self, current_step: int, update_idx: int) -> None:
+    def info(self, update_idx: int) -> None:
         """
         Outputs basic information to the console.
 
         Parameters:
-            current_step (int): the current step index
             update_idx (int): the current update index
         """
-        step = number_to_short(current_step)
-        total_steps = number_to_short(self.n_steps)
-
         update_idx = number_to_short(update_idx)
         total_updates = number_to_short(self.total_updates)
 
         print(
             f"Updates: {update_idx}/{total_updates}, "
-            f"Steps: {step}/{total_steps}, "
             f"Reward Avg: {self.reward_moving_avg():.2f}, "
             f"Reward Max: {self.reward_moving_max():.2f}, "
             f"Critic Loss: {self._critic_loss.item():.2f}, "

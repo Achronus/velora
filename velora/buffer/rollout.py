@@ -3,7 +3,7 @@ try:
 except ImportError:  # pragma: no cover
     from typing_extensions import override  # pragma: no cover
 
-from typing import List
+from typing import Generator
 
 import torch
 
@@ -96,16 +96,16 @@ class RolloutBuffer(BufferBase):
         self.size = min(self.size + n_items, self.capacity)
 
     @override
-    def sample(self, batch_size: int) -> List[RolloutBatchExperience]:
+    def sample(self, batch_size: int) -> Generator[RolloutBatchExperience, None, None]:
         """
-        Returns the entire rollout buffer as a list of mini-batches of experience.
+        Returns a generator that yields mini-batches of experience.
         Randomly shuffles samples first.
 
         Parameters:
             batch_size (int): number of samples per mini-batch
 
-        Returns:
-            mini_batches (List[RolloutBatchExperience]): a list of objects of samples with the attributes (`states`, `actions`, `rewards`, `next_states`, `dones`, `log_probs`, `values`).
+        Yields:
+            mini_batch (RolloutBatchExperience): an object of samples with the attributes (`states`, `actions`, `rewards`, `next_states`, `dones`, `log_probs`, `values`).
 
                 All items have the same shape `(batch_size, features)`.
         """
@@ -120,13 +120,13 @@ class RolloutBuffer(BufferBase):
         indices = torch.randperm(self.capacity, device=self.device)
         n_batches = self.capacity // batch_size
 
-        mini_batches = []
         for i in range(n_batches):
             start_idx = i * batch_size
             end_idx = (i + 1) * batch_size if i < n_batches - 1 else self.capacity
             batch_indices = indices[start_idx:end_idx]
 
-            mini_batch = RolloutBatchExperience(
+            # Create and yield one batch at a time
+            yield RolloutBatchExperience(
                 states=self.states[batch_indices],
                 actions=self.actions[batch_indices],
                 rewards=self.rewards[batch_indices],
@@ -135,9 +135,6 @@ class RolloutBuffer(BufferBase):
                 log_probs=self.log_probs[batch_indices],
                 values=self.values[batch_indices],
             )
-            mini_batches.append(mini_batch)
-
-        return mini_batches
 
     def empty(self) -> None:
         """Empties the buffer."""
