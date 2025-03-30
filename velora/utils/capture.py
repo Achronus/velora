@@ -1,8 +1,9 @@
 import warnings
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Tuple
 
 import gymnasium as gym
+import torch
 
 from velora.gym.wrap import add_core_env_wrappers
 
@@ -59,7 +60,7 @@ def record_last_episode(
         state, _ = env.reset()
 
         while not done:
-            action, hidden = agent.predict(state, hidden)
+            action, hidden = agent.predict(state, hidden, train_mode=False)
 
             next_state, reward, terminated, truncated, _ = env.step(action)
             done = terminated or truncated
@@ -67,3 +68,36 @@ def record_last_episode(
             state = next_state
 
     env.close()
+
+
+def evaluate_agent(agent: "RLAgent", env: gym.Env) -> Tuple[torch.Tensor, torch.Tensor]:
+    """
+    Evaluates the performance of an agent on an environment using a single episode.
+
+    Parameters:
+        agent (RLAgent): the agent to evaluate
+        env (gym.Env): the Gymnasium environment
+
+    Returns:
+        ep_return (torch.Tensor): episodic return.
+        ep_length (torch.Tensor): episode length.
+    """
+    state, _ = env.reset()
+    hidden = None
+
+    ep_return = 0
+    ep_length = 0
+
+    while True:
+        action, hidden = agent.predict(state, hidden, train_mode=False)
+        next_state, reward, terminated, truncated, info = env.step(action)
+
+        done = terminated or truncated
+        state = next_state
+
+        if done:
+            ep_return = info["episode"]["r"]
+            ep_length = info["episode"]["l"]
+            break
+
+    return ep_return, ep_length

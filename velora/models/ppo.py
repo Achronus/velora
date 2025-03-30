@@ -1,10 +1,13 @@
-from typing import TYPE_CHECKING, List, Tuple, Type
+from pathlib import Path
+from typing import TYPE_CHECKING, List, Self, Tuple, Type
 
 from velora.buffer.experience import RolloutBatchExperience
 from velora.buffer.rollout import RolloutBuffer
 from velora.models.base import NCPModule, RLAgent
 from velora.models.config import ModelDetails, RLAgentConfig, TorchConfig
+from velora.utils.capture import evaluate_agent
 from velora.utils.compute import closest_divisible, get_mini_batch_size
+from velora.utils.restore import load_model, save_model
 
 try:
     from typing import override
@@ -257,6 +260,7 @@ class LiquidPPO(RLAgent):
             n_neurons (int): number of decision nodes (inter and command nodes).
             action_dim (int): number of outputs (motor nodes)
             discrete (bool, optional): whether the action space is discrete
+                or continuous. Continuous when `False`
             optim (Type[torch.optim.Optimizer], optional): the type of `PyTorch`
                 optimizer to use
             buffer_size (int, optional): the maximum size of the `RolloutBuffer`
@@ -305,6 +309,7 @@ class LiquidPPO(RLAgent):
             agent=self.__class__.__name__,
             model_details=ModelDetails(
                 type="actor-critic",
+                action_type="discrete" if discrete else "continuous",
                 **locals(),
                 actor=self.actor.config(),
                 critic=self.critic.config(),
@@ -516,7 +521,7 @@ class LiquidPPO(RLAgent):
     def train(
         self,
         envs: gym.vector.VectorEnv,
-        batch_size: int,
+        batch_size: int = 128,
         *,
         n_steps: int = 1_000_000,
         n_updates: int = 10,
@@ -563,7 +568,7 @@ class LiquidPPO(RLAgent):
 
         n_steps = closest_divisible(n_steps, batch_size)
         n_mini_batches = get_mini_batch_size(self.buffer_size, batch_size)
-        total_updates = n_steps // batch_size
+        n_episodes = n_steps // batch_size  # total policy updates
 
         # Add training details to config
         self.config = self.config.update(
@@ -588,6 +593,7 @@ class LiquidPPO(RLAgent):
 
         update_module = ParallelLossModule(self)
         modules = [update_module for _ in range(n_mini_batches)]
+        devices = [self.device for _ in range(n_mini_batches)]
 
         with VecTrainHandler(
             self, envs, n_steps, batch_size, window_size, callbacks
@@ -595,23 +601,20 @@ class LiquidPPO(RLAgent):
             hidden = None
             critic_hidden = None
 
-            states, _ = handler.envs.reset()
+            states, _ = handler.env.reset()
             current_step = 0
 
-            for i_update in range(1, total_updates + 1):
-                # Reset buffer at start of update
-                self.buffer.empty()
+            for i_episode in range(1, n_episodes + 1):
+                self.buffer.empty()  # reset buffer
 
                 # Fill buffer
                 while not self.buffer.is_full():
-                    current_step += +1
-
                     with torch.no_grad():
                         actions, log_probs, _, hidden = self.actor(states, hidden)
                         values, critic_hidden = self.critic(states, critic_hidden)
 
                         next_states, rewards, terminated, truncated, _ = (
-                            handler.envs.step(actions)
+                            handler.env.step(actions)
                         )
                         dones: torch.Tensor = terminated | truncated
 
@@ -638,14 +641,12 @@ class LiquidPPO(RLAgent):
 
                 # Buffer filled, update policy
                 for i in range(n_updates):
-                    self._anneal_lr(i, total_updates)
+                    self._anneal_lr(i, n_episodes)
 
                     inputs = [
                         (batch, gamma, gae_lambda, clip_ratio, entropy_coef)
                         for batch in self.buffer.sample(batch_size)
                     ]
-                    devices = [self.device for _ in range(n_mini_batches)]
-
                     results: ParallelResults = parallel_apply(
                         modules, inputs, devices=devices
                     )
@@ -653,17 +654,30 @@ class LiquidPPO(RLAgent):
                     for critic_loss, actor_loss in results:
                         self._gradient_step(actor_loss, critic_loss, grad_clip)
 
-                        handler.metrics.add_update(
-                            i_update,
-                            torch.tensor(0.0, device=self.device),
-                            actor_loss,
-                            critic_loss,
-                        )
-                        handler.update(i_update)
+                # Update metrics
+                ep_reward, ep_length = evaluate_agent(self, handler.eval_env)
 
-                if i_update % display_count == 0 or handler.stop():
-                    handler.metrics.info(i_update)
+                handler.metrics.add_episode(
+                    i_episode,
+                    ep_reward,
+                    ep_length,
+                    actor_loss,
+                    critic_loss,
+                )
+                handler.episode(i_episode, ep_reward)
 
+                current_step += batch_size
+                handler.increment_step(current_step)
+
+                # Output progress
+                if (
+                    i_episode % display_count == 0
+                    or i_episode == n_episodes
+                    or handler.stop()
+                ):
+                    handler.metrics.info(i_episode)
+
+                # Terminate on early stopping
                 if handler.stop():
                     break
 
@@ -676,7 +690,7 @@ class LiquidPPO(RLAgent):
         train_mode: bool = False,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
-        Makes an action prediction using the Actor network with exploration noise.
+        Makes an action prediction using the Actor network.
 
         Parameters:
             state (torch.Tensor): the current state
@@ -694,3 +708,28 @@ class LiquidPPO(RLAgent):
             action, _, _, hidden = self.actor(state, hidden)
 
         return action, hidden
+
+    def save(
+        self,
+        dirpath: str | Path,
+        *,
+        buffer: bool = False,
+        config: bool = False,
+    ) -> None:
+        save_model(self, dirpath, buffer=buffer, config=config)
+
+    @classmethod
+    def load(cls, dirpath: str | Path, *, buffer: bool = False) -> Self:
+        return load_model(cls, dirpath, buffer=buffer)
+
+    def __repr__(self) -> str:
+        return (
+            f"{self.__class__.__name__}("
+            f"state_dim={self.state_dim}, "
+            f"n_neurons={self.n_neurons}, "
+            f"discrete={self.discrete}, "
+            f"action_dim={self.action_dim}, "
+            f"optim={type(self.actor_optim).__name__}, "
+            f"buffer_size={self.buffer_size:,}, "
+            f"device={self.device})"
+        )
