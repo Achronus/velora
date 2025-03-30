@@ -1,6 +1,6 @@
 [project]
 name = "velora"
-version = "0.1.1"
+version = "0.2.0"
 description = "A Liquid Reinforcement Learning (RL) framework."
 authors = [{ name = "Ryan Partridge", email = "rpartridge101@gmail.com>" }]
 license = "MIT License"
@@ -90,7 +90,7 @@ scikit-learn = ">=1.6.1,<2.0.0"
 
 [[tool.poetry.source]]
 name = "pytorch-cuda"
-url = "https://download.pytorch.org/whl/cu124"
+url = "https://download.pytorch.org/whl/cu126"
 priority = "explicit"
 
 [build-system]
