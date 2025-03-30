@@ -526,7 +526,7 @@ class LiquidPPO(RLAgent):
         n_steps: int = 1_000_000,
         n_updates: int = 10,
         callbacks: List["TrainCallback"] | None = None,
-        display_count: int = 10,
+        display_count: int = 100,
         window_size: int = 100,
         gamma: float = 0.99,
         gae_lambda: float = 0.95,

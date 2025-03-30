@@ -62,15 +62,15 @@ class EpisodeTrainConfig(TrainConfig):
     Attributes:
         batch_size: the size of the training batch
         n_episodes: the total number of episodes trained for
-        max_steps: the maximum number of steps per training episode
         window_size: the episodic rate for calculating the reward moving
             average
         gamma: the reward discount factor
+        callbacks: a dictionary of callback details
+        max_steps: the maximum number of steps per training episode
         noise_scale: the exploration noise added when selecting
             an action (if applicable)
         tau: the soft update factor used to slowly update the
             target networks (if applicable)
-        callbacks: a dictionary of callback details
     """
 
     max_steps: int
@@ -84,15 +84,17 @@ class RolloutTrainConfig(TrainConfig):
 
     Attributes:
         batch_size: the size of the training batch
+        n_episodes: the total number of episodes trained for
+        window_size: the episodic rate for calculating the reward moving
+            average
+        gamma: the reward discount factor
+        callbacks: a dictionary of callback details
         n_steps: the maximum number of training steps
         n_updates: the number of policy updates per batch
-        window_size: the step rate for calculating the reward moving average
-        gamma: the reward discount factor
         gae_lambda: the GAE smoothing parameter
         clip_ratio: the surrogate clipping ratio
         grad_clip: max norm gradient clip
         entropy_coef: entropy exploration coefficient
-        callbacks: a dictionary of callback details
     """
 
     n_steps: int
@@ -163,7 +165,7 @@ class RLAgentConfig(BaseModel):
     model_details: ModelDetails
     buffer: BufferConfig
     torch: TorchConfig
-    train_params: TrainConfig | None = None
+    train_params: EpisodeTrainConfig | RolloutTrainConfig | None = None
 
     def update(self, env: str, train_params: TrainConfig) -> Self:
         """
@@ -176,4 +178,8 @@ class RLAgentConfig(BaseModel):
         Returns:
             self (Self): a new config model with the updated values.
         """
-        return self.model_copy(update={"env": env, "train_params": train_params})
+        return RLAgentConfig(
+            env=env,
+            train_params=train_params,
+            **self.model_dump(exclude={"env", "train_params"}),
+        )

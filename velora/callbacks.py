@@ -129,7 +129,7 @@ class SaveCheckpoints(TrainCallback):
                 Compliments `TrainCallback.RecordVideos` callback.
 
             frequency (int, optional): save frequency (in episodes)
-            buffer (bool, optional): whether to save the final buffer state
+            buffer (bool, optional): whether to save the buffer state
         """
         self.dirname = dirname
         self.frequency = frequency
