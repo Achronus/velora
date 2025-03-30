@@ -26,6 +26,7 @@ from velora.training.handler import VecTrainHandler
 
 ParallelResults = List[Tuple[torch.Tensor, torch.Tensor]]
 
+
 class ParallelLossModule(nn.Module):
     """
     A module for computing the PPO loss in parallel.

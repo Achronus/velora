@@ -91,10 +91,6 @@ class EarlyStopping(TrainCallback):
                 self.count += 1
 
                 if self.count >= self.patience:
-                    print(
-                        f"Early stopping target reached in {state.current_ep} "
-                        "episodes! Training complete."
-                    )
                     state.stop_training = True
             else:
                 self.count = 0

@@ -37,6 +37,26 @@ class TorchConfig(BaseModel):
 
 class TrainConfig(BaseModel):
     """
+    A base config model for training parameter details.
+
+    Attributes:
+        batch_size: the size of the training batch
+        n_episodes: the total number of episodes trained for
+        window_size: the episodic rate for calculating the reward moving
+            average
+        gamma: the reward discount factor
+        callbacks: a dictionary of callback details
+    """
+
+    batch_size: int
+    n_episodes: int
+    window_size: int
+    gamma: float
+    callbacks: Dict[str, Any] | None = None
+
+
+class EpisodeTrainConfig(TrainConfig):
+    """
     A config model for episodic training parameter details.
 
     Attributes:
@@ -53,17 +73,12 @@ class TrainConfig(BaseModel):
         callbacks: a dictionary of callback details
     """
 
-    batch_size: int
-    n_episodes: int
     max_steps: int
-    window_size: int
-    gamma: float
     tau: float | None = None
     noise_scale: float | None = None
-    callbacks: Dict[str, Any] | None = None
 
 
-class RolloutTrainConfig(BaseModel):
+class RolloutTrainConfig(TrainConfig):
     """
     A config model for rollout training parameter details.
 
@@ -73,15 +88,18 @@ class RolloutTrainConfig(BaseModel):
         n_updates: the number of policy updates per batch
         window_size: the step rate for calculating the reward moving average
         gamma: the reward discount factor
+        gae_lambda: the GAE smoothing parameter
+        clip_ratio: the surrogate clipping ratio
+        grad_clip: max norm gradient clip
+        entropy_coef: entropy exploration coefficient
         callbacks: a dictionary of callback details
     """
 
-    batch_size: int
     n_steps: int
     n_updates: int
-    window_size: int
-    gamma: float
-    callbacks: Dict[str, Any] | None = None
+    gae_lambda: float
+    clip_ratio: float
+    entropy_coef: float
 
 
 class ModuleConfig(BaseModel):
@@ -108,6 +126,7 @@ class ModelDetails(BaseModel):
         state_dim: number of input features
         n_neurons: number of hidden node
         action_dim: number of output features
+        action_type: the type of action space
         target_networks: whether the agent uses target networks or not
         action_noise: the type of action noise used (if applicable).
             Default is `None`
@@ -119,6 +138,7 @@ class ModelDetails(BaseModel):
     state_dim: int
     n_neurons: int
     action_dim: int
+    action_type: Literal["discrete", "continuous"] = "continuous"
     target_networks: bool = False
     action_noise: Literal["OUNoise"] | None = None
     actor: ModuleConfig
@@ -143,9 +163,9 @@ class RLAgentConfig(BaseModel):
     model_details: ModelDetails
     buffer: BufferConfig
     torch: TorchConfig
-    train_params: TrainConfig | RolloutTrainConfig | None = None
+    train_params: TrainConfig | None = None
 
-    def update(self, env: str, train_params: TrainConfig | RolloutTrainConfig) -> Self:
+    def update(self, env: str, train_params: TrainConfig) -> Self:
         """
         Updates the training details of the model.
 

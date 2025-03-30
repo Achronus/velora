@@ -16,7 +16,7 @@ from velora.models.config import (
     ModuleConfig,
     RLAgentConfig,
     RolloutTrainConfig,
-    TrainConfig,
+    EpisodeTrainConfig,
 )
 from velora.models.lnn.ncp import LiquidNCPNetwork
 
@@ -195,7 +195,7 @@ class RLAgent:
         self,
         params: Dict[str, Any],
         type: Literal["episode", "rollout"] = "episode",
-    ) -> TrainConfig | RolloutTrainConfig:
+    ) -> EpisodeTrainConfig | RolloutTrainConfig:
         """
         Helper method. Sets the `train_params` given a dictionary of training parameters.
 
@@ -205,7 +205,7 @@ class RLAgent:
                 config
 
         Returns:
-            config (TrainConfig | RolloutTrainConfig): a training config model
+            config (TrainConfig): a training config model
         """
         params = dict(
             callbacks=(
@@ -219,6 +219,6 @@ class RLAgent:
         )
 
         if type == "episode":
-            return TrainConfig(**params)
+            return EpisodeTrainConfig(**params)
 
         return RolloutTrainConfig(**params)

@@ -108,7 +108,7 @@ def vec_training_info(
     cb_str += "\n---------------------------------\n"
 
     output += cb_str if callbacks else "\n\n"
-    output += f"Training '{agent.__class__.__name__}' agent on '{env_id}' for '{number_to_short(n_steps)}' steps and '{total_updates}' policy updates.\n"
+    output += f"Training '{agent.__class__.__name__}' agent on '{env_id}' for '{number_to_short(n_steps)}' steps and '{total_updates}' episodes.\n"
     output += f"Using '{agent.buffer.__class__.__name__}' with 'capacity={number_to_short(agent.buffer.capacity)}' and '{n_mini_batches}' mini-batches with '{batch_size=}'.\n"
     output += f"Using '{n_envs}' vectorized environments.\n"
     output += f"Running computations on device '{device}'.\n"

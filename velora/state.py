@@ -7,7 +7,7 @@ from sqlmodel import Session
 
 from velora.models.base import RLAgent
 
-StatusLiteral = Literal["start", "episode", "step", "update", "complete"]
+StatusLiteral = Literal["start", "episode", "step", "complete"]
 RecordMethodLiteral = Literal["episode", "step"]
 
 
@@ -69,18 +69,16 @@ class TrainState:
 
     Parameters:
         agent (RLAgent): the agent being trained
-        env (gymnasium.Env | gym.vector.VectorEnv): the single or vectorized
-            environments used during training
+        env (gymnasium.Env): a single training or evaluation environment
         session (sqlmodel.Session): the current metric database session
         experiment_id (int): the current experiment's unique ID
         total_episodes (int, optional): total number of training episodes
         total_steps (int, optional): total number of training steps
-        status (Literal["start", "episode", "step", "update", "complete"], optional): the current stage of training.
+        status (Literal["start", "episode", "step", "complete"], optional): the current stage of training.
 
             - `start` - before training starts.
             - `episode` - inside the episode loop.
             - `step` - inside the timestep loop.
-            - `update` - inside the rollout update loop.
             - `complete` - completed training.
 
         current_ep (int, optional): the current episode index
@@ -92,7 +90,7 @@ class TrainState:
     """
 
     agent: RLAgent
-    env: gym.Env | gym.vector.VectorEnv
+    env: gym.Env
     session: Session
     experiment_id: int
     total_episodes: int = 0
@@ -117,12 +115,11 @@ class TrainState:
         Updates the training state. When any input is `None`, uses existing value.
 
         Parameters:
-            status (Literal["start", "episode", "step", "update", "complete"], optional): the current stage of training.
+            status (Literal["start", "episode", "step", "complete"], optional): the current stage of training.
 
                 - `start` - before training start.
                 - `episode` - inside the episode loop.
                 - `step` - inside the timestep loop.
-                - `update` - inside the rollout update loop.
                 - `complete` - completed training.
 
             current_ep (int, optional): the current episode index
