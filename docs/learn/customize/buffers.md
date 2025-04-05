@@ -12,7 +12,7 @@ We have our own implementations of these that are easy to work with 😊.
 
     [`velora.buffer.ReplayBuffer(capacity, state_dim, action_dim)`](../reference/buffer.md#velora.buffer.ReplayBuffer)
 
-To create a `ReplayBuffer`, simply give it a `capacity`, `state_dim`, `action_dim` and a `torch.device` (optional):
+To create a `ReplayBuffer`, simply give it a `capacity`, `state_dim`, `action_dim`, `hidden_dim` and a `torch.device` (optional):
 
 ```python
 from velora.buffer import ReplayBuffer
@@ -22,7 +22,8 @@ device = set_device()
 buffer = ReplayBuffer(
     capacity=100_000, 
     state_dim=11, 
-    action_dim=3, 
+    action_dim=3,
+    hidden_dim=8, 
     device=device
 )
 ```
@@ -122,7 +123,13 @@ state_dim = env.observation_space.shape[0]
 action_dim = env.action_space.shape[0]
 
 agent = LiquidDDPG(state_dim, 10, action_dim, device=device)
-buffer = ReplayBuffer(100_000, state_dim, action_dim, device=device)
+buffer = ReplayBuffer(
+    100_000, 
+    state_dim, 
+    action_dim, 
+    agent.actor.ncp.hidden_size,
+    device=device
+)
 
 # Warm with 5 samples
 buffer.warm(agent, env.spec.id, 5)
@@ -153,7 +160,7 @@ This code should work 'as is'.
 
 The `RolloutBuffer` is almost identical to the `ReplayBuffer` with the addition of an `empty()` method that must be used after the buffer is full.
 
-To create one, give it a `capacity`, `state_dim`, `action_dim` and a `torch.device` (optional):
+To create one, give it a `capacity`, `state_dim`, `action_dim`, `hidden_dim` and a `torch.device` (optional):
 
 ```python
 from velora.buffer import RolloutBuffer
@@ -164,6 +171,7 @@ buffer = RolloutBuffer(
     capacity=10, 
     state_dim=11,
     action_dim=3,
+    hidden_dim=8,
     device=device
 )
 ```
@@ -238,7 +246,7 @@ from velora.utils import set_device
 import torch
 
 device = set_device()
-buffer = RolloutBuffer(1, 4, 1, device=device)
+buffer = RolloutBuffer(1, 4, 1, 8, device=device)
 
 exp = (
     torch.zeros((1, 4)),
@@ -322,6 +330,8 @@ class BatchExperience:
         next_states (torch.Tensor): a batch of newly generated environment
             observations following the actions taken
         dones (torch.Tensor): a batch of environment completion statuses
+        hiddens (torch.Tensor): a batch of prediction network hidden states
+            (e.g., Actor)
     """
 
     states: torch.Tensor
@@ -329,6 +339,7 @@ class BatchExperience:
     rewards: torch.Tensor
     next_states: torch.Tensor
     dones: torch.Tensor
+    hiddens: torch.Tensor
 ```
 
 All items in this class have the same shape `(batch_size, features)` and are easily accessible through their attributes, such as `batch.states`.

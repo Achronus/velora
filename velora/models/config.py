@@ -12,12 +12,14 @@ class BufferConfig(BaseModel):
         capacity: the maximum capacity of the buffer
         state_dim: dimension of state observations
         action_dim: dimension of actions
+        hidden_dim: dimension of hidden state
     """
 
     type: Literal["ReplayBuffer", "RolloutBuffer"]
     capacity: int
     state_dim: int
     action_dim: int
+    hidden_dim: int | None = None
 
 
 class TorchConfig(BaseModel):

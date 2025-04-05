@@ -198,6 +198,7 @@ class LiquidDDPG(RLAgent):
             buffer_size,
             state_dim,
             action_dim,
+            self.actor.ncp.hidden_size,
             device=self.device,
         )
         self.noise = OUNoise(action_dim, device=device)
@@ -246,8 +247,8 @@ class LiquidDDPG(RLAgent):
 
         Parameters:
             batch (BatchExperience): an object containing a batch of experience
-                with `(states, actions, rewards, next_states, dones)` from the
-                buffer
+                with `(states, actions, rewards, next_states, dones, hidden)`
+                from the buffer
             gamma (float): the reward discount factor
 
         Returns:
@@ -255,7 +256,7 @@ class LiquidDDPG(RLAgent):
         """
         with torch.no_grad():
             next_states = batch.next_states
-            next_actions, _ = self.actor_target(next_states)
+            next_actions, _ = self.actor_target(next_states, batch.hiddens)
             target_q, _ = self.critic_target(next_states, next_actions)
             target_q = batch.rewards + (1 - batch.dones) * gamma * target_q
 
@@ -268,18 +269,20 @@ class LiquidDDPG(RLAgent):
 
         return critic_loss
 
-    def _update_actor(self, states: torch.Tensor) -> torch.Tensor:
+    def _update_actor(self, batch: BatchExperience) -> torch.Tensor:
         """
         Helper method. Performs an Actor Network update.
 
         Parameters:
-            states (torch.Tensor): a batch of state experiences from the buffer
+            batch (BatchExperience): an object containing a batch of experience
+                with `(states, actions, rewards, next_states, dones, hidden,
+                critic_hidden)` from the buffer
 
         Returns:
             actor_loss (torch.Tensor): the Actor's loss value.
         """
-        next_actions, _ = self.actor(states)
-        actor_q, _ = self.critic(states, next_actions)
+        next_actions, _ = self.actor(batch.states, batch.hiddens)
+        actor_q, _ = self.critic(batch.states, next_actions)
         actor_loss: torch.Tensor = -actor_q.mean()
 
         self.actor_optim.zero_grad()
@@ -308,7 +311,7 @@ class LiquidDDPG(RLAgent):
         batch = self.buffer.sample(batch_size)
 
         critic_loss = self._update_critic(batch, gamma)
-        actor_loss = self._update_actor(batch.states)
+        actor_loss = self._update_actor(batch)
 
         return critic_loss, actor_loss
 
@@ -320,11 +323,12 @@ class LiquidDDPG(RLAgent):
         *,
         n_episodes: int = 1000,
         callbacks: List["TrainCallback"] | None = None,
+        display_count: int = 100,
+        window_size: int = 100,
         max_steps: int = 1000,
         noise_scale: float = 0.3,
         gamma: float = 0.99,
         tau: float = 0.005,
-        window_size: int = 100,
     ) -> None:
         """
         Trains the agent on a Gymnasium environment using a `ReplayBuffer`.
@@ -335,15 +339,16 @@ class LiquidDDPG(RLAgent):
             n_episodes (int, optional): the total number of episodes to train for
             callbacks (List[TrainCallback], optional): a list of training callbacks
                 that are applied during the training process
+            display_count (int, optional): controls the console display count for
+                monitoring training progress per episodic update
+            window_size (int, optional): controls the episode rate for calculating
+                the reward moving average per episodic update
             max_steps (int, optional): the total number of steps per episode
             noise_scale (float, optional): the exploration noise added when
                 selecting an action
             gamma (float, optional): the reward discount factor
             tau (float, optional): the soft update factor used to slowly update
                 the target networks
-            window_size (int, optional): controls the episode rate for displaying
-                information to the console and for calculating the reward moving
-                average
         """
         if not isinstance(env.action_space, gym.spaces.Box):
             raise EnvironmentError(
@@ -373,17 +378,14 @@ class LiquidDDPG(RLAgent):
         with TrainHandler(
             self, env, n_episodes, max_steps, window_size, callbacks
         ) as handler:
-            for i_ep in range(n_episodes):
-                current_ep = i_ep + 1
+            for current_ep in range(1, n_episodes + 1):
                 ep_reward = 0.0
                 hidden = None
 
                 state, _ = handler.env.reset()
                 self.noise.reset()
 
-                for i_step in range(max_steps):
-                    current_step = i_step + 1
-
+                for current_step in range(1, max_steps + 1):
                     action, hidden = self.predict(
                         state,
                         hidden,
@@ -395,7 +397,7 @@ class LiquidDDPG(RLAgent):
                     )
                     done = terminated or truncated
 
-                    self.buffer.add(state, action, reward, next_state, done)
+                    self.buffer.add(state, action, reward, next_state, done, hidden)
 
                     critic_loss, actor_loss = self._train_step(batch_size, gamma)
                     self._update_target_networks(tau)
@@ -414,13 +416,17 @@ class LiquidDDPG(RLAgent):
                         )
                         break
 
-                if current_ep % window_size == 0:
+                if (
+                    current_ep % display_count == 0
+                    or current_ep == n_episodes
+                    or handler.stop()
+                ):
                     handler.metrics.info(current_ep)
 
                 handler.episode(current_ep, ep_reward)
 
+                # Terminate on early stopping
                 if handler.stop():
-                    handler.metrics.info(current_ep)
                     break
 
     @override

@@ -15,6 +15,8 @@ class BatchExperience:
         next_states (torch.Tensor): a batch of newly generated environment
             observations following the actions taken
         dones (torch.Tensor): a batch of environment completion statuses
+        hiddens (torch.Tensor): a batch of prediction network hidden states
+            (e.g., Actor)
     """
 
     states: torch.Tensor
@@ -22,6 +24,7 @@ class BatchExperience:
     rewards: torch.Tensor
     next_states: torch.Tensor
     dones: torch.Tensor
+    hiddens: torch.Tensor
 
 
 @dataclass
@@ -36,6 +39,8 @@ class RolloutBatchExperience(BatchExperience):
         next_states (torch.Tensor): a batch of newly generated environment
             observations following the actions taken
         dones (torch.Tensor): a batch of environment completion statuses
+        hidden (torch.Tensor): a batch of prediction network hidden states
+            (e.g., Actor)
         log_probs (torch.Tensor): a batch of log probabilities of the actions
         values (torch.Tensor): a batch of state values
     """

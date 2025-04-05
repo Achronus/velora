@@ -26,6 +26,7 @@ class ReplayBuffer(BufferBase):
         capacity: int,
         state_dim: int,
         action_dim: int,
+        hidden_dim: int,
         *,
         device: torch.device | None = None,
     ) -> None:
@@ -34,9 +35,10 @@ class ReplayBuffer(BufferBase):
             capacity (int): the total capacity of the buffer
             state_dim (int): dimension of state observations
             action_dim (int): dimension of actions
+            hidden_dim (int): dimension of hidden state
             device (torch.device, optional): the device to perform computations on
         """
-        super().__init__(capacity, state_dim, action_dim, device=device)
+        super().__init__(capacity, state_dim, action_dim, hidden_dim, device=device)
 
     def config(self) -> BufferConfig:
         """
@@ -50,6 +52,7 @@ class ReplayBuffer(BufferBase):
             capacity=self.capacity,
             state_dim=self.state_dim,
             action_dim=self.action_dim,
+            hidden_dim=self.hidden_dim,
         )
 
     @override
@@ -61,7 +64,7 @@ class ReplayBuffer(BufferBase):
             batch_size (int): the number of items to sample
 
         Returns:
-            batch (BatchExperience): an object of samples with the attributes (`states`, `actions`, `rewards`, `next_states`, `dones`).
+            batch (BatchExperience): an object of samples with the attributes (`states`, `actions`, `rewards`, `next_states`, `dones`, `hidden`).
 
                 All items have the same shape `(batch_size, features)`.
         """
@@ -78,6 +81,7 @@ class ReplayBuffer(BufferBase):
             rewards=self.rewards[indices],
             next_states=self.next_states[indices],
             dones=self.dones[indices],
+            hiddens=self.hiddens[indices],
         )
 
     def warm(self, agent: RLAgent, env_name: str, n_samples: int) -> None:
@@ -101,7 +105,7 @@ class ReplayBuffer(BufferBase):
             next_state, reward, terminated, truncated, _ = env.step(action)
             done = terminated or truncated
 
-            self.add(state, action, reward, next_state, done)
+            self.add(state, action, reward, next_state, done, hidden)
 
             state = next_state
 

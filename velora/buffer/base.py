@@ -12,11 +12,19 @@ MetaDataKeys = Literal[
     "capacity",
     "state_dim",
     "action_dim",
+    "hidden_dim",
     "position",
     "size",
     "device",
 ]
-BufferKeys = Literal["states", "actions", "rewards", "next_states", "dones"]
+BufferKeys = Literal[
+    "states",
+    "actions",
+    "rewards",
+    "next_states",
+    "dones",
+    "hiddens",
+]
 
 
 class BufferBase:
@@ -32,6 +40,7 @@ class BufferBase:
         capacity: int,
         state_dim: int,
         action_dim: int,
+        hidden_dim: int,
         *,
         device: torch.device | None = None,
     ) -> None:
@@ -40,11 +49,13 @@ class BufferBase:
             capacity (int): the total capacity of the buffer
             state_dim (int): dimension of state observations
             action_dim (int): dimension of actions
+            hidden_dim (int): dimension of hidden state
             device (torch.device, optional): the device to perform computations on
         """
         self.capacity = capacity
         self.state_dim = state_dim
         self.action_dim = action_dim
+        self.hidden_dim = hidden_dim
         self.device = device
 
         # Position indicators
@@ -57,6 +68,7 @@ class BufferBase:
         self.rewards = torch.zeros((capacity, 1), device=device)
         self.next_states = torch.zeros((capacity, state_dim), device=device)
         self.dones = torch.zeros((capacity, 1), device=device)
+        self.hiddens = torch.zeros((capacity, hidden_dim), device=device)
 
     def add(
         self,
@@ -65,6 +77,7 @@ class BufferBase:
         reward: float,
         next_state: torch.Tensor,
         done: bool,
+        hidden: torch.Tensor,
     ) -> None:
         """
         Adds a single experience to the buffer.
@@ -75,12 +88,14 @@ class BufferBase:
             reward (float): reward received
             next_state (torch.Tensor): next state observation
             done (bool): whether the episode ended
+            hidden (torch.Tensor): Actor hidden state (prediction network)
         """
         self.states[self.position] = state.to(torch.float32)
         self.actions[self.position] = action
         self.rewards[self.position] = reward
         self.next_states[self.position] = next_state.to(torch.float32)
         self.dones[self.position] = done
+        self.hiddens[self.position] = hidden
 
         # Update position - deque style
         self.position = (self.position + 1) % self.capacity
@@ -92,7 +107,7 @@ class BufferBase:
         Samples experience from the buffer.
 
         Returns:
-            batch (BatchExperience): an object of samples with the attributes (`states`, `actions`, `rewards`, `next_states`, `dones`).
+            batch (BatchExperience): an object of samples with the attributes (`states`, `actions`, `rewards`, `next_states`, `dones`, `hidden`).
 
                 All items have the same shape `(batch_size, features)`.
         """
@@ -115,6 +130,7 @@ class BufferBase:
         - `capacity` - the maximum capacity of the buffer.
         - `state_dim` - state dimension.
         - `action_dim` - action dimension.
+        - `hidden_dim` - hidden state dimension.
         - `position` - current buffer position.
         - `size` - current size of buffer.
         - `device` - the device used for computations.
@@ -126,6 +142,7 @@ class BufferBase:
             "capacity": self.capacity,
             "state_dim": self.state_dim,
             "action_dim": self.action_dim,
+            "hidden_dim": self.hidden_dim,
             "position": self.position,
             "size": self.size,
             "device": str(self.device) if self.device else None,
@@ -141,6 +158,7 @@ class BufferBase:
         - `rewards` - tensor of rewards.
         - `next_states` - tensor of next states.
         - `dones` - tensor of dones.
+        - `hiddens` - tensor of Actor hidden states (prediction network).
 
         Returns:
             state_dict (Dict[str, torch.Tensor]): the current state of the buffer
@@ -151,6 +169,7 @@ class BufferBase:
             "rewards": self.rewards,
             "next_states": self.next_states,
             "dones": self.dones,
+            "hiddens": self.hiddens,
         }
 
     def save(self, dirpath: str | Path, prefix: str = "buffer_") -> None:
@@ -197,6 +216,7 @@ class BufferBase:
             capacity=metadata["capacity"],
             state_dim=metadata["state_dim"],
             action_dim=metadata["action_dim"],
+            hidden_dim=metadata["hidden_dim"],
             device=torch.device(device) if device else None,
         )
         buffer.position = metadata["position"]
@@ -210,5 +230,6 @@ class BufferBase:
         buffer.rewards = data["rewards"]
         buffer.next_states = data["next_states"]
         buffer.dones = data["dones"]
+        buffer.hiddens = data["hiddens"]
 
         return buffer

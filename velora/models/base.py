@@ -13,10 +13,10 @@ if TYPE_CHECKING:
     from velora.buffer.base import BufferBase  # pragma: no cover
 
 from velora.models.config import (
+    EpisodeTrainConfig,
     ModuleConfig,
     RLAgentConfig,
     RolloutTrainConfig,
-    EpisodeTrainConfig,
 )
 from velora.models.lnn.ncp import LiquidNCPNetwork
 
