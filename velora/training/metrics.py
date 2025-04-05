@@ -195,6 +195,12 @@ class TrainMetricsBase:
         self._critic_loss: torch.Tensor = torch.zeros(1, device=self.device)
         self._actor_loss: torch.Tensor = torch.zeros(1, device=self.device)
 
+        self.step_total: torch.Tensor = torch.zeros(
+            1,
+            dtype=torch.int32,
+            device=self.device,
+        )
+
     def start_experiment(self, config: "RLAgentConfig") -> None:
         """
         Confirms the start of a metric experiment by adding it to the database and
@@ -285,12 +291,6 @@ class EpisodeTrainMetrics(TrainMetricsBase):
 
         self._current_losses = StepStorage(max_steps, device=device)
 
-        self._step_total: torch.Tensor = torch.zeros(
-            1,
-            dtype=torch.int32,
-            device=self.device,
-        )
-
     def add_step(self, critic: torch.Tensor, actor: torch.Tensor) -> None:
         """
         Add timesteps metrics to local storage.
@@ -322,7 +322,7 @@ class EpisodeTrainMetrics(TrainMetricsBase):
 
         self._actor_loss = self._current_losses.actor_avg(ep_length.item())
         self._critic_loss = self._current_losses.critic_avg(ep_length.item())
-        self._step_total += ep_length
+        self.step_total += ep_length
 
         moving_avg = self.reward_moving_avg()
         moving_std = self.reward_moving_std()
@@ -354,7 +354,7 @@ class EpisodeTrainMetrics(TrainMetricsBase):
         max_eps = number_to_short(self.n_episodes)
 
         ep_length = number_to_short(int(self._ep_lengths.latest))
-        step_total = number_to_short(self._step_total.item())
+        step_total = number_to_short(self.step_total.item())
 
         max_length = number_to_short(int(self._ep_lengths.max().item()))
         max_steps = number_to_short(self.max_steps)

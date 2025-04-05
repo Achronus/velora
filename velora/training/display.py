@@ -45,7 +45,7 @@ def training_info(
             number_to_short(agent.active_params),
             number_to_short(agent.total_params),
         )
-        params_str += f"({active}/{total})"
+        params_str += f" ({active}/{total})"
 
     cb_str = "\n\nActive Callbacks:"
     cb_str += "\n---------------------------------\n"
@@ -98,7 +98,7 @@ def vec_training_info(
             number_to_short(agent.active_params),
             number_to_short(agent.total_params),
         )
-        params_str += f"({active}/{total})"
+        params_str += f" ({active}/{total})"
 
     total_updates = number_to_short(n_steps // batch_size)
 

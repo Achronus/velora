@@ -1,6 +1,8 @@
+import json
 import time
+from pathlib import Path
 from types import TracebackType
-from typing import TYPE_CHECKING, List, Self, Type
+from typing import TYPE_CHECKING, Any, Dict, List, Self, Type
 
 import gymnasium as gym
 from sqlmodel import Session
@@ -105,7 +107,7 @@ class TrainHandlerBase:
             f"{early_stop_str}"
             "Training completed in: "
             f"{number_to_short(self.state.current_ep)} episodes, "
-            f"{number_to_short(self.state.current_step)} steps, "
+            f"{number_to_short(self._metrics.step_total.item())} steps, "
             f"and {self.train_time}."
         )
 
@@ -157,6 +159,29 @@ class TrainHandlerBase:
             dirname = self.state.record_state.dirpath.parent.name
             print()
             record_last_episode(self.agent, self.env.spec.id, dirname)
+
+    def save_completed(self, stats: Dict[str, Any]) -> None:
+        """
+        Saves the completed training information to a JSON file in the
+        local directory.
+
+        Parameters:
+            stats (Dict[str, Any]): a dictionary of model statistics to store
+        """
+        path = Path("completed").with_suffix(".json")
+        data = {
+            "episodes": self.state.current_ep,
+            "steps": self._metrics.step_total.item(),
+            "time": {
+                "hours": self.train_time.hrs,
+                "minutes": self.train_time.mins,
+                "seconds": round(self.train_time.secs, 4),
+            },
+            "stats": stats,
+        }
+
+        with path.open("w") as f:
+            f.write(json.dumps(data, indent=2))
 
 
 class TrainHandler(TrainHandlerBase):
@@ -225,6 +250,27 @@ class TrainHandler(TrainHandlerBase):
         )
 
         return super().__enter__()
+
+    def __exit__(
+        self,
+        exc_type: Type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ):
+        super().__exit__(exc_type, exc_val, exc_tb)
+
+        self.save_completed(
+            {
+                "reward": {
+                    "average": round(self._metrics.reward_moving_avg(), 4),
+                    "max": round(self._metrics.reward_moving_max(), 4),
+                },
+                "loss": {
+                    "actor": round(self._metrics._actor_loss.item(), 4),
+                    "critic": round(self._metrics._critic_loss.item(), 4),
+                },
+            }
+        )
 
     def start(self) -> None:
         super().start()

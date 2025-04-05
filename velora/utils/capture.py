@@ -90,7 +90,7 @@ def evaluate_agent(agent: "RLAgent", env: gym.Env) -> Tuple[torch.Tensor, torch.
 
     while True:
         action, hidden = agent.predict(state, hidden, train_mode=False)
-        next_state, reward, terminated, truncated, info = env.step(action)
+        next_state, reward, terminated, truncated, info = env.step(action.flatten())
 
         done = terminated or truncated
         state = next_state
