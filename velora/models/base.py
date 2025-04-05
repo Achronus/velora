@@ -8,6 +8,7 @@ import torch.nn as nn
 import torch.optim as optim
 
 from velora.models.weight import WeightInitType
+from velora.utils.core import set_seed
 from velora.utils.torch import summary
 
 if TYPE_CHECKING:
@@ -87,6 +88,7 @@ class RLAgent:
         action_dim: int,
         buffer_size: int,
         device: torch.device | None,
+        seed: int | None,
     ) -> None:
         """
         Parameters:
@@ -95,12 +97,14 @@ class RLAgent:
             action_dim (int): number of outputs (motor nodes)
             buffer_size (int): buffer capacity
             device (torch.device, optional): the device to perform computations on
+            seed (int, optional): random number seed
         """
         self.state_dim = state_dim
         self.n_neurons = n_neurons
         self.action_dim = action_dim
         self.buffer_size = buffer_size
         self.device = device
+        self.seed = set_seed(seed)
 
         self.config: RLAgentConfig | None = None
         self.buffer: "BufferBase" | None = None

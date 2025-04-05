@@ -23,16 +23,23 @@ We've got two methods that help with this: `set_seed` and `set_device`.
 
 ???+ api "API Docs"
 
-    [`velora.utils.set_seed(value)`](../reference/utils.md#velora.utils.core.set_seed)
+    [`velora.utils.set_seed()`](../reference/utils.md#velora.utils.core.set_seed)
 
-Setting a seed controls the randomness for the `PyTorch` and `NumPy` packages, making your experiment results consistent and reproducible.
+Setting a seed controls the randomness for `Python`, `PyTorch` and `NumPy`, making your experiment results consistent and reproducible.
 
-Simply, pass `set_seed` a numeric `value` and you are good to go!
+You have two options here:
+
+1. Pass your own seed value
+2. Let it generate one automatically
 
 ```python
 from velora.utils import set_seed
 
-set_seed(64)
+seed = set_seed(64)
+print(seed)  # 64
+
+seed = set_seed()
+print(seed)  # A random seed
 ```
 
 This code should work 'as is'.

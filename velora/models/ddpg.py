@@ -152,6 +152,7 @@ class LiquidDDPG(RLAgent):
         actor_lr: float = 1e-4,
         critic_lr: float = 1e-3,
         device: torch.device | None = None,
+        seed: int | None = None,
     ) -> None:
         """
         Parameters:
@@ -164,8 +165,10 @@ class LiquidDDPG(RLAgent):
             actor_lr (float, optional): the actor optimizer learning rate
             critic_lr (float, optional): the critic optimizer learning rate
             device (torch.device, optional): the device to perform computations on
+            seed (int, optional): random number seed for experiment reproducibility.
+                When `None` generates a seed automatically
         """
-        super().__init__(state_dim, n_neurons, action_dim, buffer_size, device)
+        super().__init__(state_dim, n_neurons, action_dim, buffer_size, device, seed)
 
         self.actor = DDPGActor(
             self.state_dim,
@@ -211,6 +214,7 @@ class LiquidDDPG(RLAgent):
         # Init config details
         self.config = RLAgentConfig(
             agent=self.__class__.__name__,
+            seed=self.seed,
             model_details=ModelDetails(
                 type="actor-critic",
                 **locals(),
@@ -362,6 +366,7 @@ class LiquidDDPG(RLAgent):
         )
 
         # Display console details
+        env.reset(seed=self.seed)  # Set seed
         training_info(
             self,
             env.spec.id,
@@ -370,10 +375,11 @@ class LiquidDDPG(RLAgent):
             window_size,
             callbacks or [],
             self.device,
+            env.np_random_seed,
         )
 
         self.noise.reset()
-        self.buffer.warm(self, env.spec.id, batch_size)
+        self.buffer.warm(self, env.spec.id, batch_size, self.seed)
 
         with TrainHandler(
             self, env, n_episodes, max_steps, window_size, callbacks

@@ -84,7 +84,13 @@ class ReplayBuffer(BufferBase):
             hiddens=self.hiddens[indices],
         )
 
-    def warm(self, agent: RLAgent, env_name: str, n_samples: int) -> None:
+    def warm(
+        self,
+        agent: RLAgent,
+        env_name: str,
+        n_samples: int,
+        seed: int | None = None,
+    ) -> None:
         """
         Warms the buffer to fill it to a number of samples by generating them
         from an agent using a copy of the environment.
@@ -93,12 +99,13 @@ class ReplayBuffer(BufferBase):
             agent (RLAgent): the agent to generate samples with
             env_name (str): the name of environment to generate samples from
             n_samples (int): the maximum number of samples to generate
+            seed (int, optional): random number generator seed
         """
         env = gym.make(env_name)
         env = add_core_env_wrappers(env, agent.device)
 
         hidden = None
-        state, _ = env.reset()
+        state, _ = env.reset(seed=seed)
 
         while not len(self) >= n_samples:
             action, hidden = agent.predict(state, hidden, train_mode=True)

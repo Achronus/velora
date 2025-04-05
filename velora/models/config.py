@@ -156,6 +156,7 @@ class RLAgentConfig(BaseModel):
     Attributes:
         agent: the type of agent used
         env: the name of the environment the model was trained on. Default is `None`
+        seed: random number generator value
         model_details: the agent's network model details
         buffer: the buffer details
         torch: the PyTorch details
@@ -164,6 +165,7 @@ class RLAgentConfig(BaseModel):
 
     agent: str
     env: str | None = None
+    seed: int
     model_details: ModelDetails
     buffer: BufferConfig
     torch: TorchConfig

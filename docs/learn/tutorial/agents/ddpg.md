@@ -35,22 +35,24 @@ This will create an instance of the model with the following default parameters:
 - `actor_lr=1e-4` - the actor optimizer using a learning rate of `0.0001`.
 - `critic_lr=1e-3` - the critic optimizer using a learning rate of `0.001`.
 - `device=None` - no computation device set (E.g., `cpu`).
+- `seed=None` - a randomly generated seed for `Python`, `PyTorch`, `NumPy` and `Gymnasium`.
 
 You can customize them freely using the required parameter name.
 
-We strongly recommend that use the [`set_seed`](../../tutorial/utils.md#setting-a-seed) and [`set_device`](../../tutorial/utils.md#setting-a-device) utility methods before initializing the model to help with result reproducibility and faster training times:
+We strongly recommend that use the [`set_device`](../../tutorial/utils.md#setting-a-device) utility method before initializing the model to help with faster training times:
 
 ```python
 from velora.models import LiquidDDPG
-from velora.utils import set_seed, set_device
+from velora.utils import set_device
 
-set_seed(64)
 device = set_device()
 
 model = LiquidDDPG(4, 10, 1, device=device)
 ```
 
 This code should work 'as is'.
+
+`LiquidDDPG` uses the [`set_seed`](../../tutorial/utils.md#setting-a-seed) utility method automatically when the model's `seed=None`. This saves you having to manually create it first! 😉
 
 ## Training the Model
 
@@ -64,11 +66,10 @@ We just use the `train()` method given a `gymnasium.Env` and a `batch_size`:
 
 ```python hl_lines="9-10 13"
 from velora.models import LiquidDDPG
-from velora.utils import set_seed, set_device
+from velora.utils import set_device
 
 import gymnasium as gym
 
-set_seed(64)
 device = set_device()
 
 BATCH_SIZE = 128
@@ -129,16 +130,16 @@ from velora.models import LiquidDDPG
 from velora.gym import add_core_env_wrappers
 from velora.utils import set_seed, set_device
 
-set_seed(64)
+seed = set_seed()
 device = set_device()
 
 env = gym.make("InvertedPendulum-v5", render_mode='rgb_array')
 env = add_core_env_wrappers(env, device=device)
 
-model = LiquidDDPG(4, 10, 1, device=device)
+model = LiquidDDPG(4, 10, 1, device=device, seed=seed)
 model.train(env, 128, n_episodes=100)
 
-state, _ = env.reset()
+state, _ = env.reset(seed=seed)
 
 episode_over = False
 hidden = None
