@@ -4,6 +4,7 @@ import torch
 import torch.nn as nn
 
 from velora.models.lnn.sparse import SparseLinear
+from velora.models.weight import WeightInitType
 
 
 class NCPLiquidCell(nn.Module):
@@ -30,6 +31,7 @@ class NCPLiquidCell(nn.Module):
         n_hidden: int,
         mask: torch.Tensor,
         *,
+        init_type: str | WeightInitType = "kaiming_uniform",
         device: torch.device | None = None,
     ) -> None:
         """
@@ -38,6 +40,7 @@ class NCPLiquidCell(nn.Module):
             n_hidden (int): number of hidden nodes.
             mask (torch.Tensor): a matrix of sparse connections
                 usually containing a combination of `[-1, 1, 0]`.
+            init_type (str, optional): the type of weight initialization
             device (torch.device, optional): the device to load tensors on.
         """
 
@@ -46,6 +49,7 @@ class NCPLiquidCell(nn.Module):
         self.in_features = in_features
         self.n_hidden = n_hidden
         self.head_size = n_hidden + in_features
+        self.init_type = init_type
         self.device = device
 
         # Absolute to maintain masking (-1 -> 1)
@@ -80,6 +84,7 @@ class NCPLiquidCell(nn.Module):
             self.head_size,
             self.n_hidden,
             self.sparsity_mask,
+            init_type=self.init_type,
             device=self.device,
         )
 

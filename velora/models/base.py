@@ -7,6 +7,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
+from velora.models.weight import WeightInitType
 from velora.utils.torch import summary
 
 if TYPE_CHECKING:
@@ -34,6 +35,7 @@ class NCPModule(nn.Module):
         n_neurons: int,
         out_features: int,
         *,
+        init_type: str | WeightInitType = "kaiming_uniform",
         device: torch.device | None = None,
     ):
         """
@@ -41,6 +43,7 @@ class NCPModule(nn.Module):
             in_features (int): the number of input nodes
             n_neurons (int): the number of hidden neurons
             out_features (int): the number of output nodes
+            init_type (str, optional): the type of weight initialization
             device (torch.device, optional): the device to perform computations on
         """
         super().__init__()
@@ -51,6 +54,7 @@ class NCPModule(nn.Module):
             in_features=in_features,
             n_neurons=n_neurons,
             out_features=out_features,
+            init_type=init_type,
             device=device,
         ).to(device)
 
