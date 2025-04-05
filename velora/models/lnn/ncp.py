@@ -5,6 +5,7 @@ import torch.nn as nn
 
 from velora.models.lnn.cell import NCPLiquidCell
 from velora.models.lnn.sparse import SparseLinear
+from velora.models.weight import WeightInitType
 from velora.utils.torch import active_parameters, total_parameters
 from velora.wiring import Wiring
 
@@ -39,6 +40,7 @@ class LiquidNCPNetwork(nn.Module):
         out_features: int,
         *,
         sparsity_level: float = 0.5,
+        init_type: str | WeightInitType = "kaiming_uniform",
         device: torch.device | None = None,
     ) -> None:
         """
@@ -54,7 +56,8 @@ class LiquidNCPNetwork(nn.Module):
                 - When `0.1` neurons are very dense.
                 - When `0.9` they are very sparse.
 
-            device (torch.device, optional): the device to load tensors on.
+            init_type (str, optional): the type of weight initialization
+            device (torch.device, optional): the device to load tensors on
         """
         super().__init__()
 
@@ -77,6 +80,7 @@ class LiquidNCPNetwork(nn.Module):
             in_features,
             self.counts.inter,
             torch.abs(self.masks.inter.T),
+            init_type=init_type,
             device=device,
         ).to(device)
 
@@ -84,6 +88,7 @@ class LiquidNCPNetwork(nn.Module):
             self.counts.inter,
             self.counts.command,
             self.masks.command,
+            init_type=init_type,
             device=device,
         ).to(device)
         self.hidden_size = self.counts.command
@@ -92,6 +97,7 @@ class LiquidNCPNetwork(nn.Module):
             self.counts.command,
             self.counts.motor,
             torch.abs(self.masks.motor.T),
+            init_type=init_type,
             device=device,
         ).to(device)
 

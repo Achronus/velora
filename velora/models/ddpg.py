@@ -339,10 +339,10 @@ class LiquidDDPG(RLAgent):
             n_episodes (int, optional): the total number of episodes to train for
             callbacks (List[TrainCallback], optional): a list of training callbacks
                 that are applied during the training process
-            display_count (int, optional): controls the console display count for
-                monitoring training progress per episodic update
-            window_size (int, optional): controls the episode rate for calculating
-                the reward moving average per episodic update
+            display_count (int, optional): console training progress frequency
+                (in episodes)
+            window_size (int, optional): the reward moving average size
+                (in episodes)
             max_steps (int, optional): the total number of steps per episode
             noise_scale (float, optional): the exploration noise added when
                 selecting an action
