@@ -1,17 +1,31 @@
 import json
 from pathlib import Path
 from pydoc import locate
-from typing import TYPE_CHECKING, Any, Dict, Literal, Type
+from typing import TYPE_CHECKING, Any, Dict, Literal, Type, get_args
 
 import torch
+from torch.optim import Optimizer
 from safetensors.torch import load_file, save_file
 
 if TYPE_CHECKING:
-    from velora.models.base import RLAgent  # pragma: no cover
+    from velora.models.base import RLAgent, NCPModule  # pragma: no cover
 
 
-TensorDictKeys = Literal["actor", "critic", "actor_target", "critic_target"]
-MetadataKeys = Literal["model", "critic_optim", "actor_optim", "buffer"]
+TensorDictKeys = Literal[
+    "actor",
+    "critic",
+    "critic2",
+    "actor_target",
+    "critic_target",
+    "critic2_target",
+]
+MetadataKeys = Literal[
+    "model",
+    "actor_optim",
+    "critic_optim",
+    "critic2_optim",
+    "buffer",
+]
 ModelMetadataKeys = Literal[
     "state_dim",
     "n_neurons",
@@ -19,7 +33,7 @@ ModelMetadataKeys = Literal[
     "buffer_size",
     "device",
 ]
-OptimDictKeys = Literal["actor_optim", "critic_optim"]
+OptimDictKeys = Literal["actor_optim", "critic_optim", "critic2_optim"]
 
 
 def optim_to_tensor(name: str, state_dict: Dict[str, Any]) -> Dict[str, torch.Tensor]:
@@ -144,19 +158,12 @@ def save_model(
             f"A model state already exists in the '{save_path}' directory! Either change the 'dirpath', delete the folders contents, or use 'force=True' to allow overwriting."
         )
 
+    # Handle model state dicts, ignoring missing items
     model_tuples = [
-        ("actor", agent.actor.state_dict()),
-        ("critic", agent.critic.state_dict()),
+        (item, getattr(agent, item).state_dict())
+        for item in get_args(TensorDictKeys)
+        if hasattr(agent, item) and getattr(agent, item) is not None
     ]
-
-    # Add target networks if used
-    if agent.actor_target is not None:
-        model_tuples.extend(
-            [
-                ("actor_target", agent.actor_target.state_dict()),
-                ("critic_target", agent.critic_target.state_dict()),
-            ]
-        )
 
     tensor_dict: Dict[str, torch.Tensor] = {}
 
@@ -164,9 +171,16 @@ def save_model(
         for param_name, tensor in state_dict.items():
             tensor_dict[f"{model_name}.{param_name}"] = tensor.contiguous()
 
-    actor_dict = optim_to_tensor("actor_optim", agent.actor_optim.state_dict())
-    critic_dict = optim_to_tensor("critic_optim", agent.critic_optim.state_dict())
-    optim_dict = dict(**actor_dict, **critic_dict)
+    # Handle optimizers, ignoring missing items
+    optim_dict: Dict[OptimDictKeys, Dict[str, Any]] = {}
+    param_dict: Dict[OptimDictKeys, Dict[str, Any]] = {}
+
+    for key in get_args(OptimDictKeys):
+        module: "NCPModule" = getattr(agent, key)
+
+        if module is not None:
+            optim_dict |= optim_to_tensor(key, module.state_dict())
+            param_dict[key] = module.state_dict()["param_groups"]
 
     # Save tensors (weights and biases only)
     save_file(tensor_dict, model_state_path)
@@ -182,14 +196,15 @@ def save_model(
             "optim": f"torch.optim.{type(agent.actor_optim).__name__}",
             "device": str(agent.device) if agent.device is not None else "cpu",
         },
-        "actor_optim": agent.actor_optim.state_dict()["param_groups"],
-        "critic_optim": agent.critic_optim.state_dict()["param_groups"],
+        **param_dict,
     }
 
+    # Add buffer (if applicable)
     if buffer:
         metadata["buffer"] = agent.buffer.metadata()
         save_file(agent.buffer.state_dict(), buffer_state_path)
 
+    # Write to files
     if config and not config_path.exists():
         with config_path.open("w") as f:
             f.write(agent.config.model_dump_json(indent=2, exclude_none=True))
@@ -257,29 +272,22 @@ def load_model(
     tensor_dict: Dict[str, torch.Tensor] = load_file(model_state_path, device)
     model_state = model_from_tensor(tensor_dict)
 
-    model.actor.load_state_dict(model_state["actor"])
-    model.critic.load_state_dict(model_state["critic"])
-
-    if "actor_target" in model_state.keys():
-        model.actor_target.load_state_dict(model_state["actor_target"])
-        model.critic_target.load_state_dict(model_state["critic_target"])
+    for key in model_state.keys():
+        module: "NCPModule" = getattr(model, key)
+        module.load_state_dict(model_state[key])
 
     # Load optimizer parameters from safetensors
     tensor_dict: Dict[str, torch.Tensor] = load_file(optim_state_path, device)
     optim_state = optim_from_tensor(tensor_dict)
 
-    model.actor_optim.load_state_dict(
-        {
-            "state": optim_state["actor_optim"],
-            "param_groups": metadata["actor_optim"],
-        }
-    )
-    model.critic_optim.load_state_dict(
-        {
-            "state": optim_state["critic_optim"],
-            "param_groups": metadata["critic_optim"],
-        }
-    )
+    for key in optim_state.keys():
+        module: Optimizer = getattr(model, key)
+        module.load_state_dict(
+            {
+                "state": optim_state[key],
+                "param_groups": metadata[key],
+            }
+        )
 
     # Load buffer
     if buffer:

@@ -44,6 +44,9 @@ class NCPModule(nn.Module):
         """
         super().__init__()
 
+        self.in_features = in_features
+        self.n_neurons = n_neurons
+        self.out_features = out_features
         self.device = device
 
         self.ncp = LiquidNCPNetwork(
@@ -106,12 +109,15 @@ class RLAgent:
 
         self.actor: NCPModule | None = None
         self.critic: NCPModule | None = None
+        self.critic2: NCPModule | None = None
 
         self.actor_target: NCPModule | None = None
         self.critic_target: NCPModule | None = None
+        self.critic2_target: NCPModule | None = None
 
         self.actor_optim: optim.Optimizer | None = None
         self.critic_optim: optim.Optimizer | None = None
+        self.critic2_optim: optim.Optimizer | None = None
 
         self.active_params = 0
         self.total_params = 0
