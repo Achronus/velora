@@ -35,7 +35,7 @@ def init_linear_xavier(layer: nn.Module) -> None:
     Performs Xavier weight initialization as described in the paper:
     https://proceedings.mlr.press/v9/glorot10a.html.
     """
-    nn.init.xavier_normal(layer.weight)
+    nn.init.xavier_normal_(layer.weight)
 
     if layer.bias is not None:
         nn.init.zeros_(layer.bias)
@@ -47,7 +47,7 @@ def init_linear_sonar(layer: nn.Module, sonar_std: float = 0.006) -> None:
     https://arxiv.org/abs/2308.11466.
     """
     std = sonar_std * (3 / layer.in_features) ** 0.5
-    nn.init.uniform(layer.weight, a=-std, b=std)
+    nn.init.uniform_(layer.weight, a=-std, b=std)
 
     if layer.bias is not None:
         nn.init.zeros_(layer.bias)

@@ -184,6 +184,8 @@ class LiquidDDPG(RLAgent):
             device=self.device,
         ).to(self.device)
 
+        self.hidden_dim = self.actor.ncp.hidden_size
+
         self.actor_target = deepcopy(self.actor)
         self.critic_target = deepcopy(self.critic)
 
@@ -201,7 +203,7 @@ class LiquidDDPG(RLAgent):
             buffer_size,
             state_dim,
             action_dim,
-            self.actor.ncp.hidden_size,
+            self.hidden_dim,
             device=self.device,
         )
         self.noise = OUNoise(action_dim, device=device)

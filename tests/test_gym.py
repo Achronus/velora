@@ -86,6 +86,12 @@ class TestAddCoreEnvWrappers:
         assert isinstance(wrapped_twice.env, RecordEpisodeStatistics)
         assert wrapped_once is wrapped_twice  # No redundant wrapping
 
+    def test_invalid_environment(self, device: torch.device):
+        envs = gym.make_vec("CartPole-v1", num_envs=2, vectorization_mode="sync")
+
+        with pytest.raises(ValueError):
+            add_core_env_wrappers(envs, device)
+
 
 class TestSearchHelper:
     @pytest.fixture
