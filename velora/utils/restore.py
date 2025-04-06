@@ -70,14 +70,14 @@ def optim_from_tensor(tensor_dict: Dict[str, torch.Tensor]) -> Dict[OptimDictKey
     Returns:
         state_dict (Dict[str, Any]): the converted state as a normal dictionary
     """
-    state_dict: Dict[OptimDictKeys, Any] = {
-        "actor_optim": {},
-        "critic_optim": {},
-    }
+    state_dict: Dict[OptimDictKeys, Any] = {}
 
     for key, tensor in tensor_dict.items():
         optim_name, param_id, param_key = key.split(".")
         param_id = int(param_id)
+
+        if optim_name not in state_dict:
+            state_dict[optim_name] = {}
 
         if param_id not in state_dict[optim_name]:
             state_dict[optim_name][param_id] = {}
@@ -99,15 +99,14 @@ def model_from_tensor(
     Returns:
         state_dict (Dict[str, Any]): the converted state as a normal dictionary
     """
-    state_dict: Dict[TensorDictKeys, Any] = {
-        "actor": {},
-        "critic": {},
-        "actor_target": {},
-        "critic_target": {},
-    }
+    state_dict: Dict[TensorDictKeys, Any] = {}
 
     for key, tensor in tensor_dict.items():
         model_name, param_name = key.split(".", 1)
+
+        if model_name not in state_dict:
+            state_dict[model_name] = {}
+
         state_dict[model_name][param_name] = tensor
 
     return state_dict
