@@ -69,10 +69,7 @@ def wrap_gym_env(
     return reduce(apply_wrapper, wrappers, env)
 
 
-def add_core_env_wrappers(
-    env: gym.Env | gym.vector.VectorEnv,
-    device: torch.device,
-) -> gym.Env | gym.vector.VectorEnv:
+def add_core_env_wrappers(env: gym.Env, device: torch.device) -> gym.Env:
     """
     Wraps a [Gymnasium](https://gymnasium.farama.org/) environment with the following (in order) if not already applied:
 
@@ -82,20 +79,17 @@ def add_core_env_wrappers(
     Used in all pre-built algorithms.
 
     Parameters:
-        env (gym.Env | gym.vector.VectorEnv): the Gymnasium environment
+        env (gym.Env): the Gymnasium environment
         device (torch.device): the PyTorch device to perform computations on
 
     Returns:
-        env (gym.Env | gym.vector.VectorEnv): an updated Gymnasium environment
+        env (gym.Env): an updated Gymnasium environment
     """
     if isinstance(env, gym.Env):
         from gymnasium.wrappers import RecordEpisodeStatistics
         from gymnasium.wrappers.numpy_to_torch import NumpyToTorch
-    elif isinstance(env, gym.vector.VectorEnv):
-        from gymnasium.wrappers.vector import RecordEpisodeStatistics
-        from gymnasium.wrappers.vector.numpy_to_torch import NumpyToTorch
     else:
-        ValueError(f"{type(env)}' is not supported.")
+        raise ValueError(f"{type(env)}' is not supported.")
 
     has_stats = False
     has_torch = False

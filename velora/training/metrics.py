@@ -261,7 +261,7 @@ class TrainMetricsBase:
             )
 
 
-class EpisodeTrainMetrics(TrainMetricsBase):
+class TrainMetrics(TrainMetricsBase):
     """
     A utility class for working with and storing episodic training metrics for
     monitoring an agents training performance.
@@ -363,93 +363,6 @@ class EpisodeTrainMetrics(TrainMetricsBase):
             f"Episode: {ep}/{max_eps}, "
             f"Steps: {ep_length}/{step_total}, "
             f"Max Length: {max_length}/{max_steps}, "
-            f"Reward Avg: {self.reward_moving_avg():.2f}, "
-            f"Reward Max: {self.reward_moving_max():.2f}, "
-            f"Critic Loss: {self._critic_loss.item():.2f}, "
-            f"Actor Loss: {self._actor_loss.item():.2f}"
-        )
-
-
-class RolloutTrainMetrics(TrainMetricsBase):
-    """
-    A utility class for working with and storing rollout training metrics for
-    monitoring an agents training performance.
-    """
-
-    def __init__(
-        self,
-        session: Session,
-        window_size: int,
-        n_steps: int,
-        total_updates: int,
-        *,
-        device: torch.device | None = None,
-    ) -> None:
-        """
-        Parameters:
-            session (sqlmodel.Session): current metric database session
-            window_size (int): moving average window size
-            n_steps (int): maximum number of training steps
-            total_updates (int): the total policy updates to perform
-            device (torch.device, optional): the device to perform computations on
-        """
-        super().__init__(session, window_size, device=device)
-
-        self.total_updates = total_updates
-        self.n_steps = n_steps
-
-    def add_episode(
-        self,
-        ep_idx: int,
-        reward: torch.Tensor,
-        ep_length: torch.Tensor,
-        actor_loss: torch.Tensor,
-        critic_loss: torch.Tensor,
-    ) -> None:
-        """
-        Adds a rollout's update metrics to the database.
-
-        Parameters:
-            ep_idx (int): the current episode index
-            reward (torch.Tensor): episode reward
-            ep_length (torch.Tensor): number of steps after episode done
-        """
-        self._exp_created_check()
-
-        self._ep_rewards.add(reward)
-        self._ep_lengths.add(ep_length)
-
-        self._actor_loss = actor_loss
-        self._critic_loss = critic_loss
-
-        moving_avg = self.reward_moving_avg()
-        moving_std = self.reward_moving_std()
-
-        ep = Episode(
-            experiment_id=self.experiment_id,
-            episode_num=ep_idx,
-            reward=reward.item(),
-            length=ep_length.item(),
-            reward_moving_avg=moving_avg,
-            reward_moving_std=moving_std,
-            actor_loss=self._actor_loss.item(),
-            critic_loss=self._critic_loss.item(),
-        )
-        self.session.add(ep)
-        self.session.commit()
-
-    def info(self, update_idx: int) -> None:
-        """
-        Outputs basic information to the console.
-
-        Parameters:
-            update_idx (int): the current update index
-        """
-        update_idx = number_to_short(update_idx)
-        total_updates = number_to_short(self.total_updates)
-
-        print(
-            f"Updates: {update_idx}/{total_updates}, "
             f"Reward Avg: {self.reward_moving_avg():.2f}, "
             f"Reward Max: {self.reward_moving_max():.2f}, "
             f"Critic Loss: {self._critic_loss.item():.2f}, "

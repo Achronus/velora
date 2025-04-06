@@ -14,7 +14,7 @@ from velora.training.handler import TrainHandler
 from velora.training.metrics import (
     StepStorage,
     MovingMetric,
-    EpisodeTrainMetrics,
+    TrainMetrics,
 )
 
 
@@ -170,11 +170,11 @@ class TestMovingMetric:
         assert len(metric) == 3
 
 
-class TestEpisodeTrainMetrics:
+class TestTrainMetrics:
     @pytest.fixture
-    def metrics(self, experiment) -> EpisodeTrainMetrics:
+    def metrics(self, experiment) -> TrainMetrics:
         session, _ = experiment
-        return EpisodeTrainMetrics(
+        return TrainMetrics(
             session,
             window_size=10,
             n_episodes=100,
@@ -204,7 +204,7 @@ class TestEpisodeTrainMetrics:
 
     def test_init(self, experiment):
         session, _ = experiment
-        metrics = EpisodeTrainMetrics(
+        metrics = TrainMetrics(
             session,
             window_size=10,
             n_episodes=100,
@@ -222,9 +222,7 @@ class TestEpisodeTrainMetrics:
         assert isinstance(metrics._current_losses, StepStorage)
         assert metrics._current_losses.capacity == 200
 
-    def test_start_experiment(
-        self, metrics: EpisodeTrainMetrics, mock_config: RLAgentConfig
-    ):
+    def test_start_experiment(self, metrics: TrainMetrics, mock_config: RLAgentConfig):
         """Test starting an experiment."""
         # Start the experiment
         metrics.start_experiment(mock_config)
@@ -238,7 +236,7 @@ class TestEpisodeTrainMetrics:
         assert experiment.agent == mock_config.agent
         assert experiment.env == mock_config.env
 
-    def test_add_step(self, metrics: EpisodeTrainMetrics):
+    def test_add_step(self, metrics: TrainMetrics):
         """Test adding step metrics."""
         # Fill in test values
         critic_loss = torch.tensor(0.8)
@@ -255,7 +253,7 @@ class TestEpisodeTrainMetrics:
         assert metrics._current_losses.position == 1
         assert metrics._current_losses.size == 1
 
-    def test_add_episode(self, metrics: EpisodeTrainMetrics, experiment):
+    def test_add_episode(self, metrics: TrainMetrics, experiment):
         """Test adding episode metrics."""
         # Setup - start an experiment first
         session, experiment_id = experiment
@@ -296,7 +294,7 @@ class TestEpisodeTrainMetrics:
         assert metrics._current_losses.position == 0
         assert metrics._current_losses.size == 0
 
-    def test_add_episode_without_experiment(self, metrics: EpisodeTrainMetrics):
+    def test_add_episode_without_experiment(self, metrics: TrainMetrics):
         """Test adding episode metrics without first creating an experiment."""
         # Experiment ID is None (not set)
         with pytest.raises(RuntimeError) as excinfo:
@@ -306,7 +304,7 @@ class TestEpisodeTrainMetrics:
 
         assert "An experiment must be created first" in str(excinfo.value)
 
-    def test_reward_moving_avg(self, metrics: EpisodeTrainMetrics):
+    def test_reward_moving_avg(self, metrics: TrainMetrics):
         """Test calculating reward moving average."""
         # Add some rewards
         metrics._ep_rewards.add(torch.tensor(80.0))
@@ -316,7 +314,7 @@ class TestEpisodeTrainMetrics:
         avg = metrics.reward_moving_avg()
         assert torch.isclose(torch.tensor(avg), torch.tensor(17.0)), avg
 
-    def test_reward_moving_std(self, metrics: EpisodeTrainMetrics):
+    def test_reward_moving_std(self, metrics: TrainMetrics):
         """Test calculating reward moving standard deviation."""
         # Add some rewards
         metrics._ep_rewards.add(torch.tensor(80.0))
@@ -326,7 +324,7 @@ class TestEpisodeTrainMetrics:
         std = metrics.reward_moving_std()
         assert torch.isclose(torch.tensor(std), torch.tensor(35.91656)), std
 
-    def test_reward_moving_max(self, metrics: EpisodeTrainMetrics):
+    def test_reward_moving_max(self, metrics: TrainMetrics):
         """Test calculating reward moving max."""
         # Add some rewards
         metrics._ep_rewards.add(torch.tensor(80.0))
@@ -336,7 +334,7 @@ class TestEpisodeTrainMetrics:
         max_reward = metrics.reward_moving_max()
         assert torch.isclose(torch.tensor(max_reward), torch.tensor(90.0))
 
-    def test_info(self, metrics: EpisodeTrainMetrics):
+    def test_info(self, metrics: TrainMetrics):
         """Test info method that outputs to console."""
         # Setup
         metrics._ep_lengths = torch.zeros(

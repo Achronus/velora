@@ -44,6 +44,7 @@ class TestTrainingInfo:
             window_size=100,
             callbacks=[],
             device="cpu",
+            seed=64,
         )
 
         mock_print.assert_called_once()
@@ -54,6 +55,7 @@ class TestTrainingInfo:
         assert "Using 'MockBuffer' with 'capacity=100K'" in printed_output
         assert "batch_size=64" in printed_output
         assert "device 'cpu'" in printed_output
+        assert "seed of '64" in printed_output
         assert "window_size=100" in printed_output
         assert "5,000/10,000" in printed_output
         assert "Active Callbacks:" not in printed_output  # No callbacks
@@ -69,6 +71,7 @@ class TestTrainingInfo:
             window_size=100,
             callbacks=mock_callbacks,
             device="cpu",
+            seed=64,
         )
 
         mock_print.assert_called_once()
@@ -93,6 +96,7 @@ class TestTrainingInfo:
             window_size=100,
             callbacks=[],
             device="cuda",
+            seed=64,
         )
 
         mock_print.assert_called_once()
@@ -112,6 +116,7 @@ class TestTrainingInfo:
             window_size=100,
             callbacks=[],
             device="cpu",
+            seed=64,
         )
 
         mock_print.assert_called_once()
@@ -131,6 +136,7 @@ class TestTrainingInfo:
             window_size=100,
             callbacks=[],
             device="cuda:0",
+            seed=64,
         )
 
         mock_print.assert_called_once()

@@ -1,4 +1,4 @@
-from velora.utils.capture import record_last_episode
+from velora.utils.capture import evaluate_agent, record_last_episode
 from velora.utils.core import set_device, set_seed
 from velora.utils.format import number_to_short
 from velora.utils.restore import load_model, save_model
@@ -26,4 +26,5 @@ __all__ = [
     "number_to_short",
     "save_model",
     "load_model",
+    "evaluate_agent",
 ]

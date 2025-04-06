@@ -470,7 +470,7 @@ class TestSparseLinear:
         initial_bias = layer.bias.clone()
 
         # Reset parameters
-        layer.reset_parameters()
+        layer.reset_parameters("kaiming_uniform")
 
         # Check that parameters have changed
         assert not torch.allclose(layer.weight, initial_weight)

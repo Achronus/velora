@@ -167,8 +167,9 @@ class TestLiquidDDPG:
             reward = 2.0  # Single float value
             next_state = torch.zeros(ddpg.state_dim)
             done = False
+            hidden = torch.zeros(ddpg.hidden_dim)
 
-            ddpg.buffer.add(state, action, reward, next_state, done)
+            ddpg.buffer.add(state, action, reward, next_state, done, hidden)
 
         # Perform training step
         result = ddpg._train_step(batch_size, gamma)
@@ -189,7 +190,9 @@ class TestLiquidDDPG:
             reward = 2.0
             next_state = torch.zeros(ddpg.state_dim)
             done = False
-            ddpg.buffer.add(state, action, reward, next_state, done)
+            hidden = torch.zeros(ddpg.hidden_dim)
+
+            ddpg.buffer.add(state, action, reward, next_state, done, hidden)
 
         # Should return None when buffer is insufficient
         result = ddpg._train_step(batch_size, gamma)
@@ -226,7 +229,9 @@ class TestLiquidDDPG:
             reward = float(i * 0.5)
             next_state = torch.ones(ddpg.state_dim)
             done = i == 9
-            ddpg.buffer.add(state, action, reward, next_state, done)
+            hidden = torch.zeros(ddpg.hidden_dim)
+
+            ddpg.buffer.add(state, action, reward, next_state, done, hidden)
 
         # Get the initial buffer size to compare later
         buffer_size = len(ddpg.buffer)
@@ -410,10 +415,8 @@ class TestLiquidDDPG:
 
                 try:
                     # Skip the db operations completely
-                    with patch(
-                        "velora.training.metrics.EpisodeTrainMetrics.add_episode"
-                    ):
-                        with patch("velora.training.metrics.EpisodeTrainMetrics.info"):
+                    with patch("velora.training.metrics.TrainMetrics.add_episode"):
+                        with patch("velora.training.metrics.TrainMetrics.info"):
                             # Patch TrainHandler.episode to set ep_reward on the state
                             # Include the correct signature with ep_reward parameter
                             def patched_episode(
@@ -507,8 +510,8 @@ class TestLiquidDDPG:
             ),
         ):
             # Skip database operations by patching add_episode
-            with patch("velora.training.metrics.EpisodeTrainMetrics.add_episode"):
-                with patch("velora.training.metrics.EpisodeTrainMetrics.info"):
+            with patch("velora.training.metrics.TrainMetrics.add_episode"):
+                with patch("velora.training.metrics.TrainMetrics.info"):
                     # Prepare a patched episode method with the correct signature
                     def mock_episode(self, current_ep, ep_reward=None, *args, **kwargs):
                         # Set ep_reward directly on the state
@@ -539,9 +542,8 @@ class TestLiquidDDPG:
             with pytest.raises(FileExistsError, match=r"A model state already exists"):
                 ddpg.save(save_path)
 
-    def test_invalid_checkpoint_error(self, ddpg: LiquidDDPG):
+    def test_invalid_checkpoint_error(self):
         with tempfile.TemporaryDirectory() as temp_dir:
-            save_path = Path(temp_dir) / "model_save"
             invalid_path = Path(temp_dir) / "invalid_save"
 
             # Create an invalid safetensors file

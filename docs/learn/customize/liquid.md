@@ -230,4 +230,4 @@ Notice how we don't need to manually define a hidden state. It's done for us aut
 
 ---
 
-Next, we'll look at the `ReplayBuffer` and `RolloutBuffer` classes 🤩.
+Next, we'll look at working with buffers! 🤩

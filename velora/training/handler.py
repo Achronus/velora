@@ -17,11 +17,7 @@ from velora.metrics.db import get_db_engine
 from velora.models.base import RLAgent
 from velora.state import TrainState
 from velora.time import ElapsedTime
-from velora.training.metrics import (
-    EpisodeTrainMetrics,
-    RolloutTrainMetrics,
-    TrainMetricsBase,
-)
+from velora.training.metrics import TrainMetrics, TrainMetricsBase
 from velora.utils.capture import record_last_episode
 
 
@@ -215,7 +211,7 @@ class TrainHandler(TrainHandlerBase):
         self.max_steps = max_steps
 
     @property
-    def metrics(self) -> EpisodeTrainMetrics:
+    def metrics(self) -> TrainMetrics:
         """
         Training metric class instance.
 
@@ -232,7 +228,7 @@ class TrainHandler(TrainHandlerBase):
             self (Self): the initialized context.
         """
         self.session = Session(self.engine)
-        self._metrics = EpisodeTrainMetrics(
+        self._metrics = TrainMetrics(
             self.session,
             self.window_size,
             self.n_episodes,
@@ -287,103 +283,3 @@ class TrainHandler(TrainHandlerBase):
         """
         self.state.update(status="step", current_step=current_step)
         self._run_callbacks()
-
-
-class VecTrainHandler(TrainHandlerBase):
-    """
-    A context manager for handling an agents training state. Compatible with
-    vectorized environments.
-    """
-
-    def __init__(
-        self,
-        agent: RLAgent,
-        envs: gym.vector.VectorEnv,
-        n_steps: int,
-        batch_size: int,
-        window_size: int,
-        callbacks: List["TrainCallback"] | None,
-    ) -> None:
-        """
-        Parameters:
-            agent (RLAgent): the agent being trained
-            env (gym.vector.VectorEnv): the vectorized environments to train
-                the agent on
-            n_steps (int): maximum number of training steps
-            batch_size (int): number of samples per mini-batch
-            window_size (int): episode window size rate
-            callbacks (List[TrainCallback] | None): a list of training callbacks.
-                If `None` sets to an empty list
-        """
-        super().__init__(agent, envs, window_size, callbacks)
-
-        self.n_steps = n_steps
-        self.batch_size = batch_size
-
-        self.total_updates = n_steps // batch_size
-
-        # Setup evaluation environment
-        self.eval_env = gym.make(envs.spec.id, render_mode="rgb_array")
-
-    @property
-    def metrics(self) -> RolloutTrainMetrics:
-        """
-        Training metric class instance.
-
-        Returns:
-            metrics (RolloutTrainMetrics): current training metric state.
-        """
-        return self._metrics
-
-    def start(self) -> None:
-        super().start()
-
-        # Update eval environment with callback wrappers
-        self.eval_env = self.state.env
-        self.eval_env = add_core_env_wrappers(self.eval_env, self.device)
-
-    def __enter__(self) -> Self:
-        """
-        Setup the training context, initializing the environment.
-
-        Returns:
-            self (Self): the initialized context.
-        """
-        self.session = Session(self.engine)
-        self._metrics = RolloutTrainMetrics(
-            self.session,
-            self.window_size,
-            self.n_steps,
-            self.total_updates,
-            device=self.device,
-        )
-        self._metrics.start_experiment(self.agent.config)
-
-        self.state = TrainState(
-            agent=self.agent,
-            env=self.eval_env,
-            session=self.session,
-            total_episodes=self.total_updates,
-            experiment_id=self._metrics.experiment_id,
-        )
-
-        return super().__enter__()
-
-    def __exit__(
-        self,
-        exc_type: Type[BaseException] | None,
-        exc_val: BaseException | None,
-        exc_tb: TracebackType | None,
-    ) -> None:
-        super().__exit__(exc_type, exc_val, exc_tb)
-
-        self.eval_env.close()
-
-    def increment_step(self, current_step: int) -> None:
-        """
-        Increments the training states step index.
-
-        Parameters:
-            current_step (int): the current training timestep index
-        """
-        self.state.update(current_step=current_step)

@@ -4,6 +4,12 @@ Buffers are a central piece for RL algorithms and are used heavily in our own im
 
 In Off-Policy agents we use a `ReplayBuffer` and in On-Policy, a `RolloutBuffer`.
 
+???+ warning "Rollout Buffers"
+
+    We've recently discontinued the `RolloutBuffer` and removed it from the framework due to instability issues with LNNs and on-policy agents.
+
+    So, you'll only see the docs for the `ReplayBuffer` here!
+
 We have our own implementations of these that are easy to work with 😊.
 
 ## Replay Buffer
@@ -148,124 +154,6 @@ buffer.add(*exp)
 batch = buffer.sample(batch_size=5)
 
 len(buffer)  # 6
-```
-
-This code should work 'as is'.
-
-## Rollout Buffer
-
-???+ api "API Docs"
-
-    [`velora.buffer.RolloutBuffer(capacity, state_dim, action_dim)`](../reference/buffer.md#velora.buffer.RolloutBuffer)
-
-The `RolloutBuffer` is almost identical to the `ReplayBuffer` with the addition of an `empty()` method that must be used after the buffer is full.
-
-To create one, give it a `capacity`, `state_dim`, `action_dim`, `hidden_dim` and a `torch.device` (optional):
-
-```python
-from velora.buffer import RolloutBuffer
-from velora.utils import set_device
-
-device = set_device()
-buffer = RolloutBuffer(
-    capacity=10, 
-    state_dim=11,
-    action_dim=3,
-    hidden_dim=8,
-    device=device
-)
-```
-
-### Add and Empty Rollouts
-
-???+ api "API Docs"
-
-    [`velora.buffer.RolloutBuffer.add(state, action, reward, next_state, done)`](../reference/buffer.md#velora.buffer.BufferBase.add)
-
-    [`velora.buffer.RolloutBuffer.empty()`](../reference/buffer.md#velora.buffer.RolloutBuffer.empty)
-
-To add an item, we use the `add()` method with a set of experience from a `Tuple` or the individual items:
-
-```python
-import torch
-
-exp = (
-    torch.zeros((1, 4)),
-    torch.tensor((1.)),
-    2.,
-    torch.zeros((1, 4)),
-    False,
-)
-
-buffer.add(*exp)
-buffer.add(
-    torch.zeros((1, 4)),
-    torch.tensor((1.)),
-    2.,
-    torch.zeros((1, 4)),
-    False,
-)
-```
-
-Once the buffer is full, we need to `empty()` it before we can add new samples:
-
-```python
-buffer.empty()
-```
-
-### Get All Samples
-
-???+ api "API Docs"
-
-    [`velora.buffer.RolloutBuffer.sample()`](../reference/buffer.md#velora.buffer.RolloutBuffer.sample)
-
-We can get the complete experience from the rollout buffer using the `sample()` method:
-
-```python
-rollouts = buffer.sample()
-```
-
-This gives us a `BatchExperience` object.
-
-### Check Buffer Size
-
-Lastly, we can check the `current size` of the buffer:
-
-```python
-len(buffer)  # 1
-```
-
-### Full Rollout Example
-
-Here's a complete example of the code we've just seen:
-
-```python
-from velora.buffer import RolloutBuffer
-from velora.utils import set_device
-
-import torch
-
-device = set_device()
-buffer = RolloutBuffer(1, 4, 1, 8, device=device)
-
-exp = (
-    torch.zeros((1, 4)),
-    torch.tensor((1.)),
-    2.,
-    torch.zeros((1, 4)),
-    False,
-)
-
-buffer.add(*exp)
-# buffer.add(*exp)  # BufferError
-
-batch = buffer.sample()
-
-len(buffer)  # 1
-
-buffer.empty()
-len(buffer)  # 0
-# buffer.sample()  # BufferError
 ```
 
 This code should work 'as is'.
