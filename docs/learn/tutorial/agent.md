@@ -32,16 +32,10 @@ This code should work 'as is'.
 
 Want to use a different agent? Just swap out `LiquidDDPG` with a different one!
 
-???+ warning "LiquidPPO"
-
-    `LiquidPPO` will be introduced in a later version of the framework. 
-    
-    We use it here strictly for demonstration purposes.
-
 ```python
-from velora.models import LiquidPPO
+from velora.models import LiquidSAC
 
-model = LiquidPPO(4, 10, 1)
+model = LiquidSAC(4, 10, 1)
 ```
 
 It really is that easy! 🤩
@@ -87,12 +81,12 @@ Each agent has it's own set of unique hyperparameters for it's `train()` method.
 Like before, need a different agent? Just swap it out!
 
 ```python
-from velora.models import LiquidPPO
+from velora.models import LiquidSAC
 import gymnasium as gym
 
 env = gym.make('InvertedPendulum-v5')
 
-model = LiquidPPO(4, 10, 1)
+model = LiquidSAC(4, 10, 1)
 model.train(env, 128)
 ```
 

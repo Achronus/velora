@@ -221,7 +221,7 @@ class LiquidDDPG(RLAgent):
                 type="actor-critic",
                 **locals(),
                 target_networks=True,
-                action_noise="OUNoise",
+                exploration_type="OUNoise",
                 actor=self.actor.config(),
                 critic=self.critic.config(),
             ),

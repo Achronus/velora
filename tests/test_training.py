@@ -4,7 +4,7 @@ import pytest
 import torch
 
 from velora.metrics.db import get_current_episode
-from velora.metrics.models import Experiment
+from velora.metrics.models import Episode, Experiment
 from velora.models.base import RLAgent
 
 from velora.models.config import RLAgentConfig
@@ -49,17 +49,19 @@ class TestStepStorage:
     def test_add(self, storage: StepStorage):
         critic_loss = torch.tensor(2.5)
         actor_loss = torch.tensor(3.5)
+        entropy_loss = torch.tensor(4.5)
 
-        storage.add(critic_loss, actor_loss)
+        storage.add(critic_loss, actor_loss, entropy_loss)
 
         assert storage.critic_losses[0].item() == 2.5
         assert storage.actor_losses[0].item() == 3.5
+        assert storage.entropy_losses[0].item() == 4.5
         assert storage.position == 1
         assert storage.size == 1
 
     def test_add_multiple(self, storage: StepStorage):
         for i in range(12):  # More than capacity to test wrapping
-            storage.add(torch.tensor(i), torch.tensor(i + 10))
+            storage.add(torch.tensor(i), torch.tensor(i + 10), torch.tensor(i + 2))
 
         # Check that position wrapped around
         assert storage.position == 2
@@ -193,6 +195,7 @@ class TestTrainMetrics:
                 batch_size=32,
                 n_episodes=100,
                 max_steps=200,
+                display_count=10,
                 window_size=10,
                 gamma=0.99,
                 tau=0.005,
@@ -237,21 +240,37 @@ class TestTrainMetrics:
         assert experiment.env == mock_config.env
 
     def test_add_step(self, metrics: TrainMetrics):
-        """Test adding step metrics."""
         # Fill in test values
         critic_loss = torch.tensor(0.8)
         actor_loss = torch.tensor(0.6)
+        entropy_loss = torch.tensor(0.6)
 
         # Add a step
         metrics.add_step(critic=critic_loss, actor=actor_loss)
 
-        # Verify losses were stored
+        # Verify losses were stored (no entropy)
         assert torch.isclose(
             metrics._current_losses.critic_losses[0], torch.tensor(0.8)
         )
         assert torch.isclose(metrics._current_losses.actor_losses[0], torch.tensor(0.6))
+        assert torch.isclose(
+            metrics._current_losses.entropy_losses[0], torch.tensor(0.0)
+        )
         assert metrics._current_losses.position == 1
         assert metrics._current_losses.size == 1
+
+        # Verify additional losses (with entropy)
+        metrics.add_step(critic=critic_loss, actor=actor_loss, entropy=entropy_loss)
+
+        assert torch.isclose(
+            metrics._current_losses.critic_losses[1], torch.tensor(0.8)
+        )
+        assert torch.isclose(metrics._current_losses.actor_losses[1], torch.tensor(0.6))
+        assert torch.isclose(
+            metrics._current_losses.entropy_losses[1], torch.tensor(0.6)
+        )
+        assert metrics._current_losses.position == 2
+        assert metrics._current_losses.size == 2
 
     def test_add_episode(self, metrics: TrainMetrics, experiment):
         """Test adding episode metrics."""
@@ -260,7 +279,11 @@ class TestTrainMetrics:
         metrics.experiment_id = experiment_id
 
         # Add step metrics first (to have losses to average)
-        metrics._current_losses.add(torch.tensor(0.7), torch.tensor(0.5))
+        metrics._current_losses.add(
+            torch.tensor(0.7),
+            torch.tensor(0.5),
+            torch.tensor(0.6),
+        )
 
         # Add an episode
         ep_idx = 5
@@ -276,13 +299,14 @@ class TestTrainMetrics:
             results.append(ep)
 
         assert len(results) == 1
-        episode = results[0]
+        episode: Episode = results[0]
         assert episode.experiment_id == experiment_id
         assert episode.episode_num == ep_idx
         assert episode.reward == reward.item()
         assert episode.length == ep_length.item()
         assert torch.isclose(torch.tensor(episode.actor_loss), torch.tensor(0.05))
         assert torch.isclose(torch.tensor(episode.critic_loss), torch.tensor(0.07))
+        assert torch.isclose(torch.tensor(episode.entropy_loss), torch.tensor(0.06))
 
         # Verify reward was added to moving metric
         assert torch.isclose(
@@ -334,9 +358,7 @@ class TestTrainMetrics:
         max_reward = metrics.reward_moving_max()
         assert torch.isclose(torch.tensor(max_reward), torch.tensor(90.0))
 
-    def test_info(self, metrics: TrainMetrics):
-        """Test info method that outputs to console."""
-        # Setup
+    def test_info_no_entropy(self, metrics: TrainMetrics):
         metrics._ep_lengths = torch.zeros(
             (100,), dtype=torch.int, device=torch.device("cpu")
         )
@@ -345,6 +367,37 @@ class TestTrainMetrics:
         metrics._ep_rewards.add(torch.tensor(85.0))
         metrics._critic_loss = torch.tensor(0.7)
         metrics._actor_loss = torch.tensor(0.6)
+        metrics._entropy_loss = torch.tensor(0.0)
+
+        # Mock print
+        with patch("builtins.print") as mock_print:
+            # Execute
+            metrics.info(current_ep=50)
+
+            # Verify print was called
+            mock_print.assert_called_once()
+
+            # Check the print message format (don't check exact format as it might change)
+            print_args = mock_print.call_args[0][0]
+            assert "Episode" in print_args, mock_print.call_args
+            assert "Steps" in print_args
+            assert "Max Length:" in print_args
+            assert "Reward Avg:" in print_args
+            assert "Reward Max:" in print_args
+            assert "Actor Loss:" in print_args
+            assert "Critic Loss:" in print_args
+            assert "Entropy Loss:" not in print_args
+
+    def test_info_with_entropy(self, metrics: TrainMetrics):
+        metrics._ep_lengths = torch.zeros(
+            (100,), dtype=torch.int, device=torch.device("cpu")
+        )
+        metrics._ep_lengths[49] = 200  # Set episode 50's length
+        metrics._ep_lengths.latest = 200
+        metrics._ep_rewards.add(torch.tensor(85.0))
+        metrics._critic_loss = torch.tensor(0.7)
+        metrics._actor_loss = torch.tensor(0.6)
+        metrics._entropy_loss = torch.tensor(0.6)
 
         # Mock print
         with patch("builtins.print") as mock_print:
@@ -361,8 +414,9 @@ class TestTrainMetrics:
             assert "Max Length:" in print_args
             assert "Reward Avg:" in print_args
             assert "Reward Max:" in print_args
-            assert "Critic Loss:" in print_args
             assert "Actor Loss:" in print_args
+            assert "Critic Loss:" in print_args
+            assert "Entropy Loss:" in print_args
 
 
 class TestTrainHandler:

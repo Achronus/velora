@@ -477,6 +477,7 @@ class TestCometAnalytics:
         mock_ep.reward_moving_std = 5.0
         mock_ep.actor_loss = 0.6
         mock_ep.critic_loss = 0.7
+        mock_ep.entropy_loss = 0.6
         return mock_ep
 
     def test_comet_import_error(self):

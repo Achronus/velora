@@ -41,6 +41,7 @@ class Episode(SQLModel, table=True):
             window size
         actor_loss (float): the average Actor loss for the episode
         critic_loss (float): the average Critic loss for the episode
+        entropy_loss (float): the average Entropy loss for the episode
         created_at (datetime): the date and time when the the entry was created
     """
 
@@ -59,6 +60,7 @@ class Episode(SQLModel, table=True):
     # Loss metrics
     actor_loss: float
     critic_loss: float
+    entropy_loss: float = Field(default=0.0)
 
     # Behaviour metrics
     # explore_rate: float

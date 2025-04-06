@@ -386,6 +386,14 @@ class CometAnalytics(TrainCallback):
                     epoch=state.current_ep,
                 )
 
+                # Only if required (SAC)
+                if episode.entropy_loss != 0:
+                    self.experiment.log_metric(
+                        "ep_entropy_loss",
+                        episode.entropy_loss,
+                        epoch=state.current_ep,
+                    )
+
         # Finalize training
         if state.status == "complete":
             # Log video recordings

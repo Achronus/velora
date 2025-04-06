@@ -24,6 +24,7 @@ def training_info(
     callbacks: List["TrainCallback"],
     device: str,
     seed: int,
+    extras: str = "",
 ) -> None:
     """
     Display's starting information to the console for a training run. Focuses
@@ -38,6 +39,7 @@ def training_info(
         callbacks (List[TrainCallback]): applied training callbacks
         device (str): the device to perform computations on
         seed (int): random number seed used
+        extras (str, optional): extra information unique to the agent
     """
     output = NAME_STR.strip()
     params_str = f"{agent.active_params:,}/{agent.total_params:,}"
@@ -58,6 +60,7 @@ def training_info(
     output += f"Training '{agent.__class__.__name__}' agent on '{env_id}' for '{number_to_short(n_episodes)}' episodes.\n"
     output += f"Using '{agent.buffer.__class__.__name__}' with 'capacity={number_to_short(agent.buffer.capacity)}'.\n"
     output += f"Sampling episodes with '{batch_size=}'.\n"
+    output += extras
     output += f"Generating random values with a seed of '{seed}'.\n"
     output += f"Running computations on device '{device}'.\n"
     output += f"Moving averages computed based on 'window_size={number_to_short(window_size)}'.\n"

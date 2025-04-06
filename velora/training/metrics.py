@@ -19,6 +19,7 @@ class StepStorage:
     Attributes:
         critic_losses (torch.Tensor): a tensor of agent Critic loss values
         actor_losses (torch.Tensor): a tensor of agent Actor loss values
+        entropy_losses (torch.Tensor): a tensor of agent Entropy loss values
     """
 
     def __init__(self, capacity: int, *, device: torch.device | None = None) -> None:
@@ -36,6 +37,7 @@ class StepStorage:
 
         self.critic_losses = torch.zeros((capacity), device=device)
         self.actor_losses = torch.zeros((capacity), device=device)
+        self.entropy_losses = torch.zeros((capacity), device=device)
 
     def critic_avg(self, ep_length: int) -> torch.Tensor:
         """
@@ -61,16 +63,35 @@ class StepStorage:
         """
         return self.actor_losses[:ep_length].mean()
 
-    def add(self, critic: torch.Tensor, actor: torch.Tensor) -> None:
+    def entropy_avg(self, ep_length: int) -> torch.Tensor:
+        """
+        Computes the entropy loss average. Useful for computing episodic averages.
+
+        Parameters:
+            ep_length (int): size of the episode
+
+        Returns:
+            avg (torch.Tensor): entropy loss step average
+        """
+        return self.entropy_losses[:ep_length].mean()
+
+    def add(
+        self,
+        critic: torch.Tensor,
+        actor: torch.Tensor,
+        entropy: torch.Tensor,
+    ) -> None:
         """
         Adds one of each metric into storage.
 
         Parameters:
             critic (torch.Tensor): critic loss
             actor (torch.Tensor): actor loss
+            entropy (torch.Tensor): entropy loss
         """
-        self.critic_losses[self.position] = critic.to(self.device)
-        self.actor_losses[self.position] = actor.to(self.device)
+        self.critic_losses[self.position] = critic
+        self.actor_losses[self.position] = actor
+        self.entropy_losses[self.position] = entropy
 
         # Update position
         self.position = (self.position + 1) % self.capacity
@@ -80,6 +101,7 @@ class StepStorage:
         """Empty storage."""
         self.critic_losses.zero_()
         self.actor_losses.zero_()
+        self.entropy_losses.zero_()
 
         self.position = 0
         self.size = 0
@@ -194,6 +216,7 @@ class TrainMetricsBase:
 
         self._critic_loss: torch.Tensor = torch.zeros(1, device=self.device)
         self._actor_loss: torch.Tensor = torch.zeros(1, device=self.device)
+        self._entropy_loss: torch.Tensor = torch.zeros(1, device=self.device)
 
         self.step_total: torch.Tensor = torch.zeros(
             1,
@@ -291,15 +314,25 @@ class TrainMetrics(TrainMetricsBase):
 
         self._current_losses = StepStorage(max_steps, device=device)
 
-    def add_step(self, critic: torch.Tensor, actor: torch.Tensor) -> None:
+    def add_step(
+        self,
+        critic: torch.Tensor,
+        actor: torch.Tensor,
+        entropy: torch.Tensor | None = None,
+    ) -> None:
         """
         Add timesteps metrics to local storage.
 
         Parameters:
             critic (torch.Tensor): critic step loss
             actor (torch.Tensor): actor step loss
+            entropy (torch.Tensor, optional): entropy step loss
         """
-        self._current_losses.add(critic, actor)
+        self._current_losses.add(
+            critic,
+            actor,
+            entropy or torch.zeros(1, device=self.device),
+        )
 
     def add_episode(
         self,
@@ -322,6 +355,7 @@ class TrainMetrics(TrainMetricsBase):
 
         self._actor_loss = self._current_losses.actor_avg(ep_length.item())
         self._critic_loss = self._current_losses.critic_avg(ep_length.item())
+        self._entropy_loss = self._current_losses.entropy_avg(ep_length.item())
         self.step_total += ep_length
 
         moving_avg = self.reward_moving_avg()
@@ -336,6 +370,7 @@ class TrainMetrics(TrainMetricsBase):
             reward_moving_std=moving_std,
             actor_loss=self._actor_loss.item(),
             critic_loss=self._critic_loss.item(),
+            entropy_loss=self._entropy_loss.item(),
         )
         self.session.add(ep)
         self.session.commit()
@@ -359,12 +394,17 @@ class TrainMetrics(TrainMetricsBase):
         max_length = number_to_short(int(self._ep_lengths.max().item()))
         max_steps = number_to_short(self.max_steps)
 
+        entropy_loss = self._entropy_loss.item()
+
+        entropy_str = f", Entropy Loss: {entropy_loss:.2f}" if entropy_loss != 0 else ""
+
         print(
             f"Episode: {ep}/{max_eps}, "
             f"Steps: {ep_length}/{step_total}, "
             f"Max Length: {max_length}/{max_steps}, "
             f"Reward Avg: {self.reward_moving_avg():.2f}, "
             f"Reward Max: {self.reward_moving_max():.2f}, "
-            f"Critic Loss: {self._critic_loss.item():.2f}, "
-            f"Actor Loss: {self._actor_loss.item():.2f}"
+            f"Actor Loss: {self._actor_loss.item():.2f}, "
+            f"Critic Loss: {self._critic_loss.item():.2f}"
+            f"{entropy_str}"
         )
