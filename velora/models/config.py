@@ -110,16 +110,16 @@ class SACExtraParameters(BaseModel):
         initial_alpha: the starting entropy coefficient value
         target_entropy: the target entropy for automatic adjustment
         log_std_min: lower bound for the log standard deviation of the
-            action distribution
+            action distribution. Default is `None`
         log_std_max: upper bound for the log standard deviation of the
-            action distribution
+            action distribution. Default is `None`
     """
 
     alpha_lr: float
     initial_alpha: float
     target_entropy: float
-    log_std_min: float
-    log_std_max: float
+    log_std_min: float | None = None
+    log_std_max: float | None = None
 
 
 class ModelDetails(BaseModel):
