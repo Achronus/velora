@@ -20,9 +20,9 @@ if TYPE_CHECKING:
     from velora.callbacks import TrainCallback  # pragma: no cover
 
 from velora.buffer.replay import ReplayBuffer
-from velora.models.base import LiquidNCPModule, RLAgent
+from velora.models.base import LiquidNCPModule, NCPModule, RLAgent
 from velora.models.config import (
-    ModelDetails,
+    BasicModelDetails,
     RLAgentConfig,
     SACExtraParameters,
     TorchConfig,
@@ -198,6 +198,47 @@ class SACCritic(LiquidNCPModule):
         return q_values, new_hidden
 
 
+class SACCriticNCP(NCPModule):
+    """
+    An NCP Critic Network for the SAC algorithm. Estimates Q-values given
+    states and actions.
+
+    Usable with continuous action spaces.
+    """
+
+    def __init__(
+        self,
+        num_obs: int,
+        n_neurons: int,
+        num_actions: int,
+        *,
+        device: torch.device | None = None,
+    ) -> None:
+        """
+        Parameters:
+            num_obs (int): the number of input observations
+            n_neurons (int): the number of hidden neurons
+            num_actions (int): the number of actions
+            device (torch.device, optional): the device to perform computations on
+        """
+        super().__init__(num_obs + num_actions, n_neurons, 1, device=device)
+
+    def forward(self, obs: torch.Tensor, actions: torch.Tensor) -> torch.Tensor:
+        """
+        Performs a forward pass through the network.
+
+        Parameters:
+            obs (torch.Tensor): the batch of state observations
+            actions (torch.Tensor): the batch of actions
+
+        Returns:
+            q_values (torch.Tensor): the Q-Value predictions.
+        """
+        inputs = torch.cat([obs, actions], dim=-1)
+        q_values = self.ncp(inputs)
+        return q_values
+
+
 class LiquidSAC(RLAgent):
     """
     A Liquid variant of the Soft Actor-Critic (SAC) algorithm for `continuous` action spaces.
@@ -318,7 +359,7 @@ class LiquidSAC(RLAgent):
         self.config = RLAgentConfig(
             agent=self.__class__.__name__,
             seed=self.seed,
-            model_details=ModelDetails(
+            model_details=BasicModelDetails(
                 type="actor-critic",
                 **locals(),
                 target_networks=True,

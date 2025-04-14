@@ -1,4 +1,4 @@
-from typing import Any, Dict, Literal, Self
+from typing import Any, Dict, Literal, Self, Tuple
 
 from pydantic import BaseModel
 
@@ -122,7 +122,7 @@ class SACExtraParameters(BaseModel):
     log_std_max: float | None = None
 
 
-class ModelDetails(BaseModel):
+class BasicModelDetails(BaseModel):
     """
     A config model for storing an agent's network model details.
 
@@ -154,6 +154,73 @@ class ModelDetails(BaseModel):
     extras: SACExtraParameters | None = None
 
 
+class EntropyParameters(BaseModel):
+    """
+    A config model for extra parameters for NeuroFlow agents.
+
+    Attributes:
+        lr: the entropy parameter learning rate
+        initial_alpha: the starting entropy coefficient value
+        target: the target entropy for automatic adjustment
+    """
+
+    lr: float
+    initial_alpha: float
+    target: float
+
+
+class CriticConfig(BaseModel):
+    """
+    A critic config model for storing a NeuroFlow agent's critic module details.
+
+    Attributes:
+        critic1: details about the first critic network
+        critic2: details about the second critic network
+    """
+
+    critic1: ModuleConfig
+    critic2: ModuleConfig
+
+
+class NFModelDetails(BaseModel):
+    """
+    A config model for storing a NeuroFlow agent's network model details.
+
+
+    Attributes:
+        type: the type of architecture used. Default is `actor-critic`
+        state_dim: number of input features
+        actor_neurons: number of actor network decision nodes
+        critic_neurons: number of critic network decision nodes
+        action_dim: number of output features
+        action_type: the type of action space. Default is `continuous`
+        tau: the soft update factor for target networks
+        target_networks: whether the agent uses target networks or not.
+            Default is `True`
+        log_std: lower and upper bounds for the log standard deviation of the
+            action distribution. Only required for `continuous` spaces.
+            Default is `None`
+        exploration_type: the type of agent exploration used
+        actor: details about the Actor network
+        critic: details about the Critic networks
+        entropy: details about the entropy exploration
+    """
+
+    type: str = "actor-critic"
+    state_dim: int
+    actor_neurons: int
+    critic_neurons: int
+    action_dim: int
+    tau: float
+    action_type: Literal["discrete", "continuous"] = "continuous"
+    target_networks: bool = True
+    log_std: Tuple[float, float] | None = None
+    exploration_type: Literal["Entropy", "CAT-Entropy"]
+    actor: ModuleConfig
+    critic: CriticConfig
+    entropy: EntropyParameters
+
+
 class RLAgentConfig(BaseModel):
     """
     A config model for RL agents. Stored with agent states during the `save()` method.
@@ -171,7 +238,7 @@ class RLAgentConfig(BaseModel):
     agent: str
     env: str | None = None
     seed: int
-    model_details: ModelDetails
+    model_details: BasicModelDetails | NFModelDetails
     buffer: BufferConfig
     torch: TorchConfig
     train_params: TrainConfig | None = None

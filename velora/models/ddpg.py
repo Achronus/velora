@@ -14,11 +14,11 @@ import torch.optim as optim
 
 if TYPE_CHECKING:
     from velora.callbacks import TrainCallback  # pragma: no cover
+    from velora.buffer.experience import BatchExperience  # pragma: no cover
 
-from velora.buffer.experience import BatchExperience
 from velora.buffer.replay import ReplayBuffer
 from velora.models.base import LiquidNCPModule, RLAgent
-from velora.models.config import ModelDetails, RLAgentConfig, TorchConfig
+from velora.models.config import BasicModelDetails, RLAgentConfig, TorchConfig
 from velora.noise import OUNoise
 from velora.training.display import training_info
 from velora.training.handler import TrainHandler
@@ -217,7 +217,7 @@ class LiquidDDPG(RLAgent):
         self.config = RLAgentConfig(
             agent=self.__class__.__name__,
             seed=self.seed,
-            model_details=ModelDetails(
+            model_details=BasicModelDetails(
                 type="actor-critic",
                 **locals(),
                 target_networks=True,
@@ -247,7 +247,7 @@ class LiquidDDPG(RLAgent):
         soft_update(self.actor, self.actor_target, tau=tau)
         soft_update(self.critic, self.critic_target, tau=tau)
 
-    def _update_critic(self, batch: BatchExperience, gamma: float) -> torch.Tensor:
+    def _update_critic(self, batch: "BatchExperience", gamma: float) -> torch.Tensor:
         """
         Helper method. Performs a Critic Network update.
 
@@ -275,7 +275,7 @@ class LiquidDDPG(RLAgent):
 
         return critic_loss
 
-    def _update_actor(self, batch: BatchExperience) -> torch.Tensor:
+    def _update_actor(self, batch: "BatchExperience") -> torch.Tensor:
         """
         Helper method. Performs an Actor Network update.
 

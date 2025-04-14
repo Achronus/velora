@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 from velora.buffer.replay import ReplayBuffer
 from velora.models.base import LiquidNCPModule, RLAgent
 from velora.models.config import (
-    ModelDetails,
+    BasicModelDetails,
     RLAgentConfig,
     SACExtraParameters,
     TorchConfig,
@@ -283,7 +283,7 @@ class LiquidSACDiscrete(RLAgent):
         self.config = RLAgentConfig(
             agent=self.__class__.__name__,
             seed=self.seed,
-            model_details=ModelDetails(
+            model_details=BasicModelDetails(
                 type="actor-critic",
                 **locals(),
                 target_networks=True,

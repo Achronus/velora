@@ -1,10 +1,9 @@
-from velora.models.sac.continuous import SACActor, SACCritic, LiquidSAC
+from velora.models.sac.continuous import LiquidSAC, SACActor, SACCritic
 from velora.models.sac.discrete import (
+    LiquidSACDiscrete,
     SACActorDiscrete,
     SACCriticDiscrete,
-    LiquidSACDiscrete,
 )
-
 
 __all__ = [
     "SACActor",
