@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from velora.callbacks import TrainCallback  # pragma: no cover
 
 from velora.buffer.replay import ReplayBuffer
-from velora.models.base import NCPModule, RLAgent
+from velora.models.base import LiquidNCPModule, RLAgent
 from velora.models.config import (
     ModelDetails,
     RLAgentConfig,
@@ -33,7 +33,7 @@ from velora.utils.restore import load_model, save_model
 from velora.utils.torch import soft_update
 
 
-class SACActor(NCPModule):
+class SACActor(LiquidNCPModule):
     """
     A Liquid NCP Actor Network for the SAC algorithm. Outputs a Gaussian
     distribution over actions.
@@ -150,7 +150,7 @@ class SACActor(NCPModule):
         return actions, log_prob, new_hidden
 
 
-class SACCritic(NCPModule):
+class SACCritic(LiquidNCPModule):
     """
     A Liquid NCP Critic Network for the SAC algorithm. Estimates Q-values given
     states and actions.

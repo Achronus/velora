@@ -8,7 +8,7 @@ from safetensors.torch import load_file, save_file
 from torch.optim import Optimizer
 
 if TYPE_CHECKING:
-    from velora.models.base import NCPModule, RLAgent  # pragma: no cover
+    from velora.models.base import LiquidNCPModule, RLAgent  # pragma: no cover
 
 
 TensorDictKeys = Literal[
@@ -175,7 +175,7 @@ def save_model(
     param_dict: Dict[OptimDictKeys, Dict[str, Any]] = {}
 
     for key in get_args(OptimDictKeys):
-        module: "NCPModule" = getattr(agent, key)
+        module: "LiquidNCPModule" = getattr(agent, key)
 
         if module is not None:
             optim_dict |= optim_to_tensor(key, module.state_dict())
@@ -272,7 +272,7 @@ def load_model(
     model_state = model_from_tensor(tensor_dict)
 
     for key in model_state.keys():
-        module: "NCPModule" = getattr(model, key)
+        module: "LiquidNCPModule" = getattr(model, key)
         module.load_state_dict(model_state[key])
 
     # Load optimizer parameters from safetensors

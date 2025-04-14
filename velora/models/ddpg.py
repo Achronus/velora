@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 
 from velora.buffer.experience import BatchExperience
 from velora.buffer.replay import ReplayBuffer
-from velora.models.base import NCPModule, RLAgent
+from velora.models.base import LiquidNCPModule, RLAgent
 from velora.models.config import ModelDetails, RLAgentConfig, TorchConfig
 from velora.noise import OUNoise
 from velora.training.display import training_info
@@ -40,7 +40,7 @@ CheckpointLiteral = Literal[
 ]
 
 
-class DDPGActor(NCPModule):
+class DDPGActor(LiquidNCPModule):
     """
     A Liquid NCP Actor Network for the DDPG algorithm.
     """
@@ -81,7 +81,7 @@ class DDPGActor(NCPModule):
         return scaled_actions, new_hidden
 
 
-class DDPGCritic(NCPModule):
+class DDPGCritic(LiquidNCPModule):
     """
     A Liquid NCP Critic Network for the DDPG algorithm.
     """
