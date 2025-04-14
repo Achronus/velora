@@ -4,11 +4,11 @@ from pydoc import locate
 from typing import TYPE_CHECKING, Any, Dict, Literal, Type, get_args
 
 import torch
-from torch.optim import Optimizer
 from safetensors.torch import load_file, save_file
+from torch.optim import Optimizer
 
 if TYPE_CHECKING:
-    from velora.models.base import RLAgent, NCPModule  # pragma: no cover
+    from velora.models.base import NCPModule, RLAgent  # pragma: no cover
 
 
 TensorDictKeys = Literal[

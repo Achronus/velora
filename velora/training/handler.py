@@ -264,6 +264,7 @@ class TrainHandler(TrainHandlerBase):
                 "loss": {
                     "actor": round(self._metrics._actor_loss.item(), 4),
                     "critic": round(self._metrics._critic_loss.item(), 4),
+                    "entropy": round(self._metrics._entropy_loss.item(), 4),
                 },
             }
         )
