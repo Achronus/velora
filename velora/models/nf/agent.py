@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import TYPE_CHECKING, Dict, List, Literal, Self, Tuple, Type
+from typing import TYPE_CHECKING, Dict, List, Literal, Self, Tuple, Type, Union
 
 from velora.callbacks import TrainCallback
 from velora.training.display import training_info
@@ -16,6 +16,7 @@ import torch.nn as nn
 import torch.optim as optim
 
 if TYPE_CHECKING:
+    from velora.gym.wrap import GymNames  # pragma: no cover
     from velora.buffer.experience import BatchExperience  # pragma: no cover
 
 from velora.buffer.replay import ReplayBuffer
@@ -59,7 +60,7 @@ class NeuroFlow(RLModuleAgent):
 
     def __init__(
         self,
-        env_id: str,
+        env_id: Union[str, "GymNames"],
         actor_neurons: int,
         critic_neurons: int,
         *,

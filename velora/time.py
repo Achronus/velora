@@ -33,7 +33,7 @@ class ElapsedTime:
         hrs, remainder = divmod(elapsed, 3600)
         mins, secs = divmod(remainder, 60)
 
-        return ElapsedTime(hrs=hrs, mins=mins, secs=secs)
+        return cls(hrs=hrs, mins=mins, secs=secs)
 
     def __str__(self) -> str:
         return f"{self.hrs:.2f}h {self.mins:.2f}m {self.secs:.2f}s"
