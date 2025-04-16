@@ -87,6 +87,9 @@ class TrainState:
         current_step (int, optional): the current training timestep
         ep_reward (float, optional): the current episode reward
         stop_training (bool, optional): a flag to declare training termination
+        saving_enabled (bool, optional): a flag for checkpoint saving
+        checkpoint_dir (Path, optional): the checkpoint directory path when
+            `saving_enabled=True`
         record_state (RecordState, optional): the video recording state
         analytics_state (AnalyticsState, optional): the analytics state
     """
@@ -103,6 +106,8 @@ class TrainState:
     current_step: int = 0
     ep_reward: float = 0.0
     stop_training: bool = False
+    saving_enabled: bool = False
+    checkpoint_dir: Path | None = None
     record_state: RecordState | None = None
     analytics_state: AnalyticsState | None = None
 

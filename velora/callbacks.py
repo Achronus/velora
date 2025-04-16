@@ -142,6 +142,10 @@ class SaveCheckpoints(TrainCallback):
             )
 
     def __call__(self, state: "TrainState") -> "TrainState":
+        if state.status == "start":
+            state.saving_enabled = True
+            state.checkpoint_dir = self.filepath
+
         # Only perform checkpoint operations on episode and complete events
         if state.status != "episode" and state.status != "complete":
             return state

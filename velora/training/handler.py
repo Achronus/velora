@@ -2,7 +2,7 @@ import json
 import time
 from pathlib import Path
 from types import TracebackType
-from typing import TYPE_CHECKING, Any, Dict, List, Literal, Self, Type
+from typing import TYPE_CHECKING, List, Literal, Self, Type
 
 from sqlmodel import Session
 
@@ -152,15 +152,14 @@ class TrainHandlerBase:
             print()
             record_last_episode(self.agent, self.env.spec.id, dirname)
 
-    def save_completed(self, stats: Dict[str, Any]) -> None:
+    def save_completed(self) -> None:
         """
         Saves the completed training information to a JSON file in the
         local directory.
-
-        Parameters:
-            stats (Dict[str, Any]): a dictionary of model statistics to store
         """
-        path = Path("completed").with_suffix(".json")
+        path = Path(self.state.checkpoint_dir, "completed").with_suffix(".json")
+
+        # data to save
         data = {
             "episodes": self.state.current_ep,
             "steps": self._metrics.step_total.item(),
@@ -169,7 +168,18 @@ class TrainHandlerBase:
                 "minutes": self.train_time.mins,
                 "seconds": round(self.train_time.secs, 4),
             },
-            "stats": stats,
+            "early_stopped": self.state.stop_training,
+            "stats": {
+                "reward": {
+                    "average": round(self._metrics.reward_moving_avg(), 4),
+                    "max": round(self._metrics.reward_moving_max(), 4),
+                },
+                "loss": {
+                    "actor": round(self._metrics._actor_loss.item(), 4),
+                    "critic": round(self._metrics._critic_loss.item(), 4),
+                    "entropy": round(self._metrics._entropy_loss.item(), 4),
+                },
+            },
         }
 
         with path.open("w") as f:
@@ -252,19 +262,8 @@ class TrainHandler(TrainHandlerBase):
     ):
         super().__exit__(exc_type, exc_val, exc_tb)
 
-        self.save_completed(
-            {
-                "reward": {
-                    "average": round(self._metrics.reward_moving_avg(), 4),
-                    "max": round(self._metrics.reward_moving_max(), 4),
-                },
-                "loss": {
-                    "actor": round(self._metrics._actor_loss.item(), 4),
-                    "critic": round(self._metrics._critic_loss.item(), 4),
-                    "entropy": round(self._metrics._entropy_loss.item(), 4),
-                },
-            }
-        )
+        if self.state.saving_enabled:
+            self.save_completed()
 
     def start(self) -> None:
         super().start()
