@@ -8,11 +8,11 @@ import torch
 from velora.gym.wrap import add_core_env_wrappers
 
 if TYPE_CHECKING:
-    from velora.models.base import RLAgent  # pragma: no cover
+    from velora.models.base import RLModuleAgent  # pragma: no cover
 
 
 def record_last_episode(
-    agent: "RLAgent",
+    agent: "RLModuleAgent",
     env_name: str,
     dirname: str,
     root_path: str | Path | None = None,
@@ -26,7 +26,7 @@ def record_last_episode(
     Filename format: `<env_name>_final-episode-0.mp4`.
 
     Parameters:
-        agent (RLAgent): an agent to use
+        agent (RLModuleAgent): an agent to use
         env_name (str): the name of environment to use
         dirname (str): the model directory name. Used inside `checkpoints` directory
             as `checkpoints/<dirname>/videos`
@@ -70,12 +70,14 @@ def record_last_episode(
     env.close()
 
 
-def evaluate_agent(agent: "RLAgent", env: gym.Env) -> Tuple[torch.Tensor, torch.Tensor]:
+def evaluate_agent(
+    agent: "RLModuleAgent", env: gym.Env
+) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Evaluates the performance of an agent on an environment using a single episode.
 
     Parameters:
-        agent (RLAgent): the agent to evaluate
+        agent (RLModuleAgent): the agent to evaluate
         env (gym.Env): the Gymnasium environment
 
     Returns:

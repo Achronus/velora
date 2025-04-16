@@ -3,13 +3,16 @@ try:
 except ImportError:  # pragma: no cover
     from typing_extensions import override  # pragma: no cover
 
+from typing import TYPE_CHECKING
+
 import gymnasium as gym
 import torch
 
+if TYPE_CHECKING:
+    from velora.models.base import RLModuleAgent  # pragma: no cover
+
 from velora.buffer.base import BufferBase
 from velora.buffer.experience import BatchExperience
-from velora.gym.wrap import add_core_env_wrappers
-from velora.models.base import RLAgent
 from velora.models.config import BufferConfig
 
 
@@ -84,39 +87,34 @@ class ReplayBuffer(BufferBase):
             hiddens=self.hiddens[indices],
         )
 
-    def warm(
-        self,
-        agent: RLAgent,
-        env_name: str,
-        n_samples: int,
-        seed: int | None = None,
-    ) -> None:
+    def warm(self, agent: "RLModuleAgent", n_samples: int, num_envs: int = 8) -> None:
         """
         Warms the buffer to fill it to a number of samples by generating them
-        from an agent using a copy of the environment.
+        from an agent using a `vectorized` copy of the environment.
 
         Parameters:
-            agent (RLAgent): the agent to generate samples with
-            env_name (str): the name of environment to generate samples from
+            agent (Any): the agent to generate samples with
             n_samples (int): the maximum number of samples to generate
-            seed (int, optional): random number generator seed
+            num_envs (int, optional): number of vectorized environments
         """
-        env = gym.make(env_name)
-        env = add_core_env_wrappers(env, agent.device)
+        envs = gym.make_vec(
+            agent.env.spec.id,
+            num_envs=num_envs,
+            vectorization_mode="sync",
+        )
+        envs: gym.vector.SyncVectorEnv = gym.wrappers.vector.NumpyToTorch(
+            envs, agent.device
+        )
 
         hidden = None
-        state, _ = env.reset(seed=seed)
+        states, _ = envs.reset()
 
         while not len(self) >= n_samples:
-            action, hidden = agent.predict(state, hidden, train_mode=True)
-            next_state, reward, terminated, truncated, _ = env.step(action)
-            done = terminated or truncated
+            actions, hidden = agent.predict(states, hidden, train_mode=True)
+            next_states, rewards, terminated, truncated, _ = envs.step(actions)
+            dones = terminated | truncated
 
-            self.add(state, action, reward, next_state, done, hidden)
+            self.add_multi(states, actions, rewards, next_states, dones, hidden)
+            states = next_states
 
-            state = next_state
-
-            if done:
-                state, _ = env.reset()
-
-        env.close()
+        envs.close()

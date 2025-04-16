@@ -318,21 +318,19 @@ class TrainMetrics(TrainMetricsBase):
         self,
         critic: torch.Tensor,
         actor: torch.Tensor,
-        entropy: torch.Tensor | None = None,
+        entropy: torch.Tensor,
     ) -> None:
         """
-        Add timesteps metrics to local storage.
+        Add timestep metrics to local storage.
 
         Parameters:
             critic (torch.Tensor): critic step loss
             actor (torch.Tensor): actor step loss
-            entropy (torch.Tensor, optional): entropy step loss
+            entropy (torch.Tensor): entropy step loss
         """
-        self._current_losses.add(
-            critic,
-            actor,
-            entropy or torch.zeros(1, device=self.device),
-        )
+        self._exp_created_check()
+
+        self._current_losses.add(critic, actor, entropy)
 
     def add_episode(
         self,
@@ -394,10 +392,6 @@ class TrainMetrics(TrainMetricsBase):
         max_length = number_to_short(int(self._ep_lengths.max().item()))
         max_steps = number_to_short(self.max_steps)
 
-        entropy_loss = self._entropy_loss.item()
-
-        entropy_str = f", Entropy Loss: {entropy_loss:.2f}" if entropy_loss != 0 else ""
-
         print(
             f"Episode: {ep}/{max_eps}, "
             f"Steps: {ep_length}/{step_total}, "
@@ -405,6 +399,6 @@ class TrainMetrics(TrainMetricsBase):
             f"Reward Avg: {self.reward_moving_avg():.2f}, "
             f"Reward Max: {self.reward_moving_max():.2f}, "
             f"Actor Loss: {self._actor_loss.item():.2f}, "
-            f"Critic Loss: {self._critic_loss.item():.2f}"
-            f"{entropy_str}"
+            f"Critic Loss: {self._critic_loss.item():.2f}, "
+            f"Entropy Loss: {self._entropy_loss.item():.2f}"
         )

@@ -1,10 +1,10 @@
 from typing import TYPE_CHECKING, List
 
-from velora.utils.format import number_to_short
-
 if TYPE_CHECKING:
+    from velora.models.base import RLModuleAgent  # pragma: no cover
     from velora.callbacks import TrainCallback  # pragma: no cover
-    from velora.models.base import RLAgent  # pragma: no cover
+
+from velora.utils.format import number_to_short
 
 NAME_STR = """
 __     __   _
@@ -16,30 +16,23 @@ __     __   _
 
 
 def training_info(
-    agent: "RLAgent",
-    env_id: str,
+    agent: "RLModuleAgent",
     n_episodes: int,
     batch_size: int,
     window_size: int,
+    warmup_steps: int,
     callbacks: List["TrainCallback"],
-    device: str,
-    seed: int,
-    extras: str = "",
 ) -> None:
     """
-    Display's starting information to the console for a training run. Focuses
-    on episodic models.
+    Display's starting information to the console for a training run.
 
     Parameters:
-        agent (RLAgent): the agent being trained
-        env_id (str): the environment ID
+        agent (Any): the agent being trained
         n_episodes (int): maximum number of training episodes
         batch_size (int): sampling batch size
         window_size (int): moving average window size
+        warmup_steps (int): number of buffer warmup steps
         callbacks (List[TrainCallback]): applied training callbacks
-        device (str): the device to perform computations on
-        seed (int): random number seed used
-        extras (str, optional): extra information unique to the agent
     """
     output = NAME_STR.strip()
     params_str = f"{agent.active_params:,}/{agent.total_params:,}"
@@ -57,12 +50,12 @@ def training_info(
     cb_str += "\n---------------------------------\n"
 
     output += cb_str if callbacks else "\n\n"
-    output += f"Training '{agent.__class__.__name__}' agent on '{env_id}' for '{number_to_short(n_episodes)}' episodes.\n"
+    output += f"Training '{agent.__class__.__name__}' agent on '{agent.env.spec.id}' for '{number_to_short(n_episodes)}' episodes.\n"
     output += f"Using '{agent.buffer.__class__.__name__}' with 'capacity={number_to_short(agent.buffer.capacity)}'.\n"
     output += f"Sampling episodes with '{batch_size=}'.\n"
-    output += extras
-    output += f"Generating random values with a seed of '{seed}'.\n"
-    output += f"Running computations on device '{device}'.\n"
+    output += f"Warming buffer with '{number_to_short(warmup_steps)}' samples before training starts.\n"
+    output += f"Generating random values with a seed of '{agent.seed}'.\n"
+    output += f"Running computations on device '{agent.device}'.\n"
     output += f"Moving averages computed based on 'window_size={number_to_short(window_size)}'.\n"
     output += f"Using networks with '{params_str}' active parameters.\n"
     output += "---------------------------------"

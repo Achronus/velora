@@ -1,4 +1,4 @@
-from copy import deepcopy
+from typing import Tuple
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Self, Tuple, Type
 
@@ -16,7 +16,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.distributions import Normal
 
-if TYPE_CHECKING:
+from velora.models.base import LiquidNCPModule, NCPModule
     from velora.callbacks import TrainCallback  # pragma: no cover
 
 from velora.buffer.replay import ReplayBuffer
@@ -41,11 +41,16 @@ class SACActor(LiquidNCPModule):
     Usable with continuous action spaces.
     """
 
+    action_scale: torch.Tensor
+    action_bias: torch.Tensor
+
     def __init__(
         self,
         num_obs: int,
         n_neurons: int,
         num_actions: int,
+        action_scale: torch.Tensor,
+        action_bias: torch.Tensor,
         *,
         log_std_min: float = -5,
         log_std_max: float = 2,
@@ -56,6 +61,10 @@ class SACActor(LiquidNCPModule):
             num_obs (int): the number of input observations
             n_neurons (int): the number of hidden neurons
             num_actions (int): the number of actions
+            action_scale (torch.Tensor): scale factor to map normalized actions to
+                environment's action range
+            action_bias (torch.Tensor): bias/offset to center normalized actions to
+                environment's action range
             log_std_min (float, optional): lower bound for the log standard
                 deviation of the action distribution. Controls the minimum
                 variance of actions
@@ -68,6 +77,9 @@ class SACActor(LiquidNCPModule):
 
         self.log_std_min = log_std_min
         self.log_std_max = log_std_max
+
+        self.register_buffer("action_scale", action_scale)
+        self.register_buffer("action_bias", action_bias)
 
     @torch.jit.ignore
     def get_sample(
@@ -111,7 +123,10 @@ class SACActor(LiquidNCPModule):
         mean, _ = torch.chunk(x, 2, dim=-1)
 
         # Bound actions between [-1, 1]
-        actions = torch.tanh(mean)
+        actions_normalized = torch.tanh(mean)
+
+        # Scale back to env action space
+        actions = actions_normalized * self.action_scale + self.action_bias
 
         return actions, new_hidden
 
@@ -141,10 +156,15 @@ class SACActor(LiquidNCPModule):
 
         # Sample from normal distribution
         x_t, dist_log_probs = self.get_sample(mean, std)
-        actions = torch.tanh(x_t)  # Bounded: [-1, 1]
+        actions_normalized = torch.tanh(x_t)  # Bounded: [-1, 1]
+
+        # Scale back to environment's action space
+        actions = actions_normalized * self.action_scale + self.action_bias
 
         # Calculate log probability, accounting for tanh
-        log_prob: torch.Tensor = dist_log_probs - torch.log(1 - actions.pow(2) + 1e-6)
+        log_prob = dist_log_probs - torch.log(
+            self.action_scale * (1 - actions_normalized.pow(2)) + 1e-6
+        )
         log_prob = log_prob.sum(dim=-1, keepdim=True)
 
         return actions, log_prob, new_hidden

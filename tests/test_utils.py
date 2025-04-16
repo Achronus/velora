@@ -7,7 +7,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 
-from velora.models.base import RLAgent
+from velora.models.base import RLModuleAgent
 from velora.utils.capture import evaluate_agent, record_last_episode
 from velora.utils.core import set_seed, set_device
 from velora.utils.format import number_to_short
@@ -251,7 +251,7 @@ class TestNetworkUpdates:
 class TestRecordLastEpisode:
     @pytest.fixture
     def mock_agent(self):
-        agent = MagicMock(spec=RLAgent)
+        agent = MagicMock(spec=RLModuleAgent)
         agent.device = "cpu"
         agent.predict.return_value = (torch.tensor([0.0]), torch.zeros(1, 10))
         return agent

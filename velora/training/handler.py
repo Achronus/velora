@@ -2,9 +2,8 @@ import json
 import time
 from pathlib import Path
 from types import TracebackType
-from typing import TYPE_CHECKING, Any, Dict, List, Self, Type
+from typing import TYPE_CHECKING, Any, Dict, List, Literal, Self, Type
 
-import gymnasium as gym
 from sqlmodel import Session
 
 from velora.utils.format import number_to_short
@@ -14,7 +13,7 @@ if TYPE_CHECKING:
 
 from velora.gym.wrap import add_core_env_wrappers
 from velora.metrics.db import get_db_engine
-from velora.models.base import RLAgent
+from velora.models.base import RLModuleAgent
 from velora.state import TrainState
 from velora.time import ElapsedTime
 from velora.training.metrics import TrainMetrics, TrainMetricsBase
@@ -28,22 +27,19 @@ class TrainHandlerBase:
 
     def __init__(
         self,
-        agent: RLAgent,
-        env: gym.Env | gym.vector.VectorEnv,
+        agent: RLModuleAgent,
         window_size: int,
         callbacks: List["TrainCallback"] | None,
     ) -> None:
         """
         Parameters:
             agent (RLAgent): the agent being trained
-            env (gym.Env | gym.vector.VectorEnv): the environment (or vectorized
-                envs) to train the agent on
             window_size (int): episode window size rate
             callbacks (List[TrainCallback] | None): a list of training callbacks.
                 If `None` sets to an empty list
         """
         self.agent = agent
-        self.env = env
+        self.env = self.agent.env
         self.window_size = window_size
         self.callbacks = callbacks or []
         self.device = self.agent.device
@@ -67,7 +63,7 @@ class TrainHandlerBase:
         self.start_time = time.time()
 
         self.start()
-        self.env = add_core_env_wrappers(self.env, self.agent.device)
+        self.env = add_core_env_wrappers(self.env, self.device)
 
         return self
 
@@ -188,25 +184,26 @@ class TrainHandler(TrainHandlerBase):
 
     def __init__(
         self,
-        agent: RLAgent,
-        env: gym.Env,
+        agent: RLModuleAgent,
         n_episodes: int,
         max_steps: int,
+        log_freq: int,
         window_size: int,
         callbacks: List["TrainCallback"] | None,
     ) -> None:
         """
         Parameters:
-            agent (RLAgent): the agent being trained
-            env (gym.Env): the environment to train the agent on
+            agent (RLModuleAgent): the agent being trained
             n_episodes (int): the total number of training episodes
             max_steps (int): maximum number of steps in an episode
+            log_freq (int): metric logging frequency (in episodes)
             window_size (int): episode window size rate
             callbacks (List[TrainCallback] | None): a list of training callbacks.
                 If `None` sets to an empty list
         """
-        super().__init__(agent, env, window_size, callbacks)
+        super().__init__(agent, window_size, callbacks)
 
+        self.log_freq = log_freq
         self.n_episodes = n_episodes
         self.max_steps = max_steps
 
@@ -216,7 +213,7 @@ class TrainHandler(TrainHandlerBase):
         Training metric class instance.
 
         Returns:
-            metrics (EpisodeTrainMetrics): current training metric state.
+            metrics (TrainMetrics): current training metric state.
         """
         return self._metrics
 
@@ -283,4 +280,19 @@ class TrainHandler(TrainHandlerBase):
             current_step (int): the current training timestep index
         """
         self.state.update(status="step", current_step=current_step)
+        self._run_callbacks()
+
+    def log(self, idx: int, log_type: Literal["episode", "step"]) -> None:
+        """
+        Performs `logging` callback event.
+
+        Parameters:
+            idx (int): the current training step or episode index
+            log_type (str): the type of logging method
+        """
+        if log_type == "episode":
+            self.state.update(status="logging", current_ep=idx, logging_type=log_type)
+        else:
+            self.state.update(status="logging", current_step=idx, logging_type=log_type)
+
         self._run_callbacks()

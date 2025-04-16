@@ -3,7 +3,7 @@ import tempfile
 import pytest
 import torch
 
-from velora.models.ddpg import LiquidDDPG
+from velora.models.nf.agent import NeuroFlow
 from velora.utils.restore import (
     load_model,
     optim_to_tensor,
@@ -102,7 +102,7 @@ class TestLoadModel:
             with pytest.raises(
                 FileNotFoundError, match="Optimizer state .* does not exist"
             ):
-                load_model(LiquidDDPG, save_path)
+                load_model(NeuroFlow, save_path)
 
     def test_missing_metadata(self):
         # Create a temporary directory structure with missing metadata
@@ -124,20 +124,20 @@ class TestLoadModel:
 
             # Attempt to load should raise FileNotFoundError
             with pytest.raises(FileNotFoundError, match="Metadata .* does not exist"):
-                load_model(LiquidDDPG, save_path)
+                load_model(NeuroFlow, save_path)
 
 
 class TestSaveModel:
     @pytest.fixture
-    def test_agent(self) -> LiquidDDPG:
-        return LiquidDDPG(
-            state_dim=4,
-            n_neurons=16,
-            action_dim=2,
+    def test_agent(self) -> NeuroFlow:
+        return NeuroFlow(
+            "InvertedPendulum-v5",
+            8,
+            16,
             device="cpu",
         )
 
-    def test_force_flag(self, tmp_path: Path, test_agent: LiquidDDPG):
+    def test_force_flag(self, tmp_path: Path, test_agent: NeuroFlow):
         # Define a checkpoint path in the temporary directory
         checkpoint_path = tmp_path / "test_model"
 
@@ -155,21 +155,19 @@ class TestSaveModel:
             save_model(test_agent, checkpoint_path, buffer=True, config=True)
 
         # Change something in the agent to verify the save is actually updated
-        test_agent.noise.reset()  # Reset noise to change internal state
-        test_agent.actor_optim.zero_grad()  # Change optimizer state
+        test_agent.actor.optim.zero_grad()  # Change optimizer state
 
         # With force=True, saving should succeed and overwrite
         save_model(test_agent, checkpoint_path, buffer=True, config=True, force=True)
 
         # Load the agent back to verify it saved properly
-        loaded_agent = LiquidDDPG.load(checkpoint_path, buffer=True)
+        loaded_agent = NeuroFlow.load(checkpoint_path, buffer=True)
 
         # Verify the agent was loaded successfully
         assert loaded_agent.state_dim == test_agent.state_dim
         assert loaded_agent.action_dim == test_agent.action_dim
-        assert loaded_agent.n_neurons == test_agent.n_neurons
 
         # Compare some parameters to ensure they match
-        test_params = list(test_agent.actor.parameters())[0]
-        loaded_params = list(loaded_agent.actor.parameters())[0]
+        test_params = list(test_agent.actor.network.parameters())[0]
+        loaded_params = list(loaded_agent.actor.network.parameters())[0]
         assert torch.allclose(test_params, loaded_params)

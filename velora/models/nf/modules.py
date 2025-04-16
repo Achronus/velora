@@ -50,6 +50,8 @@ class ActorModule(BaseModule):
         state_dim: int,
         n_neurons: int,
         action_dim: int,
+        action_scale: torch.Tensor,
+        action_bias: torch.Tensor,
         *,
         log_std_min: float = -5,
         log_std_max: float = 2,
@@ -62,6 +64,10 @@ class ActorModule(BaseModule):
             state_dim (int): dimension of the state space
             n_neurons (int): number of decision/hidden neurons
             action_dim (int): dimension of the action space
+            action_scale (torch.Tensor): scale factor to map normalized actions to
+                environment's action range
+            action_bias (torch.Tensor): bias/offset to center normalized actions to
+                environment's action range
             log_std_min (float, optional): minimum log standard deviation
             log_std_max (float, optional): maximum log standard deviation
             optim (Type[optim.Optimizer], optional): a `PyTorch` optimizer class
@@ -71,6 +77,8 @@ class ActorModule(BaseModule):
         self.state_dim = state_dim
         self.n_neurons = n_neurons
         self.action_dim = action_dim
+        self.action_scale = action_scale
+        self.action_bias = action_bias
         self.log_std = (log_std_min, log_std_max)
         self.lr = lr
         self.device = device
@@ -79,6 +87,8 @@ class ActorModule(BaseModule):
             state_dim,
             n_neurons,
             action_dim,
+            action_scale,
+            action_bias,
             log_std_min=log_std_min,
             log_std_max=log_std_max,
             device=device,

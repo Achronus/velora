@@ -101,6 +101,46 @@ class BufferBase:
         self.position = (self.position + 1) % self.capacity
         self.size = min(self.size + 1, self.capacity)
 
+    def add_multi(
+        self,
+        states: torch.Tensor,
+        actions: torch.Tensor,
+        rewards: torch.Tensor,
+        next_states: torch.Tensor,
+        dones: torch.Tensor,
+        hiddens: torch.Tensor,
+    ) -> None:
+        """
+        Adds a set of experience to the buffer.
+
+        Parameters:
+            states (torch.Tensor): current state observations
+            actions (torch.Tensor): action takens
+            rewards (torch.Tensor): rewards received
+            next_states (torch.Tensor): next state observations
+            dones (torch.Tensor): whether the episode ended
+            hiddens (torch.Tensor): Actor hidden states (prediction network)
+        """
+        batch_size = states.shape[0]
+
+        new_position = self.position + batch_size
+        indices = torch.arange(self.position, new_position) % self.capacity
+
+        dtype = torch.float32
+        rewards = rewards.unsqueeze(-1) if rewards.dim() == 1 else rewards
+        dones = dones.unsqueeze(-1) if dones.dim() == 1 else dones
+
+        self.states[indices] = states.to(dtype)
+        self.actions[indices] = actions
+        self.rewards[indices] = rewards.to(dtype)
+        self.next_states[indices] = next_states.to(dtype)
+        self.dones[indices] = dones.to(dtype)
+        self.hiddens[indices] = hiddens
+
+        # Update position - deque style
+        self.position = (new_position) % self.capacity
+        self.size = min(self.size + batch_size, self.capacity)
+
     @abstractmethod
     def sample(self) -> BatchExperience:
         """

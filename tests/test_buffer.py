@@ -2,13 +2,12 @@ import json
 from typing import Tuple
 import pytest
 
-import gymnasium as gym
 import torch
 
 from velora.buffer.experience import BatchExperience
 from velora.buffer.replay import ReplayBuffer
 from velora.models.config import BufferConfig
-from velora.models.ddpg import LiquidDDPG
+from velora.models.nf.agent import NeuroFlow
 
 
 class TestBatchExperience:
@@ -260,62 +259,221 @@ class TestReplayBuffer:
         assert (nested_dir / "buffer_metadata.json").exists()
         assert (nested_dir / "buffer_state.safetensors").exists()
 
-    def test_buffer_warm(self):
-        device = torch.device("cpu")
-        env = gym.make("InvertedPendulum-v5", render_mode="rgb_array")
+    def test_buffer_warm(self, replay_buffer: ReplayBuffer):
+        model = NeuroFlow("InvertedPendulum-v5", 8, 16, device=torch.device("cpu"))
+        assert len(replay_buffer) == 0
 
-        state_dim = env.observation_space.shape[0]
-        action_dim = env.action_space.shape[0]
+        n_samples = 10
+        model.buffer.warm(model, n_samples, 2)
 
-        agent = LiquidDDPG(state_dim, 8, action_dim, device=device)
-        hidden_dim = agent.actor.ncp.hidden_size
+        assert len(model.buffer) >= n_samples
 
-        buffer = ReplayBuffer(
-            capacity=100,
-            state_dim=state_dim,
-            action_dim=action_dim,
-            hidden_dim=hidden_dim,
-            device=device,
+    def test_add_multi(self, replay_buffer: ReplayBuffer):
+        """Test adding multiple experiences at once using add_multi."""
+        # Create test data: batch of 5 experiences
+        batch_size = 5
+        state_dim = replay_buffer.state_dim
+        action_dim = replay_buffer.action_dim
+        hidden_dim = replay_buffer.hidden_dim
+
+        # Create batch tensors
+        states = torch.rand(batch_size, state_dim)
+        actions = torch.rand(batch_size, action_dim)
+        rewards = torch.rand(batch_size, 1)
+        next_states = torch.rand(batch_size, state_dim)
+        dones = torch.zeros(batch_size, 1)  # All false
+        dones[-1] = 1  # Make the last one done
+        hiddens = torch.rand(batch_size, hidden_dim)
+
+        # Store initial position and size
+        initial_position = replay_buffer.position
+        initial_size = replay_buffer.size
+
+        # Add the batch of experiences
+        replay_buffer.add_multi(states, actions, rewards, next_states, dones, hiddens)
+
+        # Verify size increased correctly
+        assert replay_buffer.size == min(
+            initial_size + batch_size, replay_buffer.capacity
         )
 
-        # Verify initial empty state
-        assert len(buffer) == 0
+        # Verify position updated correctly
+        expected_position = (initial_position + batch_size) % replay_buffer.capacity
+        assert replay_buffer.position == expected_position
 
-        # Test warming the buffer
-        n_samples = 15
-        buffer.warm(agent, env.spec.id, n_samples)
-
-        # Verify buffer has been filled with experiences
-        assert len(buffer) == n_samples
-
-        # Add another experience manually
-        buffer.add(
-            torch.zeros(state_dim, device=device),
-            torch.zeros(action_dim, device=device),
-            1.0,
-            torch.zeros(state_dim, device=device),
-            False,
-            torch.zeros(hidden_dim, device=device),
+        # Compute the indices where the experiences should have been stored
+        indices = (
+            torch.arange(initial_position, initial_position + batch_size)
+            % replay_buffer.capacity
         )
 
-        # Verify buffer length increases
-        assert len(buffer) == n_samples + 1
+        # Verify all experiences were stored correctly
+        for i, idx in enumerate(indices):
+            assert torch.allclose(
+                replay_buffer.states[idx], states[i].to(torch.float32)
+            )
+            assert torch.allclose(replay_buffer.actions[idx], actions[i])
+            assert torch.allclose(replay_buffer.rewards[idx], rewards[i])
+            assert torch.allclose(
+                replay_buffer.next_states[idx], next_states[i].to(torch.float32)
+            )
+            assert torch.allclose(replay_buffer.dones[idx], dones[i])
+            assert torch.allclose(replay_buffer.hiddens[idx], hiddens[i])
 
-        # Test sampling from buffer
-        batch = buffer.sample(batch_size=n_samples)
+    def test_add_multi_wrapping(self, replay_buffer: ReplayBuffer):
+        """Test that add_multi correctly wraps around when it exceeds capacity."""
+        # Fill the buffer close to capacity
+        capacity = replay_buffer.capacity
+        remaining_space = 5  # Leave a small amount of space
+        fill_size = capacity - remaining_space
 
-        # Verify batch structure
-        assert hasattr(batch, "states")
-        assert hasattr(batch, "actions")
-        assert hasattr(batch, "rewards")
-        assert hasattr(batch, "next_states")
-        assert hasattr(batch, "dones")
-        assert hasattr(batch, "hiddens")
+        # Create large batch to fill most of the buffer
+        states = torch.zeros(fill_size, replay_buffer.state_dim)
+        actions = torch.zeros(fill_size, replay_buffer.action_dim)
+        rewards = torch.ones(fill_size, 1)  # Use ones to distinguish
+        next_states = torch.zeros(fill_size, replay_buffer.state_dim)
+        dones = torch.zeros(fill_size, 1)
+        hiddens = torch.zeros(fill_size, replay_buffer.hidden_dim)
 
-        # Verify batch shapes
-        assert batch.states.shape[0] == n_samples
-        assert batch.actions.shape[0] == n_samples
-        assert batch.rewards.shape[0] == n_samples
-        assert batch.next_states.shape[0] == n_samples
-        assert batch.dones.shape[0] == n_samples
-        assert batch.hiddens.shape[0] == n_samples
+        # Fill the buffer
+        replay_buffer.add_multi(states, actions, rewards, next_states, dones, hiddens)
+        assert replay_buffer.size == fill_size
+        assert replay_buffer.position == fill_size
+
+        # Now add a batch that will wrap around
+        wrap_size = remaining_space + 3  # 3 more than remaining space
+
+        # Create batch that will wrap around
+        wrap_states = torch.ones(
+            wrap_size, replay_buffer.state_dim
+        )  # Use ones to distinguish
+        wrap_actions = torch.ones(wrap_size, replay_buffer.action_dim)
+        wrap_rewards = torch.zeros(wrap_size, 1)  # Use zeros to distinguish
+        wrap_next_states = torch.ones(wrap_size, replay_buffer.state_dim)
+        wrap_dones = torch.zeros(wrap_size, 1)
+        wrap_hiddens = torch.ones(wrap_size, replay_buffer.hidden_dim)
+
+        # Add batch that should wrap
+        replay_buffer.add_multi(
+            wrap_states,
+            wrap_actions,
+            wrap_rewards,
+            wrap_next_states,
+            wrap_dones,
+            wrap_hiddens,
+        )
+
+        # Verify size is now at capacity
+        assert replay_buffer.size == capacity
+
+        # Verify position wrapped around correctly
+        expected_position = (fill_size + wrap_size) % capacity
+        assert replay_buffer.position == expected_position
+
+        # Check the last 'remaining_space' elements of the buffer should have ones from the wrap batch
+        for i in range(capacity - remaining_space, capacity):
+            wrap_idx = i - (capacity - remaining_space)
+            assert torch.allclose(
+                replay_buffer.states[i], wrap_states[wrap_idx].to(torch.float32)
+            )
+            assert torch.allclose(
+                replay_buffer.rewards[i], wrap_rewards[wrap_idx]
+            )  # Should be zeros
+
+        # Check the first few elements should also have been overwritten with ones from wrap batch
+        for i in range(expected_position):
+            wrap_idx = remaining_space + i
+            assert torch.allclose(
+                replay_buffer.states[i], wrap_states[wrap_idx].to(torch.float32)
+            )
+            assert torch.allclose(
+                replay_buffer.rewards[i], wrap_rewards[wrap_idx]
+            )  # Should be zeros
+
+    def test_add_multi_exceeds_capacity(self, replay_buffer: ReplayBuffer):
+        """Test adding a batch larger than the buffer capacity."""
+        capacity = replay_buffer.capacity
+
+        # Create a batch twice the size of the buffer
+        batch_size = capacity * 2
+
+        states = torch.rand(batch_size, replay_buffer.state_dim)
+        actions = torch.rand(batch_size, replay_buffer.action_dim)
+        rewards = torch.rand(batch_size, 1)
+        next_states = torch.rand(batch_size, replay_buffer.state_dim)
+        dones = torch.zeros(batch_size, 1)
+        hiddens = torch.rand(batch_size, replay_buffer.hidden_dim)
+
+        # Add the oversized batch
+        replay_buffer.add_multi(states, actions, rewards, next_states, dones, hiddens)
+
+        # Verify size is capped at capacity
+        assert replay_buffer.size == capacity
+
+        # Verify position wrapped around correctly
+        expected_position = batch_size % capacity
+        assert replay_buffer.position == expected_position
+
+        # The buffer should contain the last 'capacity' items from the batch
+        start_idx = batch_size - capacity
+        for i in range(capacity):
+            buffer_idx = (i + expected_position) % capacity
+            batch_idx = start_idx + i
+
+            # Make sure to account for wrapping in the buffer
+            if batch_idx >= batch_size:
+                batch_idx = batch_idx - batch_size
+
+            assert torch.allclose(
+                replay_buffer.states[buffer_idx], states[batch_idx].to(torch.float32)
+            )
+            assert torch.allclose(replay_buffer.actions[buffer_idx], actions[batch_idx])
+            assert torch.allclose(replay_buffer.rewards[buffer_idx], rewards[batch_idx])
+
+    def test_add_then_add_multi(self, replay_buffer: ReplayBuffer):
+        """Test adding single experiences followed by a batch."""
+        # Add a few single experiences
+        for i in range(3):
+            state = torch.full((replay_buffer.state_dim,), float(i))
+            action = torch.full((replay_buffer.action_dim,), float(i))
+            reward = float(i)
+            next_state = torch.full((replay_buffer.state_dim,), float(i + 1))
+            done = False
+            hidden = torch.full((replay_buffer.hidden_dim,), float(i))
+
+            replay_buffer.add(state, action, reward, next_state, done, hidden)
+
+        # Verify initial state
+        assert replay_buffer.size == 3
+        assert replay_buffer.position == 3
+
+        # Create a batch to add
+        batch_size = 4
+        states = torch.full((batch_size, replay_buffer.state_dim), 10.0)
+        actions = torch.full((batch_size, replay_buffer.action_dim), 10.0)
+        rewards = torch.full((batch_size, 1), 10.0)
+        next_states = torch.full((batch_size, replay_buffer.state_dim), 11.0)
+        dones = torch.zeros(batch_size, 1)
+        hiddens = torch.full((batch_size, replay_buffer.hidden_dim), 10.0)
+
+        # Add the batch
+        replay_buffer.add_multi(states, actions, rewards, next_states, dones, hiddens)
+
+        # Verify updated state
+        assert replay_buffer.size == 7
+        assert replay_buffer.position == 7
+
+        # Check individual experiences are still there
+        for i in range(3):
+            assert torch.allclose(
+                replay_buffer.states[i],
+                torch.full((replay_buffer.state_dim,), float(i)).to(torch.float32),
+            )
+            assert torch.allclose(replay_buffer.rewards[i], torch.tensor([[float(i)]]))
+
+        # Check batch experiences were added correctly
+        for i in range(4):
+            assert torch.allclose(
+                replay_buffer.states[i + 3], states[i].to(torch.float32)
+            )
+            assert torch.allclose(replay_buffer.rewards[i + 3], rewards[i])

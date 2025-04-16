@@ -3,8 +3,6 @@ from abc import abstractmethod
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Tuple, get_args
 
-from velora.utils.format import number_to_short
-
 try:
     from typing import override
 except ImportError:  # pragma: no cover
@@ -14,10 +12,11 @@ import gymnasium as gym
 
 if TYPE_CHECKING:
     from velora.state import TrainState  # pragma: no cover
+    from velora.models.base import RLModuleAgent  # pragma: no cover
 
 from velora.metrics.db import get_current_episode
-from velora.models.base import RLAgent
 from velora.state import AnalyticsState, RecordMethodLiteral, RecordState
+from velora.utils.format import number_to_short
 
 
 class TrainCallback:
@@ -128,7 +127,7 @@ class SaveCheckpoints(TrainCallback):
 
                 Compliments `TrainCallback.RecordVideos` callback.
 
-            frequency (int, optional): save frequency (in episodes)
+            frequency (int, optional): save frequency (in episodes or steps)
             buffer (bool, optional): whether to save the buffer state
         """
         self.dirname = dirname
@@ -159,7 +158,7 @@ class SaveCheckpoints(TrainCallback):
         if state.status == "episode" and ep_idx != state.total_episodes:
             if ep_idx % self.frequency == 0:
                 should_save = True
-                filename += f"ep{number_to_short(ep_idx)}"
+                filename += f"{number_to_short(ep_idx)}"
 
         # Perform final checkpoint save
         elif state.status == "complete":
@@ -171,12 +170,12 @@ class SaveCheckpoints(TrainCallback):
 
         return state
 
-    def save_checkpoint(self, agent: RLAgent, dirname: str) -> None:
+    def save_checkpoint(self, agent: "RLModuleAgent", dirname: str) -> None:
         """
         Saves a checkpoint at a given episode with the given suffix.
 
         Parameters:
-            agent (RLAgent): the agent being trained
+            agent (RLModuleAgent): the agent being trained
             dirname (str): the checkpoint directory name
         """
         checkpoint_path = Path(self.filepath, dirname)
@@ -362,37 +361,9 @@ class CometAnalytics(TrainCallback):
             self.experiment.log_parameters(state.agent.config.model_dump())
 
         # Send episodic metrics
-        if state.status == "episode":
-            results = get_current_episode(
-                state.session,
-                state.experiment_id,
-                state.current_ep,
-            )
-
-            for episode in results:
-                reward_low = episode.reward_moving_avg - episode.reward_moving_std
-                reward_high = episode.reward_moving_avg + episode.reward_moving_std
-
-                self.experiment.log_metrics(
-                    {
-                        "ep_reward": episode.reward,
-                        "ep_length": episode.length,
-                        "ep_reward_moving_avg": episode.reward_moving_avg,
-                        "ep_reward_moving_upper": reward_high,
-                        "ep_reward_moving_lower": reward_low,
-                        "ep_actor_loss": episode.actor_loss,
-                        "ep_critic_loss": episode.critic_loss,
-                    },
-                    epoch=state.current_ep,
-                )
-
-                # Only if required (SAC)
-                if episode.entropy_loss != 0:
-                    self.experiment.log_metric(
-                        "ep_entropy_loss",
-                        episode.entropy_loss,
-                        epoch=state.current_ep,
-                    )
+        if state.status == "logging":
+            if state.logging_type == "episode":
+                self.log_episode_data(state)
 
         # Finalize training
         if state.status == "complete":
@@ -404,6 +375,37 @@ class CometAnalytics(TrainCallback):
             self.experiment.end()
 
         return state
+
+    def log_episode_data(self, state: "TrainState") -> None:
+        """
+        Logs episodic data to the experiment.
+
+        Parameters:
+            state (TrainState): the current training state
+        """
+        results = get_current_episode(
+            state.session,
+            state.experiment_id,
+            state.current_ep,
+        )
+
+        for item in results:
+            reward_low = item.reward_moving_avg - item.reward_moving_std
+            reward_high = item.reward_moving_avg + item.reward_moving_std
+
+            self.experiment.log_metrics(
+                {
+                    "reward/moving_lower": reward_low,
+                    "reward/moving_avg": item.reward_moving_avg,
+                    "reward/moving_upper": reward_high,
+                    "episode/return": item.reward,
+                    "episode/length": item.length,
+                    "losses/actor": item.actor_loss,
+                    "losses/critic": item.critic_loss,
+                    "losses/entropy": item.entropy_loss,
+                },
+                epoch=state.current_ep,
+            )
 
     def init_experiment(self, state: "TrainState") -> None:
         """Setups up a comet experiment and stores it locally.

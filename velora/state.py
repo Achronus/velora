@@ -5,9 +5,9 @@ from typing import Any, Callable, Dict, List, Literal
 import gymnasium as gym
 from sqlmodel import Session
 
-from velora.models.base import RLAgent
+from velora.models.base import RLModuleAgent
 
-StatusLiteral = Literal["start", "episode", "step", "complete"]
+StatusLiteral = Literal["start", "episode", "logging", "step", "complete"]
 RecordMethodLiteral = Literal["episode", "step"]
 
 
@@ -68,7 +68,7 @@ class TrainState:
     A storage container for the current state of model training.
 
     Parameters:
-        agent (RLAgent): the agent being trained
+        agent (RLModuleAgent): the agent being trained
         env (gymnasium.Env): a single training or evaluation environment
         session (sqlmodel.Session): the current metric database session
         experiment_id (int): the current experiment's unique ID
@@ -78,9 +78,11 @@ class TrainState:
 
             - `start` - before training starts.
             - `episode` - inside the episode loop.
+            - `logging` - metric logging.
             - `step` - inside the timestep loop.
             - `complete` - completed training.
 
+        logging_type (Literal["episode", "step"], optional): the logging type
         current_ep (int, optional): the current episode index
         current_step (int, optional): the current training timestep
         ep_reward (float, optional): the current episode reward
@@ -89,13 +91,14 @@ class TrainState:
         analytics_state (AnalyticsState, optional): the analytics state
     """
 
-    agent: RLAgent
+    agent: RLModuleAgent
     env: gym.Env
     session: Session
     experiment_id: int
     total_episodes: int = 0
     total_steps: int = 0
     status: StatusLiteral = "start"
+    logging_type: Literal["episode", "step"] = "episode"
     current_ep: int = 0
     current_step: int = 0
     ep_reward: float = 0.0
@@ -110,26 +113,30 @@ class TrainState:
         current_ep: int | None = None,
         current_step: int | None = None,
         ep_reward: int | None = None,
+        logging_type: Literal["episode", "step"] | None = None,
     ) -> None:
         """
         Updates the training state. When any input is `None`, uses existing value.
 
         Parameters:
-            status (Literal["start", "episode", "step", "complete"], optional): the current stage of training.
+            status (Literal["start", "episode", "logging", "step", "complete"], optional): the current stage of training.
 
                 - `start` - before training start.
                 - `episode` - inside the episode loop.
+                - `logging` - metric logging.
                 - `step` - inside the timestep loop.
                 - `complete` - completed training.
 
             current_ep (int, optional): the current episode index
             current_step (int, optional): the current training timestep
             ep_reward (float, optional): the current episode or rollout update reward
+            logging_type (Literal["episode", "step"], optional): the logging type
         """
         self.status = status if status else self.status
         self.current_ep = current_ep if current_ep else self.current_ep
         self.current_step = current_step if current_step else self.current_step
         self.ep_reward = ep_reward if ep_reward else self.ep_reward
+        self.logging_type = logging_type if logging_type else self.logging_type
 
     def analytics_update(self) -> None:
         """

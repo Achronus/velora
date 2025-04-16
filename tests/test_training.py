@@ -1,14 +1,14 @@
-from unittest.mock import MagicMock, patch
+import json
+from unittest.mock import MagicMock, Mock, patch
 import pytest
 
 import torch
 
 from velora.metrics.db import get_current_episode
 from velora.metrics.models import Episode, Experiment
-from velora.models.base import RLAgent
+from velora.models.base import RLModuleAgent
 
 from velora.models.config import RLAgentConfig
-from velora.models.ddpg import LiquidDDPG
 from velora.state import RecordState
 from velora.training.handler import TrainHandler
 from velora.training.metrics import (
@@ -186,24 +186,58 @@ class TestTrainMetrics:
 
     @pytest.fixture
     def mock_config(self) -> RLAgentConfig:
-        ddpg = LiquidDDPG(4, 10, 1)
+        with patch("velora.models.base.RLModuleAgent"):
+            # Create mock model details
+            model_details = Mock()
+            model_details.actor = Mock(active_params=100, total_params=200)
+            model_details.critic = Mock(critic1=Mock(), critic2=Mock())
+            model_details.entropy = Mock()
+            model_details.state_dim = 4
+            model_details.action_dim = 1
+            model_details.actor_neurons = 8
+            model_details.critic_neurons = 16
+            model_details.tau = 0.005
+            model_details.gamma = 0.99
+            model_details.action_type = "continuous"
+            model_details.exploration_type = "Entropy"
 
-        config = ddpg.config
-        config = config.update(
-            "TestEnv",
-            dict(
-                batch_size=32,
-                n_episodes=100,
-                max_steps=200,
-                display_count=10,
-                window_size=10,
-                gamma=0.99,
-                tau=0.005,
-                noise_scale=0.3,
-            ),
-        )
+            # Create mock buffer config
+            buffer_config = Mock()
+            buffer_config.type = "ReplayBuffer"
+            buffer_config.capacity = 100000
+            buffer_config.state_dim = 4
+            buffer_config.action_dim = 1
+            buffer_config.hidden_dim = 8
 
-        return config
+            # Create mock torch config
+            torch_config = Mock()
+            torch_config.device = "cpu"
+            torch_config.optimizer = "Adam"
+            torch_config.loss = "MSELoss"
+
+            # Create the config
+            config = Mock(spec=RLAgentConfig)
+            config.agent = "NeuroFlow"
+            config.env = "InvertedPendulum-v5"
+            config.seed = 42
+            config.model_details = model_details
+            config.buffer = buffer_config
+            config.torch = torch_config
+            config.train_params = None
+            config.model_dump = Mock(
+                return_value={
+                    "agent": "NeuroFlow",
+                    "env": "InvertedPendulum-v5",
+                    "seed": 42,
+                }
+            )
+            config.model_dump_json = Mock(
+                return_value=json.dumps(
+                    {"agent": "NeuroFlow", "env": "InvertedPendulum-v5", "seed": 42}
+                )
+            )
+
+            return config
 
     def test_init(self, experiment):
         session, _ = experiment
@@ -239,27 +273,29 @@ class TestTrainMetrics:
         assert experiment.agent == mock_config.agent
         assert experiment.env == mock_config.env
 
-    def test_add_step(self, metrics: TrainMetrics):
+    def test_add_step(self, metrics: TrainMetrics, mock_config: RLAgentConfig):
+        metrics.start_experiment(mock_config)
+
         # Fill in test values
         critic_loss = torch.tensor(0.8)
         actor_loss = torch.tensor(0.6)
         entropy_loss = torch.tensor(0.6)
 
         # Add a step
-        metrics.add_step(critic=critic_loss, actor=actor_loss)
+        metrics.add_step(critic=critic_loss, actor=actor_loss, entropy=entropy_loss)
 
-        # Verify losses were stored (no entropy)
+        # Verify losses were stored once
         assert torch.isclose(
             metrics._current_losses.critic_losses[0], torch.tensor(0.8)
         )
         assert torch.isclose(metrics._current_losses.actor_losses[0], torch.tensor(0.6))
         assert torch.isclose(
-            metrics._current_losses.entropy_losses[0], torch.tensor(0.0)
+            metrics._current_losses.entropy_losses[0], torch.tensor(0.6)
         )
         assert metrics._current_losses.position == 1
         assert metrics._current_losses.size == 1
 
-        # Verify additional losses (with entropy)
+        # Verify additional losses
         metrics.add_step(critic=critic_loss, actor=actor_loss, entropy=entropy_loss)
 
         assert torch.isclose(
@@ -358,36 +394,6 @@ class TestTrainMetrics:
         max_reward = metrics.reward_moving_max()
         assert torch.isclose(torch.tensor(max_reward), torch.tensor(90.0))
 
-    def test_info_no_entropy(self, metrics: TrainMetrics):
-        metrics._ep_lengths = torch.zeros(
-            (100,), dtype=torch.int, device=torch.device("cpu")
-        )
-        metrics._ep_lengths[49] = 200  # Set episode 50's length
-        metrics._ep_lengths.latest = 200
-        metrics._ep_rewards.add(torch.tensor(85.0))
-        metrics._critic_loss = torch.tensor(0.7)
-        metrics._actor_loss = torch.tensor(0.6)
-        metrics._entropy_loss = torch.tensor(0.0)
-
-        # Mock print
-        with patch("builtins.print") as mock_print:
-            # Execute
-            metrics.info(current_ep=50)
-
-            # Verify print was called
-            mock_print.assert_called_once()
-
-            # Check the print message format (don't check exact format as it might change)
-            print_args = mock_print.call_args[0][0]
-            assert "Episode" in print_args, mock_print.call_args
-            assert "Steps" in print_args
-            assert "Max Length:" in print_args
-            assert "Reward Avg:" in print_args
-            assert "Reward Max:" in print_args
-            assert "Actor Loss:" in print_args
-            assert "Critic Loss:" in print_args
-            assert "Entropy Loss:" not in print_args
-
     def test_info_with_entropy(self, metrics: TrainMetrics):
         metrics._ep_lengths = torch.zeros(
             (100,), dtype=torch.int, device=torch.device("cpu")
@@ -428,9 +434,9 @@ class TestTrainHandler:
         # Set up the TrainHandler instance with mocks
         handler = TrainHandler(
             agent=MagicMock(),
-            env=MagicMock(),
             n_episodes=100,
             max_steps=200,
+            log_freq=10,
             window_size=10,
             callbacks=[mock_callback],
         )
@@ -459,43 +465,52 @@ class TestTrainHandler:
 class TestTrainHandlerRecordLastEpisode:
     @pytest.fixture
     def mock_agent(self):
-        agent = MagicMock(spec=RLAgent)
+        agent = MagicMock(spec=RLModuleAgent)
         agent.device = "cpu"
+
+        # Create a mock environment with the necessary spec attributes
+        mock_env = MagicMock()
+        mock_env.spec = MagicMock()
+        mock_env.spec.id = "TestEnv-v0"
+        mock_env.spec.name = "TestEnv"
+
+        # Assign the mock env to the agent
+        agent.env = mock_env
+
         return agent
 
     @pytest.fixture
-    def mock_env(self):
-        env = MagicMock()
-        env.spec.id = "TestEnv-v0"
-        env.spec.name = "TestEnv"
-        return env
-
-    @pytest.fixture
-    def train_handler(self, mock_agent, mock_env, experiment):
+    def train_handler(self, mock_agent, experiment):
         handler = TrainHandler(
             agent=mock_agent,
-            env=mock_env,
             n_episodes=100,
             max_steps=10,
             window_size=10,
+            log_freq=10,
             callbacks=None,
         )
         handler.session = experiment[0]
         handler._metrics = MagicMock()
 
+        # Create the state
+        state = MagicMock()
+        state.agent = mock_agent
+        state.env = mock_agent.env
+        handler.state = state
+
         return handler
 
     @patch("velora.training.handler.record_last_episode")
     def test_record_last_episode_with_record_state(
-        self, mock_record, train_handler, mock_agent, mock_env, tmp_path
+        self, mock_record, train_handler, mock_agent, tmp_path
     ):
         # Set up record_state in the handler's state
         test_dir = tmp_path / "test_videos"
         test_dir.mkdir()
 
-        train_handler.state = MagicMock()
+        # Ensure both the state and the env properties are properly set
         train_handler.state.agent = mock_agent
-        train_handler.state.env = mock_env
+        train_handler.state.env = mock_agent.env
         train_handler.state.record_state = RecordState(
             dirpath=test_dir, method="episode", episode_trigger=lambda x: x % 10 == 0
         )
@@ -505,13 +520,12 @@ class TestTrainHandlerRecordLastEpisode:
 
         # Verify the record_last_episode function was called with correct parameters
         mock_record.assert_called_once_with(
-            mock_agent, mock_env.spec.id, test_dir.parent.name
+            mock_agent, mock_agent.env.spec.id, test_dir.parent.name
         )
 
     @patch("velora.training.handler.record_last_episode")
     def test_record_last_episode_without_record_state(self, mock_record, train_handler):
         # Set up state without record_state
-        train_handler.state = MagicMock()
         train_handler.state.record_state = None
 
         # Call the record_last_episode method

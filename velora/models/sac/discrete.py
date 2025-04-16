@@ -1,5 +1,5 @@
-from copy import deepcopy
-from pathlib import Path
+from typing import Tuple
+
 from typing import TYPE_CHECKING, Dict, List, Self, Tuple, Type
 
 from velora.buffer.experience import BatchExperience
@@ -16,7 +16,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.distributions import Categorical
 
-if TYPE_CHECKING:
+from velora.models.base import LiquidNCPModule
     from velora.callbacks import TrainCallback  # pragma: no cover
 
 from velora.buffer.replay import ReplayBuffer

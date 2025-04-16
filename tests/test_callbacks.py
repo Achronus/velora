@@ -16,13 +16,13 @@ from velora.callbacks import (
     SaveCheckpoints,
 )
 from velora.metrics.models import Episode
-from velora.models.base import RLAgent
+from velora.models.base import RLModuleAgent
 from velora.state import AnalyticsState, RecordState, TrainState
 
 
 @pytest.fixture
 def mock_agent():
-    agent = Mock(spec=RLAgent)
+    agent = Mock(spec=RLModuleAgent)
     return agent
 
 
@@ -228,7 +228,7 @@ class TestSaveCheckpoints:
     def test_save_on_frequency(self, mock_mkdir, train_state):
         """Test saving checkpoint at specified frequency."""
         callback = SaveCheckpoints("model_dir", frequency=10)
-        train_state.env.spec.name = "CartPole-v1"  # Set environment name
+        train_state.env.spec.name = "CartPole"  # Set environment name
         train_state.current_ep = 10  # Episode matches frequency exactly
 
         result = callback(train_state)
@@ -237,7 +237,7 @@ class TestSaveCheckpoints:
         assert train_state.agent.save.call_count == 1
         # Check save path contains correct filename without .pt extension
         save_path = train_state.agent.save.call_args[0][0]
-        assert "CartPole-v1_ep10" in str(save_path)
+        assert "CartPole_10" in str(save_path)
         assert train_state.agent.save.call_args[1]["buffer"] is False
 
         assert result is train_state
@@ -537,57 +537,65 @@ class TestCometAnalytics:
         mock_experiment.name = "custom-experiment"
         mock_experiment.disabled = True
 
-        # Mock comet_ml.Experiment to return our mock
-        sys.modules["comet_ml"].Experiment = MagicMock(return_value=mock_experiment)
+        # Mock comet_ml module
+        mock_comet = MagicMock()
+        mock_comet.Experiment = MagicMock(return_value=mock_experiment)
+        mock_comet.ExistingExperiment = MagicMock(return_value=mock_experiment)
 
-        # Create callback in test mode
-        callback = CometAnalytics(
-            "test-project", "custom-experiment", tags=["tag1", "tag2"]
-        )
-        assert callback.state.project_name == "test-project"
-        assert callback.state.experiment_name == "custom-experiment"
+        # Patch the module
+        with patch.dict(sys.modules, {"comet_ml": mock_comet}):
+            # Create callback in test mode
+            callback = CometAnalytics(
+                "test-project", "custom-experiment", tags=["tag1", "tag2"]
+            )
+            assert callback.state.project_name == "test-project"
+            assert callback.state.experiment_name == "custom-experiment"
 
-        # Test 'start' status
-        train_state.status = "start"
-        result = callback(train_state)
-        assert result.analytics_state is not None
+            # Test 'start' status
+            train_state.status = "start"
+            result = callback(train_state)
+            assert result.analytics_state is not None
 
-        # Set the experiment manually to avoid any comet_ml internals
-        callback.experiment = mock_experiment
+            # Set the experiment attribute manually
+            callback.experiment = mock_experiment
 
-        # Test 'step' status (should be ignored)
-        train_state.status = "step"
-        callback(train_state)
-        assert not mock_experiment.log_metrics.called
+            # Test 'logging' status with episode logging type
+            train_state.status = "logging"
+            train_state.logging_type = "episode"
+            train_state.current_ep = 10
 
-        # Test 'episode' status
-        train_state.status = "episode"
-        with patch("velora.callbacks.get_current_episode", return_value=[mock_episode]):
+            with patch(
+                "velora.callbacks.get_current_episode", return_value=[mock_episode]
+            ):
+                result = callback(train_state)
+
+            # Verify metrics were logged
+            mock_experiment.log_metrics.assert_called_once()
+
+            # Verify the metrics that were logged
+            metrics = mock_experiment.log_metrics.call_args[0][0]
+            assert "reward/moving_avg" in metrics
+            assert metrics["reward/moving_avg"] == mock_episode.reward_moving_avg
+            assert "reward/moving_upper" in metrics
+            assert "episode/return" in metrics
+            assert metrics["episode/return"] == mock_episode.reward
+
+            # Create mock video directory with files for 'complete' status test
+            video_dir = tmp_path / "videos"
+            video_dir.mkdir()
+            video_file = video_dir / "test_video.mp4"
+            video_file.touch()
+
+            # Test 'complete' status with videos
+            train_state.status = "complete"
+            train_state.record_state = RecordState(dirpath=video_dir, method="episode")
             callback(train_state)
 
-        # Verify metrics
-        mock_experiment.log_metrics.assert_called_once()
-        metrics = mock_experiment.log_metrics.call_args[0][0]
-        assert metrics["ep_reward"] == 95.0
-        assert metrics["ep_reward_moving_avg"] == 85.0
-        assert metrics["ep_reward_moving_upper"] == 90.0  # avg + std
-        assert metrics["ep_reward_moving_lower"] == 80.0  # avg - std
-
-        # Create mock video directory with files for 'complete' status test
-        video_dir = tmp_path / "videos"
-        video_dir.mkdir()
-        video_file = video_dir / "test_video.mp4"
-        video_file.touch()
-
-        # Test 'complete' status with videos
-        train_state.status = "complete"
-        train_state.record_state = RecordState(dirpath=video_dir, method="episode")
-        callback(train_state)
-
-        # Verify end was called and video was logged
-        mock_experiment.end.assert_called_once()
-        mock_experiment.log_video.assert_called_once()
-        assert mock_experiment.log_video.call_args[1]["format"] == "mp4"
+            # Verify end was called and video was logged
+            mock_experiment.end.assert_called_once()
+            mock_experiment.log_video.assert_called_once()
+            assert str(video_file) in mock_experiment.log_video.call_args[0][0]
+            assert mock_experiment.log_video.call_args[1]["format"] == "mp4"
 
     @patch("os.getenv", return_value="fake-api-key")
     @patch.dict(sys.modules, {"comet_ml": MagicMock()})

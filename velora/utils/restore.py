@@ -3,24 +3,16 @@ from pathlib import Path
 from pydoc import locate
 from typing import TYPE_CHECKING, Any, Dict, Literal, Type, get_args
 
+if TYPE_CHECKING:
+    from velora.models.base import RLModuleAgent  # pragma: no cover
+
 import torch
 from safetensors.torch import load_file, save_file
-from torch.optim import Optimizer
-
-
-if TYPE_CHECKING:
-    from velora.models.base import (
-        LiquidNCPModule,
-        RLAgent,
-        RLModuleAgent,
-    )  # pragma: no cover
-    from velora.models.neuroflow.modules import BaseModule  # pragma: no cover
 
 TensorDictKeys = Literal[
     "actor",
     "critic",
     "critic2",
-    "actor_target",
     "critic_target",
     "critic2_target",
 ]
@@ -113,194 +105,6 @@ def model_from_tensor(
 
 
 def save_model(
-    agent: "RLAgent",
-    dirpath: str | Path,
-    *,
-    buffer: bool = False,
-    config: bool = False,
-    force: bool = False,
-) -> None:
-    """
-    Saves the current model state into `safetensors` and `json` files.
-
-    Only usable for agents that inherit from `RLAgent`.
-
-    !!! warning
-
-        `model_config.json` is stored in the `dirpath.parent`.
-
-    Includes:
-    - `model_config.json` - contains the core details of the agent (optional)
-    - `metadata.json` - contains the model, optimizer and buffer (optional) metadata
-    - `model_state.safetensors` - contains the model weights and biases
-    - `optim_state.safetensors` - contains the optimizer states (actor and critic)
-    - `buffer_state.safetensors` - contains the buffer state (only if `buffer=True`)
-
-    Parameters:
-        agent (RLAgent): the agent's state to save
-        dirpath (str | Path): the location to store the model state. Should only
-            consist of `folder` names. E.g., `<folder>/<folder>`
-        buffer (bool, optional): a flag for storing the buffer state
-        config (bool, optional): a flag for storing the model's config
-        force (bool, optional): enables file overwriting, ignoring existing state
-            files. Useful for continuing model training
-    """
-    save_path = Path(dirpath)
-    save_path.mkdir(parents=True, exist_ok=True)
-
-    config_path = Path(save_path.parent, "model_config").with_suffix(".json")
-    metadata_path = Path(save_path, "metadata").with_suffix(".json")
-    model_state_path = Path(save_path, "model_state").with_suffix(".safetensors")
-    optim_state_path = Path(save_path, "optim_state").with_suffix(".safetensors")
-    buffer_state_path = Path(save_path, "buffer_state").with_suffix(".safetensors")
-
-    if not force and model_state_path.exists():
-        raise FileExistsError(
-            f"A model state already exists in the '{save_path}' directory! Either change the 'dirpath', delete the folders contents, or use 'force=True' to allow overwriting."
-        )
-
-    # Handle model state dicts, ignoring missing items
-    model_tuples = [
-        (item, getattr(agent, item).state_dict())
-        for item in get_args(TensorDictKeys)
-        if hasattr(agent, item) and getattr(agent, item) is not None
-    ]
-
-    tensor_dict: Dict[str, torch.Tensor] = {}
-
-    for model_name, state_dict in model_tuples:
-        for param_name, tensor in state_dict.items():
-            tensor_dict[f"{model_name}.{param_name}"] = tensor.contiguous()
-
-    # Handle optimizers, ignoring missing items
-    optim_dict: Dict[OptimDictKeys, Dict[str, Any]] = {}
-    param_dict: Dict[OptimDictKeys, Dict[str, Any]] = {}
-
-    for key in get_args(OptimDictKeys):
-        module: "LiquidNCPModule" = getattr(agent, key)
-
-        if module is not None:
-            optim_dict |= optim_to_tensor(key, module.state_dict())
-            param_dict[key] = module.state_dict()["param_groups"]
-
-    # Save tensors (weights and biases only)
-    save_file(tensor_dict, model_state_path)
-    save_file(optim_dict, optim_state_path)
-
-    # Store metadata as JSON
-    metadata: Dict[MetadataKeys, Any] = {
-        "model": {
-            "state_dim": agent.state_dim,
-            "n_neurons": agent.n_neurons,
-            "action_dim": agent.action_dim,
-            "buffer_size": agent.buffer_size,
-            "optim": f"torch.optim.{type(agent.actor_optim).__name__}",
-            "device": str(agent.device) if agent.device is not None else "cpu",
-        },
-        **param_dict,
-    }
-
-    # Add buffer (if applicable)
-    if buffer:
-        metadata["buffer"] = agent.buffer.metadata()
-        save_file(agent.buffer.state_dict(), buffer_state_path)
-
-    # Write to files
-    if config and not config_path.exists():
-        with config_path.open("w") as f:
-            f.write(agent.config.model_dump_json(indent=2, exclude_none=True))
-
-    if not metadata_path.exists():
-        with metadata_path.open("w") as f:
-            f.write(json.dumps(metadata, indent=2))
-
-
-def load_model(
-    agent: Type["RLAgent"], dirpath: str | Path, *, buffer: bool = False
-) -> "RLAgent":
-    """
-    Creates a new agent instance by loading a saved one from the `dirpath`.
-    Also, loads the original training buffer if `buffer=True`.
-
-    Only usable for agents that inherit from `RLAgent`.
-
-    These files must exist in the `dirpath`:
-    - `metadata.json` - contains the model, optimizer and buffer (optional) metadata
-    - `model_state.safetensors` - contains the model weights and biases
-    - `optim_state.safetensors` - contains the optimizer states (actor and critic)
-    - `buffer_state.safetensors` - contains the buffer state (only if `buffer=True`)
-
-    Parameters:
-        agent (Type[RLAgent]): the type of agent to load
-        dirpath (str | Path): the location to store the model state. Should only
-            consist of `folder` names. E.g., `<folder>/<folder>`
-        buffer (bool, optional): a flag for storing the buffer state
-
-    Returns:
-        agent (RLAgent): a new agent instance with the saved state
-    """
-    load_path = Path(dirpath)
-
-    metadata_path = Path(load_path, "metadata").with_suffix(".json")
-    model_state_path = Path(load_path, "model_state").with_suffix(".safetensors")
-    optim_state_path = Path(load_path, "optim_state").with_suffix(".safetensors")
-    buffer_state_path = Path(load_path, "buffer_state").with_suffix(".safetensors")
-
-    if not model_state_path.exists():
-        raise FileNotFoundError(f"Model state '{model_state_path}' does not exist!")
-
-    if not optim_state_path.exists():
-        raise FileNotFoundError(f"Optimizer state '{optim_state_path}' does not exist!")
-
-    if not metadata_path.exists():
-        raise FileNotFoundError(f"Metadata '{metadata_path}' does not exist!")
-
-    if buffer and not buffer_state_path.exists():
-        raise FileNotFoundError(
-            f"Buffer state '{buffer_state_path}' does not exist! Try with 'buffer=False'."
-        )
-
-    # Load metadata first
-    with metadata_path.open("r") as f:
-        metadata: Dict[MetadataKeys, Any] = json.load(f)
-
-    device: str = metadata["model"]["device"] or "cpu"
-    metadata["model"]["device"] = torch.device(device)
-    metadata["model"]["optim"] = locate(metadata["model"]["optim"])
-
-    # Create new model instance
-    model = agent(**metadata["model"])
-
-    # Load model parameters from safetensors
-    tensor_dict: Dict[str, torch.Tensor] = load_file(model_state_path, device)
-    model_state = model_from_tensor(tensor_dict)
-
-    for key in model_state.keys():
-        module: "LiquidNCPModule" = getattr(model, key)
-        module.load_state_dict(model_state[key])
-
-    # Load optimizer parameters from safetensors
-    tensor_dict: Dict[str, torch.Tensor] = load_file(optim_state_path, device)
-    optim_state = optim_from_tensor(tensor_dict)
-
-    for key in optim_state.keys():
-        module: Optimizer = getattr(model, key)
-        module.load_state_dict(
-            {
-                "state": optim_state[key],
-                "param_groups": metadata[key],
-            }
-        )
-
-    # Load buffer
-    if buffer:
-        model.buffer = model.buffer.load(buffer_state_path, metadata["buffer"])
-
-    print(f"Loaded model:\n  {model}\n  buffer_restored={buffer}")
-    return model
-
-
-def save_model_modules(
     agent: "RLModuleAgent",
     dirpath: str | Path,
     *,
@@ -310,8 +114,6 @@ def save_model_modules(
 ) -> None:
     """
     Saves the current model state into `safetensors` and `json` files.
-
-    Only usable for agents that inherit from `RLModuleAgent`.
 
     !!! warning
 
@@ -387,14 +189,12 @@ def save_model_modules(
             f.write(json.dumps(metadata, indent=2))
 
 
-def load_model_modules(
+def load_model(
     agent: Type["RLModuleAgent"], dirpath: str | Path, *, buffer: bool = False
-) -> "RLModuleAgent":
+) -> Any:
     """
     Creates a new agent instance by loading a saved one from the `dirpath`.
     Also, loads the original training buffer if `buffer=True`.
-
-    Only usable for agents that inherit from `RLModuleAgent`.
 
     These files must exist in the `dirpath`:
     - `metadata.json` - contains the model, optimizer and buffer (optional) metadata
@@ -436,7 +236,7 @@ def load_model_modules(
     with metadata_path.open("r") as f:
         metadata: Dict[MetadataKeys, Any] = json.load(f)
 
-    device: str = metadata["model"]["device"] or "cpu"
+    device: str = metadata["model"]["device"]
     metadata["model"]["device"] = torch.device(device)
     metadata["model"]["optim"] = locate(metadata["model"]["optim"])
 
@@ -461,7 +261,7 @@ def load_model_modules(
 
     # Restore module states
     for name in get_args(ModuleNames):
-        module: "BaseModule" = getattr(model, name)
+        module = getattr(model, name)
         module.load_state_dict(agent_state)
 
     # Load buffer

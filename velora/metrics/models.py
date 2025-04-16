@@ -62,11 +62,6 @@ class Episode(SQLModel, table=True):
     critic_loss: float
     entropy_loss: float = Field(default=0.0)
 
-    # Behaviour metrics
-    # explore_rate: float
-    # exploit_mean: float
-    # exploit_std: float
-
     # Timestamps
     created_at: datetime = Field(default_factory=datetime.now)
 

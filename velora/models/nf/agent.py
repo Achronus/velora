@@ -1,5 +1,9 @@
 from pathlib import Path
-from typing import TYPE_CHECKING, Dict, List, Self, Tuple, Type
+from typing import TYPE_CHECKING, Dict, List, Literal, Self, Tuple, Type
+
+from velora.callbacks import TrainCallback
+from velora.training.display import training_info
+from velora.training.handler import TrainHandler
 
 try:
     from typing import override
@@ -12,17 +16,15 @@ import torch.nn as nn
 import torch.optim as optim
 
 if TYPE_CHECKING:
-    from velora.callbacks import TrainCallback  # pragma: no cover
     from velora.buffer.experience import BatchExperience  # pragma: no cover
 
 from velora.buffer.replay import ReplayBuffer
 from velora.models.base import RLModuleAgent
-from velora.models.config import NFModelDetails, RLAgentConfig, TorchConfig
-from velora.models.neuroflow.modules import ActorModule, CriticModule, EntropyModule
-from velora.training.display import training_info
-from velora.training.handler import TrainHandler
-from velora.utils.format import number_to_short
-from velora.utils.restore import load_model_modules, save_model_modules
+from velora.models.config import ModelDetails, RLAgentConfig, TorchConfig
+from velora.models.nf.modules import ActorModule, CriticModule, EntropyModule
+from velora.utils.restore import load_model, save_model
+
+StateDictKeys = Literal["modules", "optimizers"]
 
 
 class NeuroFlow(RLModuleAgent):
@@ -57,57 +59,57 @@ class NeuroFlow(RLModuleAgent):
 
     def __init__(
         self,
-        state_dim: int,
+        env_id: str,
         actor_neurons: int,
         critic_neurons: int,
-        action_dim: int,
         *,
         optim: Type[optim.Optimizer] = optim.Adam,
-        buffer_size: int = 1_000_000,
+        buffer_size: int = int(1e6),
         actor_lr: float = 3e-4,
         critic_lr: float = 3e-4,
         alpha_lr: float = 3e-4,
-        curiosity_lr: float = 1e-4,
         initial_alpha: float = 1.0,
         log_std: Tuple[float, float] = (-5, 2),
         tau: float = 0.005,
-        eta: float = 0.1,
-        beta: float = 0.2,
+        gamma: float = 0.99,
         device: torch.device | None = None,
         seed: int | None = None,
     ) -> None:
         """
         Parameters:
-            state_dim (int): number of inputs (sensory nodes)
+            env_id (str): the Gymnasium environment ID to train the model on
             actor_neurons (int): number of decision nodes (inter and command nodes)
                 for the actor
             critic_neurons (int): number of decision nodes (inter and command nodes)
                 for the critic
-            action_dim (int): number of outputs (motor nodes)
             optim (Type[torch.optim.Optimizer], optional): the type of `PyTorch`
                 optimizer to use
             buffer_size (int, optional): the maximum size of the `ReplayBuffer`
             actor_lr (float, optional): the actor optimizer learning rate
             critic_lr (float, optional): the critic optimizer learning rate
             alpha_lr (float, optional): the entropy parameter learning rate
-            curiosity_lr (float, optional): the ICM optimizer learning rate
             initial_alpha (float, optional): the starting entropy coefficient value
             log_std (Tuple[float, float], optional): `(low, high)` bounds for the
                 log standard deviation of the action distribution. Controls the
                 variance of actions
             tau (float, optional): the soft update factor used to slowly update
                 the target networks
-            eta (float, optional): importance scaling factor for intrinsic reward
-            beta (float, optional): weight balancing for inverse vs. forward model
+            gamma (float, optional): the reward discount factor
             device (torch.device, optional): the device to perform computations on
             seed (int, optional): random number seed for experiment
                 reproducibility. When `None` generates a seed automatically
         """
+        env = gym.make(env_id, render_mode="rgb_array")
+
+        if not isinstance(env.action_space, gym.spaces.Box):
+            raise EnvironmentError(
+                f"Invalid '{env.action_space=}'. Must be 'gym.spaces.Box'."
+            )
+
         super().__init__(
-            state_dim,
+            env,
             actor_neurons,
             critic_neurons,
-            action_dim,
             buffer_size,
             optim,
             device,
@@ -116,12 +118,15 @@ class NeuroFlow(RLModuleAgent):
 
         self.initial_alpha = initial_alpha
         self.log_std = log_std
+        self.gamma = gamma
         self.tau = tau
 
-        self.actor = ActorModule(
+        self.actor: ActorModule = ActorModule(
             self.state_dim,
             self.actor_neurons,
             self.action_dim,
+            self.action_scale,
+            self.action_bias,
             log_std_min=log_std[0],
             log_std_max=log_std[1],
             optim=optim,
@@ -129,7 +134,7 @@ class NeuroFlow(RLModuleAgent):
             device=self.device,
         )
 
-        self.critic = CriticModule(
+        self.critic: CriticModule = CriticModule(
             self.state_dim,
             self.critic_neurons,
             self.action_dim,
@@ -139,21 +144,10 @@ class NeuroFlow(RLModuleAgent):
             device=self.device,
         )
 
-        # self.curiosity = CuriosityModule(
-        #     self.state_dim,
-        #     self.n_neurons,
-        #     self.action_dim,
-        #     optim=optim,
-        #     lr=curiosity_lr,
-        #     eta=eta,
-        #     beta=beta,
-        #     device=self.device,
-        # )
-
         self.hidden_dim = self.actor.hidden_size
 
-        self.entropy = EntropyModule(
-            action_dim,
+        self.entropy: EntropyModule = EntropyModule(
+            self.action_dim,
             initial_alpha=initial_alpha,
             optim=optim,
             lr=alpha_lr,
@@ -163,10 +157,10 @@ class NeuroFlow(RLModuleAgent):
         self.loss = nn.MSELoss()
         self.buffer: ReplayBuffer = ReplayBuffer(
             buffer_size,
-            state_dim,
-            action_dim,
-            self.hidden_dim,
-            device=self.device,
+            self.state_dim,
+            self.action_dim,
+            self.actor.hidden_size,
+            device=device,
         )
 
         self.active_params = self.actor.active_params + self.critic.active_params
@@ -175,14 +169,16 @@ class NeuroFlow(RLModuleAgent):
         # Init config details
         self.config = RLAgentConfig(
             agent=self.__class__.__name__,
+            env=env_id,
             seed=self.seed,
-            model_details=NFModelDetails(
+            model_details=ModelDetails(
                 **locals(),
+                state_dim=self.state_dim,
+                action_dim=self.action_dim,
                 exploration_type="Entropy",
                 actor=self.actor.config,
                 critic=self.critic.config,
                 entropy=self.entropy.config(),
-                # curiosity=self.curiosity.config,
             ),
             buffer=self.buffer.config(),
             torch=TorchConfig(
@@ -192,9 +188,9 @@ class NeuroFlow(RLModuleAgent):
             ),
         )
 
-        self.metadata = self.set_metadata(locals())
+        self.metadata = self.set_metadata(locals(), self.seed)
 
-    def _update_critics(self, batch: "BatchExperience", gamma: float) -> torch.Tensor:
+    def _update_critics(self, batch: "BatchExperience") -> torch.Tensor:
         """
         Helper method. Performs Critic network updates.
 
@@ -202,7 +198,6 @@ class NeuroFlow(RLModuleAgent):
             batch (BatchExperience): an object containing a batch of experience
                 with `(states, actions, rewards, next_states, dones, hidden)`
                 from the buffer
-            gamma (float): the reward discount factor
 
         Returns:
             critic_loss (torch.Tensor): total Critic network loss `(c1_loss + c2_loss)`.
@@ -215,7 +210,7 @@ class NeuroFlow(RLModuleAgent):
             # Compute target Q-value
             next_q = self.critic.target_predict(batch.next_states, next_actions)
             next_q = next_q - self.entropy.alpha * next_log_probs
-            target_q = batch.rewards + (1 - batch.dones) * gamma * next_q
+            target_q = batch.rewards + (1 - batch.dones) * self.gamma * next_q
 
         current_q1, current_q2 = self.critic.predict(batch.states, batch.actions)
 
@@ -229,14 +224,12 @@ class NeuroFlow(RLModuleAgent):
 
         return critic_loss
 
-    def _train_step(self, batch_size: int, gamma: float) -> Dict[str, torch.Tensor]:
+    def _train_step(self, batch_size: int) -> Dict[str, torch.Tensor]:
         """
         Helper method. Performs a single training step.
 
         Parameters:
             batch_size (int): number of samples in a batch
-            gamma (float): the reward discount factor
-            tau (float): soft target network update factor
 
         Returns:
             losses (Dict[str, torch.Tensor]): a dictionary of losses -
@@ -245,17 +238,10 @@ class NeuroFlow(RLModuleAgent):
             - actor: the actor loss.
             - entropy: the entropy loss.
         """
-        if len(self.buffer) < batch_size:
-            return {
-                "critic": torch.zeros(1),
-                "actor": torch.zeros(1),
-                "entropy": torch.zeros(1),
-            }
-
         batch = self.buffer.sample(batch_size)
 
         # Compute critic loss
-        critic_loss = self._update_critics(batch, gamma)
+        critic_loss = self._update_critics(batch)
 
         # Make predictions
         actions, log_probs, _ = self.actor.forward(batch.states, batch.hiddens)
@@ -282,64 +268,51 @@ class NeuroFlow(RLModuleAgent):
     @override
     def train(
         self,
-        env: gym.Env,
         batch_size: int,
         *,
         n_episodes: int = 1000,
         callbacks: List["TrainCallback"] | None = None,
+        log_freq: int = 10,
         display_count: int = 100,
         window_size: int = 100,
         max_steps: int = 1000,
-        gamma: float = 0.99,
-        warmup_steps: int = 1000,
+        warmup_steps: int = 1024,
     ) -> None:
         """
         Trains the agent on a Gymnasium environment using a `ReplayBuffer`.
 
         Parameters:
-            env (gym.Env): the Gymnasium environment to train on
             batch_size (int): the number of features in a single batch
             n_episodes (int, optional): the total number of episodes to train for
             callbacks (List[TrainCallback], optional): a list of training callbacks
                 that are applied during the training process
+            log_freq (int, optional): metric logging frequency (in episodes)
             display_count (int, optional): console training progress frequency
                 (in episodes)
             window_size (int, optional): the reward moving average size
                 (in episodes)
             max_steps (int, optional): the total number of steps per episode
-            gamma (float, optional): the reward discount factor
             warmup_steps (int, optional): number of random steps to take before
                 starting training
         """
-        if not isinstance(env.action_space, gym.spaces.Box):
-            raise EnvironmentError(
-                f"Invalid '{env.action_space=}'. Must be 'gym.spaces.Box'."
-            )
-
         # Add training details to config
-        self.config = self.config.update(
-            env.spec.name,
-            self._set_train_params(dict(**locals(), tau=self.tau)),
-        )
+        self.config = self.config.update(self._set_train_params(locals()))
 
         # Display console details
-        env.reset(seed=self.seed)  # Set seed
+        self.env.reset(seed=self.seed)  # Set seed
         training_info(
             self,
-            env.spec.id,
             n_episodes,
             batch_size,
             window_size,
+            warmup_steps,
             callbacks or [],
-            self.device,
-            env.np_random_seed,
-            extras=f"Warming buffer with '{number_to_short(warmup_steps)}' samples before training starts.\n",
         )
 
-        self.buffer.warm(self, env.spec.id, warmup_steps, self.seed)
+        self.buffer.warm(self, warmup_steps)
 
         with TrainHandler(
-            self, env, n_episodes, max_steps, window_size, callbacks
+            self, n_episodes, max_steps, log_freq, window_size, callbacks
         ) as handler:
             for current_ep in range(1, n_episodes + 1):
                 ep_reward = 0.0
@@ -356,7 +329,7 @@ class NeuroFlow(RLModuleAgent):
 
                     self.buffer.add(state, action, reward, next_state, done, hidden)
 
-                    losses = self._train_step(batch_size, gamma)
+                    losses = self._train_step(batch_size)
 
                     handler.metrics.add_step(**losses)
                     handler.step(current_step)
@@ -365,12 +338,16 @@ class NeuroFlow(RLModuleAgent):
 
                     if done:
                         ep_reward = info["episode"]["r"].item()
+
                         handler.metrics.add_episode(
                             current_ep,
                             info["episode"]["r"],
                             info["episode"]["l"],
                         )
                         break
+
+                if current_ep % log_freq == 0 or current_ep == n_episodes:
+                    handler.log(current_ep, "episode")
 
                 if (
                     current_ep % display_count == 0
@@ -425,24 +402,15 @@ class NeuroFlow(RLModuleAgent):
         buffer: bool = False,
         config: bool = False,
     ) -> None:
-        save_model_modules(self, dirpath, buffer=buffer, config=config)
+        save_model(self, dirpath, buffer=buffer, config=config)
 
     @classmethod
     def load(cls, dirpath: str | Path, *, buffer: bool = False) -> Self:
-        return load_model_modules(cls, dirpath, buffer=buffer)
+        return load_model(cls, dirpath, buffer=buffer)
 
     def __repr__(self) -> str:
         return (
             f"{self.__class__.__name__}("
-            f"state_dim={self.state_dim}, "
-            f"actor_neurons={self.actor_neurons}, "
-            f"critic_neurons={self.critic_neurons}, "
-            f"action_dim={self.action_dim}, "
-            f"optim={type(self.optim).__name__}, "
-            f"buffer_size={self.buffer_size:,}, "
-            f"initial_alpha={self.initial_alpha}, "
-            f"log_std={self.log_std}, "
-            f"tau={self.tau}, "
-            f"device={self.device}, "
-            f"seed={self.seed})"
+            + ", ".join([f"{key}={val}" for key, val in self.metadata.items()])
+            + ")"
         )

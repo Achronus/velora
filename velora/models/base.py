@@ -13,7 +13,7 @@ from velora.utils.torch import summary
 
 if TYPE_CHECKING:
     from velora.buffer.base import BufferBase  # pragma: no cover
-    from velora.models.neuroflow.modules import (
+    from velora.models.nf.modules import (
         ActorModule,
         CriticModule,
         EntropyModule,
@@ -21,7 +21,6 @@ if TYPE_CHECKING:
 
 from velora.models.config import ModuleConfig, RLAgentConfig, TrainConfig
 from velora.models.lnn.ncp import LiquidNCPNetwork, NCPNetwork
-
 
 StateDictKeys = Literal["modules", "optimizers"]
 
@@ -142,10 +141,9 @@ class RLModuleAgent:
 
     def __init__(
         self,
-        state_dim: int,
+        env: gym.Env,
         actor_neurons: int,
         critic_neurons: int,
-        action_dim: int,
         buffer_size: int,
         optim: Type[optim.Optimizer],
         device: torch.device | None,
@@ -153,24 +151,48 @@ class RLModuleAgent:
     ) -> None:
         """
         Parameters:
-            state_dim (int): number of inputs (sensory nodes)
+            env (gym.Env): Gymnasium environment to train on
             actor_neurons (int): number of decision nodes (inter and command nodes)
                 for the actor
             critic_neurons (int): number of decision nodes (inter and command nodes)
                 for the critic
-            action_dim (int): number of outputs (motor nodes)
             buffer_size (int): buffer capacity
             device (torch.device, optional): the device to perform computations on
             seed (int, optional): random number seed
         """
-        self.state_dim = state_dim
+        self.env = env
         self.actor_neurons = actor_neurons
         self.critic_neurons = critic_neurons
-        self.action_dim = action_dim
         self.buffer_size = buffer_size
         self.optim = optim
         self.device = device
         self.seed = set_seed(seed)
+
+        self.action_dim: int = (
+            self.env.action_space.n.item()
+            if isinstance(self.env.action_space, gym.spaces.Discrete)
+            else self.env.action_space.shape[-1]
+        )
+        self.state_dim: int = self.env.observation_space.shape[-1]
+
+        self.action_scale = None
+        self.action_bias = None
+
+        if isinstance(self.env.action_space, gym.spaces.Box):
+            self.action_scale = (
+                torch.tensor(
+                    self.env.action_space.high - self.env.action_space.low,
+                    device=device,
+                )
+                / 2.0
+            )
+            self.action_bias = (
+                torch.tensor(
+                    self.env.action_space.high + self.env.action_space.low,
+                    device=device,
+                )
+                / 2.0
+            )
 
         self.config: RLAgentConfig | None = None
         self.buffer: "BufferBase" | None = None
@@ -188,7 +210,6 @@ class RLModuleAgent:
     @abstractmethod
     def train(
         self,
-        env: gym.Env,
         n_episodes: int,
         max_steps: int,
         window_size: int,
@@ -288,19 +309,23 @@ class RLModuleAgent:
 
         return final_dict
 
-    def set_metadata(self, values: Dict[str, Any]) -> Dict[str, Any]:
+    def set_metadata(self, values: Dict[str, Any], seed: int) -> Dict[str, Any]:
         """
         Creates the agents metadata based on a given set of local variables.
 
         Parameters:
             values (Dict[str, Any]): local variables
+            seed (int): randomly generated seed
 
         Returns:
             metadata (Dict[str, Any]): an updated dictionary of agent metadata.
         """
-        metadata = {k: v for k, v in values.items() if k not in ["self", "__class__"]}
+        metadata = {
+            k: v for k, v in values.items() if k not in ["self", "__class__", "env"]
+        }
         metadata["device"] = str(self.device) if self.device is not None else "cpu"
         metadata["optim"] = f"torch.optim.{self.optim.__name__}"
+        metadata["seed"] = seed
 
         return metadata
 
@@ -320,9 +345,7 @@ class RLModuleAgent:
                 if params["callbacks"]
                 else None
             ),
-            **{
-                k: v for k, v in params.items() if k not in ["self", "env", "callbacks"]
-            },
+            **{k: v for k, v in params.items() if k not in ["self", "callbacks"]},
         )
         return TrainConfig(**params)
 

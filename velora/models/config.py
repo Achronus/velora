@@ -39,51 +39,29 @@ class TorchConfig(BaseModel):
 
 class TrainConfig(BaseModel):
     """
-    A base config model for training parameter details.
+    A config model for training parameter details.
 
     Attributes:
         batch_size: the size of the training batch
-        n_episodes: the total number of episodes trained for
+        n_episodes: the total number of episodes trained for. Default is `None`
         window_size: reward moving average size (in episodes)
         display_count: console training progress frequency (in episodes)
-        gamma: the reward discount factor
+        log_freq: metric logging frequency (in episodes)
         callbacks: a dictionary of callback details. Default is `None`
+        max_steps: the maximum number of steps per training episode.
+            Default is `None`
+        warmup_steps: number of random steps to take before starting
+            training
     """
 
     batch_size: int
     n_episodes: int
     window_size: int
     display_count: int
-    gamma: float
+    log_freq: int
     callbacks: Dict[str, Any] | None = None
-
-
-class TrainConfig(TrainConfig):
-    """
-    A config model for episodic training parameter details.
-
-    Attributes:
-        batch_size: the size of the training batch
-        n_episodes: the total number of episodes trained for
-        window_size: the episodic rate for calculating the reward moving
-            average
-        gamma: the reward discount factor
-        callbacks: a dictionary of callback details
-        max_steps: the maximum number of steps per training episode
-        noise_scale: the exploration noise added when selecting
-            an action. Default is `None`
-        tau: the soft update factor used to slowly update the
-            target networks. Default is `None`
-        warmup_steps: number of random steps to take before starting
-            training. Default is `None`
-        update_every: how often to update the networks. Default is `None`
-    """
-
     max_steps: int
-    tau: float | None = None
-    noise_scale: float | None = None
-    warmup_steps: int | None = None
-    update_every: int | None = None
+    warmup_steps: int
 
 
 class ModuleConfig(BaseModel):
@@ -122,38 +100,6 @@ class SACExtraParameters(BaseModel):
     log_std_max: float | None = None
 
 
-class BasicModelDetails(BaseModel):
-    """
-    A config model for storing an agent's network model details.
-
-    Attributes:
-        type: the type of architecture used
-        state_dim: number of input features
-        n_neurons: number of hidden node
-        action_dim: number of output features
-        action_type: the type of action space. Default is `continuous`
-        target_networks: whether the agent uses target networks or not.
-            Default is `False`
-        exploration_type: the type of agent exploration used
-        actor: details about the Actor network
-        critic: details about the Critic network
-        critic2: details about the second Critic network. Default is `None`
-        extras: extra parameters unique to the agent. Default is `None`
-    """
-
-    type: Literal["actor-critic"]
-    state_dim: int
-    n_neurons: int
-    action_dim: int
-    action_type: Literal["discrete", "continuous"] = "continuous"
-    target_networks: bool = False
-    exploration_type: Literal["OUNoise", "Entropy"]
-    actor: ModuleConfig
-    critic: ModuleConfig
-    critic2: ModuleConfig | None = None
-    extras: SACExtraParameters | None = None
-
-
 class EntropyParameters(BaseModel):
     """
     A config model for extra parameters for NeuroFlow agents.
@@ -169,6 +115,23 @@ class EntropyParameters(BaseModel):
     target: float
 
 
+class CuriosityConfig(BaseModel):
+    """
+    A config model for the Intrinsic Curiosity Module (ICM).
+
+    Attributes:
+        icm: details about the ICM
+        lr: the optimizers learning rate
+        eta: importance scaling factor for intrinsic reward
+        beta: weight balancing for inverse vs. forward model
+    """
+
+    icm: ModuleConfig
+    lr: float
+    eta: float
+    beta: float
+
+
 class CriticConfig(BaseModel):
     """
     A critic config model for storing a NeuroFlow agent's critic module details.
@@ -182,10 +145,9 @@ class CriticConfig(BaseModel):
     critic2: ModuleConfig
 
 
-class NFModelDetails(BaseModel):
+class ModelDetails(BaseModel):
     """
-    A config model for storing a NeuroFlow agent's network model details.
-
+    A config model for storing an agent's network model details.
 
     Attributes:
         type: the type of architecture used. Default is `actor-critic`
@@ -195,6 +157,7 @@ class NFModelDetails(BaseModel):
         action_dim: number of output features
         action_type: the type of action space. Default is `continuous`
         tau: the soft update factor for target networks
+        gamma: the reward discount factor
         target_networks: whether the agent uses target networks or not.
             Default is `True`
         log_std: lower and upper bounds for the log standard deviation of the
@@ -212,6 +175,7 @@ class NFModelDetails(BaseModel):
     critic_neurons: int
     action_dim: int
     tau: float
+    gamma: float
     action_type: Literal["discrete", "continuous"] = "continuous"
     target_networks: bool = True
     log_std: Tuple[float, float] | None = None
@@ -223,11 +187,12 @@ class NFModelDetails(BaseModel):
 
 class RLAgentConfig(BaseModel):
     """
-    A config model for RL agents. Stored with agent states during the `save()` method.
+    A config model for NeuroFlow agents. Stored with agent states during the
+    `save()` method.
 
     Attributes:
         agent: the type of agent used
-        env: the name of the environment the model was trained on. Default is `None`
+        env: the Gymnasium environment ID the model was trained on
         seed: random number generator value
         model_details: the agent's network model details
         buffer: the buffer details
@@ -236,14 +201,14 @@ class RLAgentConfig(BaseModel):
     """
 
     agent: str
-    env: str | None = None
+    env: str
     seed: int
-    model_details: BasicModelDetails | NFModelDetails
+    model_details: ModelDetails
     buffer: BufferConfig
     torch: TorchConfig
     train_params: TrainConfig | None = None
 
-    def update(self, env: str, train_params: TrainConfig) -> Self:
+    def update(self, train_params: TrainConfig) -> Self:
         """
         Updates the training details of the model.
 
@@ -255,7 +220,6 @@ class RLAgentConfig(BaseModel):
             self (Self): a new config model with the updated values.
         """
         return RLAgentConfig(
-            env=env,
             train_params=train_params,
-            **self.model_dump(exclude={"env", "train_params"}),
+            **self.model_dump(exclude={"train_params"}),
         )
