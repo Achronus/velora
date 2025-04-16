@@ -64,7 +64,7 @@ class NeuroFlow(RLModuleAgent):
         critic_neurons: int,
         *,
         optim: Type[optim.Optimizer] = optim.Adam,
-        buffer_size: int = int(1e6),
+        buffer_size: int = 1_000_000,
         actor_lr: float = 3e-4,
         critic_lr: float = 3e-4,
         alpha_lr: float = 3e-4,

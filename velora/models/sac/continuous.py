@@ -71,7 +71,7 @@ class SACActor(LiquidNCPModule):
             log_probs (torch.Tensor): log probabilities.
         """
         dist = Normal(mean, std)
-        x_t = dist.rsample()  #  Reparameterization trick
+        x_t = dist.rsample()  # Reparameterization trick
         log_probs = dist.log_prob(x_t)
 
         return x_t, log_probs
