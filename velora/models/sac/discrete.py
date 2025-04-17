@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 from torch.distributions import Categorical
 
-from velora.models.base import LiquidNCPModule
+from velora.models.base import LiquidNCPModule, NCPModule
 
 
 class SACActorDiscrete(LiquidNCPModule):
@@ -143,3 +143,42 @@ class SACCriticDiscrete(LiquidNCPModule):
         """
         q_values, new_hidden = self.ncp(obs, hidden)
         return q_values, new_hidden
+
+
+class SACCriticNCPDiscrete(NCPModule):
+    """
+    An NCP Critic Network for the SAC algorithm. Estimates Q-values given
+    states and actions.
+
+    Usable with discrete action spaces.
+    """
+
+    def __init__(
+        self,
+        num_obs: int,
+        n_neurons: int,
+        num_actions: int,
+        *,
+        device: torch.device | None = None,
+    ) -> None:
+        """
+        Parameters:
+            num_obs (int): the number of input observations
+            n_neurons (int): the number of hidden neurons
+            num_actions (int): the number of actions
+            device (torch.device, optional): the device to perform computations on
+        """
+        super().__init__(num_obs, n_neurons, num_actions, device=device)
+
+    def forward(self, obs: torch.Tensor) -> torch.Tensor:
+        """
+        Performs a forward pass through the network.
+
+        Parameters:
+            obs (torch.Tensor): the batch of state observations
+
+        Returns:
+            q_values (torch.Tensor): the Q-Value predictions.
+        """
+        q_values = self.ncp(obs)
+        return q_values

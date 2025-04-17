@@ -129,9 +129,10 @@ class BufferBase:
         dtype = torch.float32
         rewards = rewards.unsqueeze(-1) if rewards.dim() == 1 else rewards
         dones = dones.unsqueeze(-1) if dones.dim() == 1 else dones
+        actions = actions.unsqueeze(-1) if actions.dim() == 1 else actions
 
         self.states[indices] = states.to(dtype)
-        self.actions[indices] = actions
+        self.actions[indices] = actions.to(dtype)
         self.rewards[indices] = rewards.to(dtype)
         self.next_states[indices] = next_states.to(dtype)
         self.dones[indices] = dones.to(dtype)
