@@ -16,7 +16,7 @@ import torch.nn as nn
 import torch.optim as optim
 
 if TYPE_CHECKING:
-    from velora.gym.wrap import GymNames  # pragma: no cover
+    from velora.gym.wrap import DiscreteGymNames, ContinuousGymNames  # pragma: no cover
     from velora.buffer.experience import BatchExperience  # pragma: no cover
 
 from velora.buffer.replay import ReplayBuffer
@@ -68,7 +68,7 @@ class NeuroFlow(RLModuleAgent):
 
     def __init__(
         self,
-        env_id: Union[str, "GymNames"],
+        env_id: Union[str, "ContinuousGymNames"],
         actor_neurons: int,
         critic_neurons: int,
         *,
@@ -457,7 +457,7 @@ class NeuroFlowDiscrete(RLModuleAgent):
 
     def __init__(
         self,
-        env_id: Union[str, "GymNames"],
+        env_id: Union[str, "DiscreteGymNames"],
         actor_neurons: int,
         critic_neurons: int,
         *,

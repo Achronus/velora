@@ -7,22 +7,13 @@ import torch
 WrapperType = List[gym.Wrapper | gym.vector.VectorWrapper | Callable]
 
 
-GymNames = Literal[
-    "CartPole-v1",
-    "MountainCar-v0",
+ContinuousGymNames = Literal[
     "MountainCarContinuous-v0",
     "Pendulum-v1",
-    "Acrobot-v1",
-    "LunarLander-v3",
     "LunarLanderContinuous-v3",
     "BipedalWalker-v3",
     "BipedalWalkerHardcore-v3",
     "CarRacing-v3",
-    "Blackjack-v1",
-    "FrozenLake-v1",
-    "FrozenLake8x8-v1",
-    "CliffWalking-v0",
-    "Taxi-v3",
     "Reacher-v5",
     "Pusher-v5",
     "InvertedPendulum-v5",
@@ -36,9 +27,21 @@ GymNames = Literal[
     "HumanoidStandup-v5",
 ]
 
+DiscreteGymNames = Literal[
+    "Acrobot-v1",
+    "CartPole-v1",
+    "MountainCar-v0",
+    "LunarLander-v3",
+    "Blackjack-v1",
+    "Taxi-v3",
+    "CliffWalking-v0",
+    "FrozenLake-v1",
+    "FrozenLake8x8-v1",
+]
+
 
 def wrap_gym_env(
-    env: gym.Env | str | GymNames,
+    env: gym.Env | str | DiscreteGymNames | ContinuousGymNames,
     wrappers: List[gym.Wrapper | gym.vector.VectorWrapper | Callable],
 ) -> gym.Env:
     """
