@@ -191,6 +191,32 @@ class TestEarlyStopping:
         assert callback.count == 0  # No increment
         assert result.stop_training  # Still stopped
 
+    def test_config(self):
+        cb = EarlyStopping(target=100.0)
+        cb2 = EarlyStopping(target=120.0, patience=5)
+
+        assert cb.config() == (
+            "EarlyStopping",
+            {
+                "target": 100.0,
+                "patience": 3,
+            },
+        )
+
+        assert cb2.config() == (
+            "EarlyStopping",
+            {
+                "target": 120.0,
+                "patience": 5,
+            },
+        )
+
+    def test_info(self):
+        cb = EarlyStopping(target=120.0, patience=5)
+        assert (
+            cb.info() == "'EarlyStopping' enabled with 'target=120.0' and 'patience=5'."
+        )
+
 
 class TestSaveCheckpoints:
     @pytest.fixture
@@ -324,6 +350,25 @@ class TestSaveCheckpoints:
             # Clean up
             if os.path.exists(save_path.parent):
                 shutil.rmtree(save_path.parent)
+
+    def test_config(self):
+        cb = SaveCheckpoints("model_dir")
+
+        assert cb.config() == (
+            "SaveCheckpoints",
+            {
+                "dirname": "model_dir",
+                "frequency": 100,
+                "buffer": False,
+            },
+        )
+
+    def test_info(self):
+        cb = SaveCheckpoints("model_dir")
+        assert (
+            cb.info()
+            == "'SaveCheckpoints' enabled with 'frequency=100' and 'buffer=False'.\n    Files will be saved in the 'checkpoints/model_dir/saves' directory."
+        )
 
 
 class TestRecordVideos:
@@ -465,6 +510,26 @@ class TestRecordVideos:
 
         # With force=True, it should not raise an error
         _ = RecordVideos(dirname=dirname, method="episode", frequency=100, force=True)
+
+    def test_config(self):
+        cb = RecordVideos("model_dir")
+
+        assert cb.config() == (
+            "RecordVideos",
+            {
+                "dirname": "model_dir",
+                "method": "episode",
+                "frequency": 100,
+                "force": False,
+            },
+        )
+
+    def test_info(self):
+        cb = RecordVideos("model_dir")
+        assert (
+            cb.info()
+            == "'RecordVideos' enabled with 'method=episode' and 'frequency=100'.\n    Files will be saved in the 'checkpoints/model_dir/videos' directory."
+        )
 
 
 class TestCometAnalytics:
@@ -631,3 +696,27 @@ class TestCometAnalytics:
         assert callback.experiment.disabled is True
         mock_experiment.set_name.assert_called_once_with("test-experiment")
         mock_experiment.add_tags.assert_called_once_with(["tag1", "tag2"])
+
+    @patch("os.getenv", return_value="fake-api-key")
+    def test_config(self, mock_getenv):
+        os.environ["VELORA_TEST_MODE"] = "True"
+        cb = CometAnalytics("test-project")
+
+        assert cb.config() == (
+            "CometAnalytics",
+            {
+                "project_name": "test-project",
+                "experiment_name": "auto",
+                "tags": "auto",
+                "experiment_key": None,
+            },
+        )
+
+    @patch("os.getenv", return_value="fake-api-key")
+    def test_info(self, mock_getenv):
+        os.environ["VELORA_TEST_MODE"] = "True"
+        cb = CometAnalytics("test-project")
+        assert (
+            cb.info()
+            == "'CometAnalytics' enabled with 'project_name=test-project', 'experiment_name=auto' and 'tags=auto'."
+        )

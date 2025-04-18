@@ -74,7 +74,7 @@ class TrainState:
         experiment_id (int): the current experiment's unique ID
         total_episodes (int, optional): total number of training episodes
         total_steps (int, optional): total number of training steps
-        status (Literal["start", "episode", "step", "complete"], optional): the current stage of training.
+        status (Literal["start", "episode", "logging", "step", "complete"], optional): the current stage of training.
 
             - `start` - before training starts.
             - `episode` - inside the episode loop.

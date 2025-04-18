@@ -178,9 +178,11 @@ class ActorModule(BaseModule):
             f"state_dim={self.state_dim}, "
             f"n_neurons={self.n_neurons}, "
             f"action_dim={self.action_dim}, "
+            f"action_scale={self.action_scale}, "
+            f"action_bias={self.action_bias}, "
             f"optim={type(self.optim).__name__}, "
-            f"lr={self.lr}, "
             f"log_std={self.log_std}, "
+            f"lr={self.lr}, "
             f"device={self.device})"
         )
 
@@ -311,7 +313,6 @@ class ActorModuleDiscrete(BaseModule):
             f"action_dim={self.action_dim}, "
             f"optim={type(self.optim).__name__}, "
             f"lr={self.lr}, "
-            f"log_std={self.log_std}, "
             f"device={self.device})"
         )
 

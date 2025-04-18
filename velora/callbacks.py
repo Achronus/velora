@@ -239,6 +239,7 @@ class RecordVideos(TrainCallback):
         self.dirname = dirname
         self.method = method
         self.frequency = frequency
+        self.force = force
 
         self.dirpath = Path("checkpoints", dirname, "videos")
 
@@ -280,6 +281,7 @@ class RecordVideos(TrainCallback):
             "dirname": self.dirname,
             "method": self.method,
             "frequency": self.frequency,
+            "force": self.force,
         }
 
     def info(self) -> str:
@@ -453,6 +455,7 @@ class CometAnalytics(TrainCallback):
             "project_name": self.project_name,
             "experiment_name": self.experiment_name,
             "tags": ",".join(self.tags) if isinstance(self.tags, list) else self.tags,
+            "experiment_key": self.experiment_key,
         }
 
     def info(self) -> str:
