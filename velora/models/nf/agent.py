@@ -279,13 +279,13 @@ class NeuroFlow(RLModuleAgent):
         self,
         batch_size: int,
         *,
-        n_episodes: int = 1000,
+        n_episodes: int = 10_000,
         callbacks: List["TrainCallback"] | None = None,
         log_freq: int = 10,
         display_count: int = 100,
         window_size: int = 100,
         max_steps: int = 1000,
-        warmup_steps: int = 1024,
+        warmup_steps: int | None = None,
     ) -> None:
         """
         Trains the agent on a Gymnasium environment using a `ReplayBuffer`.
@@ -301,9 +301,11 @@ class NeuroFlow(RLModuleAgent):
             window_size (int, optional): the reward moving average size
                 (in episodes)
             max_steps (int, optional): the total number of steps per episode
-            warmup_steps (int, optional): number of random steps to take before
-                starting training
+            warmup_steps (int, optional): the number of samples to generate in the
+                buffer before starting training. If `None` uses `batch_size * 2`
         """
+        warmup_steps = batch_size * 2 if warmup_steps is None else warmup_steps
+
         # Add training details to config
         self.config = self.config.update(self._set_train_params(locals()))
 
@@ -318,7 +320,8 @@ class NeuroFlow(RLModuleAgent):
             callbacks or [],
         )
 
-        self.buffer.warm(self, warmup_steps)
+        if warmup_steps > 0:
+            self.buffer.warm(self, warmup_steps, 1 if warmup_steps < 8 else 8)
 
         with TrainHandler(
             self, n_episodes, max_steps, log_freq, window_size, callbacks
@@ -671,13 +674,13 @@ class NeuroFlowDiscrete(RLModuleAgent):
         self,
         batch_size: int,
         *,
-        n_episodes: int = 1000,
+        n_episodes: int = 10_000,
         callbacks: List["TrainCallback"] | None = None,
         log_freq: int = 10,
         display_count: int = 100,
         window_size: int = 100,
         max_steps: int = 1000,
-        warmup_steps: int = 1024,
+        warmup_steps: int | None = None,
     ) -> None:
         """
         Trains the agent on a Gymnasium environment using a `ReplayBuffer`.
@@ -693,9 +696,11 @@ class NeuroFlowDiscrete(RLModuleAgent):
             window_size (int, optional): the reward moving average size
                 (in episodes)
             max_steps (int, optional): the total number of steps per episode
-            warmup_steps (int, optional): number of random steps to take before
-                starting training
+            warmup_steps (int, optional): the number of samples to generate in the
+                buffer before starting training. If `None` uses `batch_size * 2`
         """
+        warmup_steps = batch_size * 2 if warmup_steps is None else warmup_steps
+
         # Add training details to config
         self.config = self.config.update(self._set_train_params(locals()))
 
@@ -710,7 +715,8 @@ class NeuroFlowDiscrete(RLModuleAgent):
             callbacks or [],
         )
 
-        self.buffer.warm(self, warmup_steps)
+        if warmup_steps > 0:
+            self.buffer.warm(self, warmup_steps, 1 if warmup_steps < 8 else 8)
 
         with TrainHandler(
             self, n_episodes, max_steps, log_freq, window_size, callbacks
