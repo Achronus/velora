@@ -11,34 +11,21 @@ if TYPE_CHECKING:
     from velora.models.base import RLModuleAgent  # pragma: no cover
 
 
-def record_last_episode(
-    agent: "RLModuleAgent",
-    env_name: str,
-    dirname: str,
-    root_path: str | Path | None = None,
-) -> None:
+def record_episode(agent: "RLModuleAgent", dirpath: str | Path | None = None) -> None:
     """
     Manually makes a video recording of an agent in an episode.
 
-    Used to record the last episode of training runs when
-    `TrainCallback.RecordVideos` is applied.
-
-    Filename format: `<env_name>_final-episode-0.mp4`.
-
     Parameters:
         agent (RLModuleAgent): an agent to use
-        env_name (str): the name of environment to use
-        dirname (str): the model directory name. Used inside `checkpoints` directory
-            as `checkpoints/<dirname>/videos`
-        root_path (str, optional): a root path for the checkpoint directory
+        dirpath (str, optional): a path to save the video. When `None` uses the
+            current working directory
     """
-    cp_path = Path("checkpoints", dirname, "videos")
-    dirpath = Path(root_path, cp_path) if root_path else cp_path
+    dirpath = Path(dirpath) if dirpath else Path().cwd()
 
     def trigger(t: int) -> bool:
         return True
 
-    env = gym.make(env_name, render_mode="rgb_array")
+    env = gym.make(agent.env.spec.id, render_mode="rgb_array")
 
     # Ignore folder warning
     with warnings.catch_warnings():
@@ -62,7 +49,7 @@ def record_last_episode(
         while not done:
             action, hidden = agent.predict(state, hidden, train_mode=False)
 
-            next_state, reward, terminated, truncated, _ = env.step(action)
+            next_state, _, terminated, truncated, _ = env.step(action)
             done = terminated or truncated
 
             state = next_state
@@ -70,20 +57,19 @@ def record_last_episode(
     env.close()
 
 
-def evaluate_agent(
-    agent: "RLModuleAgent", env: gym.Env
-) -> Tuple[torch.Tensor, torch.Tensor]:
+def evaluate_agent(agent: "RLModuleAgent") -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Evaluates the performance of an agent on an environment using a single episode.
 
     Parameters:
         agent (RLModuleAgent): the agent to evaluate
-        env (gym.Env): the Gymnasium environment
 
     Returns:
         ep_return (torch.Tensor): episodic return.
         ep_length (torch.Tensor): episode length.
     """
+    env = agent.eval_env
+
     state, _ = env.reset()
     hidden = None
 

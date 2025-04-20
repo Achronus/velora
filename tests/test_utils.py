@@ -8,7 +8,7 @@ import torch.nn as nn
 import numpy as np
 
 from velora.models.base import RLModuleAgent
-from velora.utils.capture import evaluate_agent, record_last_episode
+from velora.utils.capture import evaluate_agent, record_episode
 from velora.utils.core import set_seed, set_device
 from velora.utils.format import number_to_short
 from velora.utils.torch import to_tensor, stack_tensor, soft_update, hard_update
@@ -254,22 +254,13 @@ class TestRecordLastEpisode:
         agent = MagicMock(spec=RLModuleAgent)
         agent.device = "cpu"
         agent.predict.return_value = (torch.tensor([0.0]), torch.zeros(1, 10))
+        agent.env = gym.make("MountainCarContinuous-v0", render_mode="rgb_array")
         return agent
 
     def test_real_env(self, mock_agent, tmp_path):
         """Test record_last_episode with a real Gymnasium environment."""
-        # Use a real, simple environment
-        with patch(
-            "gymnasium.make",
-            return_value=gym.make("MountainCarContinuous-v0", render_mode="rgb_array"),
-        ):
-            # Execute the function
-            record_last_episode(
-                mock_agent,
-                "MountainCarContinuous-v0",
-                "test_dir",
-                tmp_path,
-            )
+        # Execute the function
+        record_episode(mock_agent, tmp_path / "test_dir")
 
         # Verify agent was used
         assert mock_agent.predict.call_count > 0
@@ -370,18 +361,13 @@ class TestEvaluateAgent:
     def mock_agent(self):
         agent = Mock()
         agent.predict.return_value = (torch.tensor([0.5]), torch.tensor([0.1]))
+        agent.eval_env = Mock(spec=gym.Env)
+        agent.eval_env.reset.return_value = (torch.tensor([0.0, 0.0]), {})
         return agent
 
-    @pytest.fixture
-    def mock_env(self):
-        env = Mock(spec=gym.Env)
-        initial_state = torch.tensor([0.0, 0.0])
-        env.reset.return_value = (initial_state, {})
-        return env
-
-    def test_basic_evaluation(self, mock_agent, mock_env):
+    def test_basic_evaluation(self, mock_agent):
         # Configure environment to terminate after one step
-        mock_env.step.return_value = (
+        mock_agent.eval_env.step.return_value = (
             torch.tensor([1.0, 1.0]),  # next_state
             1.0,  # reward
             True,  # terminated
@@ -390,17 +376,17 @@ class TestEvaluateAgent:
         )
 
         # Run the function under test
-        ep_return, ep_length = evaluate_agent(mock_agent, mock_env)
+        ep_return, ep_length = evaluate_agent(mock_agent)
 
         # Check function behavior
-        mock_env.reset.assert_called_once()
-        mock_env.step.assert_called_once()
+        mock_agent.eval_env.reset.assert_called_once()
+        mock_agent.eval_env.step.assert_called_once()
 
         # Check return values
         assert torch.equal(ep_return, torch.tensor(1.0))
         assert torch.equal(ep_length, torch.tensor(1))
 
-    def test_multi_step_episode(self, mock_agent, mock_env):
+    def test_multi_step_episode(self, mock_agent):
         # Configure environment to run for 3 steps before terminating
         states = [
             torch.tensor([0.0, 0.0]),
@@ -421,21 +407,21 @@ class TestEvaluateAgent:
             ),
         ]
 
-        mock_env.step.side_effect = step_responses
+        mock_agent.eval_env.step.side_effect = step_responses
 
         # Run the function under test
-        ep_return, ep_length = evaluate_agent(mock_agent, mock_env)
+        ep_return, ep_length = evaluate_agent(mock_agent)
 
         # Check behavior
-        assert mock_env.step.call_count == 3
+        assert mock_agent.eval_env.step.call_count == 3
         assert mock_agent.predict.call_count == 3
 
         # Check return values
         assert torch.equal(ep_return, torch.tensor(2.0))
         assert torch.equal(ep_length, torch.tensor(3))
 
-    def test_truncated_episode(self, mock_agent, mock_env):
-        mock_env.step.return_value = (
+    def test_truncated_episode(self, mock_agent):
+        mock_agent.eval_env.step.return_value = (
             torch.tensor([1.0, 1.0]),  # next_state
             1.0,  # reward
             False,  # terminated
@@ -444,19 +430,19 @@ class TestEvaluateAgent:
         )
 
         # Run the function under test
-        ep_return, ep_length = evaluate_agent(mock_agent, mock_env)
+        ep_return, ep_length = evaluate_agent(mock_agent)
 
         # Check return values
         assert torch.equal(ep_return, torch.tensor(1.0))
         assert torch.equal(ep_length, torch.tensor(1))
 
-    def test_action_flattening(self, mock_agent, mock_env):
+    def test_action_flattening(self, mock_agent):
         # Set up an agent that returns a multi-dimensional action
         multi_dim_action = torch.tensor([[0.1, 0.2, 0.3]])
         mock_agent.predict.return_value = (multi_dim_action, torch.tensor([0.1]))
 
         # Configure environment to terminate after one step
-        mock_env.step.return_value = (
+        mock_agent.eval_env.step.return_value = (
             torch.tensor([1.0, 1.0]),
             1.0,
             True,
@@ -465,12 +451,12 @@ class TestEvaluateAgent:
         )
 
         # Run the function
-        evaluate_agent(mock_agent, mock_env)
+        evaluate_agent(mock_agent)
 
         # Check that the action was flattened properly
         expected_flattened_action = torch.tensor([0.1, 0.2, 0.3])
         # Extract the actual argument passed to env.step
-        actual_action_passed = mock_env.step.call_args[0][0]
+        actual_action_passed = mock_agent.eval_env.step.call_args[0][0]
 
         # Check that the flattened action matches expectations
         assert torch.all(torch.eq(actual_action_passed, expected_flattened_action))

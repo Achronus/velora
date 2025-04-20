@@ -17,7 +17,7 @@ from velora.models.base import RLModuleAgent
 from velora.state import TrainState
 from velora.time import ElapsedTime
 from velora.training.metrics import TrainMetrics, TrainMetricsBase
-from velora.utils.capture import record_last_episode
+from velora.utils.capture import record_episode
 
 
 class TrainHandlerBase:
@@ -88,7 +88,6 @@ class TrainHandlerBase:
 
         self.complete()
 
-        self.env.close()
         self.session.close()
 
         self.train_time = ElapsedTime.elapsed(self.start_time)
@@ -146,11 +145,16 @@ class TrainHandlerBase:
     def record_last_episode(self) -> None:
         """
         If recording videos enabled, captures a recording of the last episode.
+
+        Only works when `TrainCallback.RecordVideos` is applied.
+
+        Filename format: `<env_name>_final-episode-0.mp4`.
         """
         if self.state.record_state is not None:
             dirname = self.state.record_state.dirpath.parent.name
+            cp_path = Path("checkpoints", dirname, "videos")
             print()
-            record_last_episode(self.agent, self.env.spec.id, dirname)
+            record_episode(self.agent, cp_path)
 
     def save_completed(self) -> None:
         """

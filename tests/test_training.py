@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch
 import pytest
 
@@ -500,7 +501,7 @@ class TestTrainHandlerRecordLastEpisode:
 
         return handler
 
-    @patch("velora.training.handler.record_last_episode")
+    @patch("velora.training.handler.record_episode")
     def test_record_last_episode_with_record_state(
         self, mock_record, train_handler, mock_agent, tmp_path
     ):
@@ -512,7 +513,9 @@ class TestTrainHandlerRecordLastEpisode:
         train_handler.state.agent = mock_agent
         train_handler.state.env = mock_agent.env
         train_handler.state.record_state = RecordState(
-            dirpath=test_dir, method="episode", episode_trigger=lambda x: x % 10 == 0
+            dirpath=test_dir,
+            method="episode",
+            episode_trigger=lambda x: x % 10 == 0,
         )
 
         # Call the record_last_episode method
@@ -520,10 +523,10 @@ class TestTrainHandlerRecordLastEpisode:
 
         # Verify the record_last_episode function was called with correct parameters
         mock_record.assert_called_once_with(
-            mock_agent, mock_agent.env.spec.id, test_dir.parent.name
+            mock_agent, Path("checkpoints", test_dir.parent.name, "videos")
         )
 
-    @patch("velora.training.handler.record_last_episode")
+    @patch("velora.training.handler.record_episode")
     def test_record_last_episode_without_record_state(self, mock_record, train_handler):
         # Set up state without record_state
         train_handler.state.record_state = None

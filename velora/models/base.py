@@ -7,6 +7,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
+from velora.gym.wrap import add_core_env_wrappers
 from velora.models.weight import WeightInitType
 from velora.utils.core import set_seed
 from velora.utils.torch import summary
@@ -161,6 +162,7 @@ class RLModuleAgent:
             seed (int, optional): random number seed
         """
         self.env = env
+        self.eval_env = add_core_env_wrappers(env, device)
         self.actor_neurons = actor_neurons
         self.critic_neurons = critic_neurons
         self.buffer_size = buffer_size
