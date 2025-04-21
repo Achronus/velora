@@ -3,7 +3,7 @@ import tempfile
 import pytest
 import torch
 
-from velora.models.nf.agent import NeuroFlow
+from velora.models.nf.agent import NeuroFlowCT
 from velora.utils.restore import (
     load_model,
     optim_to_tensor,
@@ -102,7 +102,7 @@ class TestLoadModel:
             with pytest.raises(
                 FileNotFoundError, match="Optimizer state .* does not exist"
             ):
-                load_model(NeuroFlow, save_path)
+                load_model(NeuroFlowCT, save_path)
 
     def test_missing_metadata(self):
         # Create a temporary directory structure with missing metadata
@@ -124,20 +124,20 @@ class TestLoadModel:
 
             # Attempt to load should raise FileNotFoundError
             with pytest.raises(FileNotFoundError, match="Metadata .* does not exist"):
-                load_model(NeuroFlow, save_path)
+                load_model(NeuroFlowCT, save_path)
 
 
 class TestSaveModel:
     @pytest.fixture
-    def test_agent(self) -> NeuroFlow:
-        return NeuroFlow(
+    def test_agent(self) -> NeuroFlowCT:
+        return NeuroFlowCT(
             "InvertedPendulum-v5",
             8,
             16,
             device="cpu",
         )
 
-    def test_force_flag(self, tmp_path: Path, test_agent: NeuroFlow):
+    def test_force_flag(self, tmp_path: Path, test_agent: NeuroFlowCT):
         # Define a checkpoint path in the temporary directory
         checkpoint_path = tmp_path / "test_model"
 
@@ -161,7 +161,7 @@ class TestSaveModel:
         save_model(test_agent, checkpoint_path, buffer=True, config=True, force=True)
 
         # Load the agent back to verify it saved properly
-        loaded_agent = NeuroFlow.load(checkpoint_path, buffer=True)
+        loaded_agent = NeuroFlowCT.load(checkpoint_path, buffer=True)
 
         # Verify the agent was loaded successfully
         assert loaded_agent.state_dim == test_agent.state_dim

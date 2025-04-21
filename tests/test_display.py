@@ -3,7 +3,7 @@ from unittest.mock import Mock, patch
 
 from velora.buffer.replay import ReplayBuffer
 from velora.training.display import training_info
-from velora.models.nf.agent import NeuroFlow
+from velora.models.nf.agent import NeuroFlowCT
 from velora.callbacks import TrainCallback
 
 import gymnasium as gym
@@ -17,7 +17,7 @@ class TestTrainingInfo:
     def mock_agent(self):
         """Fixture for creating a mock agent."""
         buffer = Mock(spec=ReplayBuffer)
-        agent = Mock(spec=NeuroFlow)
+        agent = Mock(spec=NeuroFlowCT)
         agent.__class__.__name__ = "MockAgent"
         buffer.__class__.__name__ = "MockBuffer"
 

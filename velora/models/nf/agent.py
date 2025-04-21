@@ -35,7 +35,7 @@ from velora.utils.restore import load_model, save_model
 StateDictKeys = Literal["modules", "optimizers"]
 
 
-class NeuroFlow(RLModuleAgent):
+class NeuroFlowCT(RLModuleAgent):
     """
     A custom Liquid model that combines a variety of RL techniques. Designed for
     `continuous` action spaces.
@@ -428,7 +428,7 @@ class NeuroFlow(RLModuleAgent):
         )
 
 
-class NeuroFlowDiscrete(RLModuleAgent):
+class NeuroFlow(RLModuleAgent):
     """
     A custom Liquid model that combines a variety of RL techniques. Designed for
     `discrete` action spaces.

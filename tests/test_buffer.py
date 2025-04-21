@@ -7,7 +7,7 @@ import torch
 from velora.buffer.experience import BatchExperience
 from velora.buffer.replay import ReplayBuffer
 from velora.models.config import BufferConfig
-from velora.models.nf.agent import NeuroFlow
+from velora.models.nf.agent import NeuroFlowCT
 
 
 class TestBatchExperience:
@@ -260,7 +260,7 @@ class TestReplayBuffer:
         assert (nested_dir / "buffer_state.safetensors").exists()
 
     def test_buffer_warm(self, replay_buffer: ReplayBuffer):
-        model = NeuroFlow("InvertedPendulum-v5", 8, 16, device=torch.device("cpu"))
+        model = NeuroFlowCT("InvertedPendulum-v5", 8, 16, device=torch.device("cpu"))
         assert len(replay_buffer) == 0
 
         n_samples = 10
