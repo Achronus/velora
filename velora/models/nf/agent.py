@@ -321,7 +321,7 @@ class NeuroFlowCT(RLModuleAgent):
         )
 
         if warmup_steps > 0:
-            self.buffer.warm(self, warmup_steps, 1 if warmup_steps < 8 else 8)
+            self.buffer.warm(self, warmup_steps, 2 if warmup_steps < 8 else 8)
 
         with TrainHandler(
             self, n_episodes, max_steps, log_freq, window_size, callbacks
@@ -716,7 +716,7 @@ class NeuroFlow(RLModuleAgent):
         )
 
         if warmup_steps > 0:
-            self.buffer.warm(self, warmup_steps, 1 if warmup_steps < 8 else 8)
+            self.buffer.warm(self, warmup_steps, 2 if warmup_steps < 8 else 8)
 
         with TrainHandler(
             self, n_episodes, max_steps, log_freq, window_size, callbacks

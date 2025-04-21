@@ -264,9 +264,18 @@ class TestReplayBuffer:
         assert len(replay_buffer) == 0
 
         n_samples = 10
-        model.buffer.warm(model, n_samples, 2)
+        model.buffer.warm(model, n_samples)
 
         assert len(model.buffer) >= n_samples
+
+    def test_buffer_warm_single_env(self, replay_buffer: ReplayBuffer):
+        model = NeuroFlowCT("InvertedPendulum-v5", 8, 16, device=torch.device("cpu"))
+        assert len(replay_buffer) == 0
+
+        n_samples = 10
+
+        with pytest.raises(ValueError):
+            model.buffer.warm(model, n_samples, 1)
 
     def test_add_multi(self, replay_buffer: ReplayBuffer):
         """Test adding multiple experiences at once using add_multi."""

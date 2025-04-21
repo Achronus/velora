@@ -95,8 +95,12 @@ class ReplayBuffer(BufferBase):
         Parameters:
             agent (Any): the agent to generate samples with
             n_samples (int): the maximum number of samples to generate
-            num_envs (int, optional): number of vectorized environments
+            num_envs (int, optional): number of vectorized environments. Cannot
+                be smaller than `2`
         """
+        if num_envs < 2:
+            raise ValueError(f"'{num_envs=}' cannot be smaller than 2.")
+
         envs = gym.make_vec(
             agent.env.spec.id,
             num_envs=num_envs,
@@ -115,6 +119,7 @@ class ReplayBuffer(BufferBase):
             dones = terminated | truncated
 
             self.add_multi(states, actions, rewards, next_states, dones, hidden)
+
             states = next_states
 
         envs.close()
