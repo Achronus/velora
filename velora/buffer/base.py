@@ -168,6 +168,7 @@ class BufferBase:
         Gets the metadata of the buffer.
 
         Includes:
+
         - `capacity` - the maximum capacity of the buffer.
         - `state_dim` - state dimension.
         - `action_dim` - action dimension.
@@ -194,6 +195,7 @@ class BufferBase:
         Return a dictionary containing the buffers state.
 
         Includes:
+
         - `states` - tensor of states.
         - `actions` - tensor of actions.
         - `rewards` - tensor of rewards.
@@ -218,6 +220,7 @@ class BufferBase:
         Saves a buffers `state_dict()` to a `safetensors` file.
 
         Includes:
+
         - `<prefix>metadata.json` - the buffers metadata
         - `<prefix>state.safetensors` - the buffer state
 
@@ -226,7 +229,7 @@ class BufferBase:
             prefix (str, optional): a name prefix for the files
         """
         save_path = Path(dirpath)
-        save_path.parent.mkdir(parents=True, exist_ok=True)
+        save_path.mkdir(parents=True, exist_ok=True)
 
         metadata_path = Path(save_path, f"{prefix}metadata").with_suffix(".json")
         buffer_path = Path(save_path, f"{prefix}state").with_suffix(".safetensors")
