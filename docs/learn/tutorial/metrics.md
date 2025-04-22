@@ -42,6 +42,7 @@ The `episode` table stores the metrics for each training episode. It's the most 
 - `reward_moving_std` - the episodes reward moving standard deviation based on the training `window_size`.
 - `actor_loss` - the average Actor loss for the episode.
 - `critic_loss` - the average Critic loss for the episode.
+- `entropy_loss` - the average Entropy loss for the episode.
 - `created_at` - the date and time when the the entry was created.
 
 ## Exploring the Database

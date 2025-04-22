@@ -5,7 +5,7 @@ To get started, simply install it through [pip [:material-arrow-right-bottom:]](
 For [PyTorch [:material-arrow-right-bottom:]](https://pytorch.org/get-started/locally/) with CUDA (recommended):
 
 ```bash
-pip install torch torchvision velora --extra-index-url https://download.pytorch.org/whl/cu124
+pip install torch torchvision velora --extra-index-url https://download.pytorch.org/whl/cu126
 ```
 
 Or, for [PyTorch [:material-arrow-right-bottom:]](https://pytorch.org/get-started/locally/) with CPU only:
@@ -19,55 +19,36 @@ pip install torch torchvision velora
 Here's a simple example:
 
 ```python
-from functools import partial
+from velora.models import NeuroFlow, NeuroFlowCT
+from velora.utils import set_device
 
-from velora.models import LiquidDDPG
-from velora.gym import wrap_gym_env
-from velora.utils import set_device, set_seed
-
-import gymnasium as gym
-from gymnasium.wrappers import NormalizeObservation, NormalizeReward, ClipReward
-
-# Setup reproducibility and PyTorch device
-seed = 64
-set_seed(seed)
-
+# Setup PyTorch device
 device = set_device()
 
-# Add extra wrappers to our environment
-env = wrap_gym_env("InvertedPendulum-v5", [
-    partial(NormalizeObservation, epsilon=1e-8),
-    partial(NormalizeReward, gamma=0.99, epsilon=1e-8),
-    partial(ClipReward, max_reward=10.0),
-    # RecordEpisodeStatistics,  # Applied automatically!
-    # partial(NumpyToTorch, device=device),  # Applied automatically!
-])
+# For continuous tasks
+model = NeuroFlowCT(
+    "InvertedPendulum-v5",
+    20,  # actor neurons 
+    128,  # critic neurons
+    device=device,
+    seed=64,  # remove for automatic generation
+)
 
-# Or, use the standard gym API (recommended for this env)
-env = gym.make("InvertedPendulum-v5")
-
-# Set core variables
-state_dim = env.observation_space.shape[0]  # in features
-n_neurons = 20  # decision/hidden nodes
-action_dim = env.action_space.shape[0]  # out features
-
-buffer_size = 100_000
-batch_size = 128
-
-# Train a model
-model = LiquidDDPG(
-    state_dim, 
-    n_neurons, 
-    action_dim, 
-    buffer_size=buffer_size,
+# For discrete tasks
+model = NeuroFlow(
+    "CartPole-v1",
+    20,  # actor neurons 
+    128,  # critic neurons
     device=device,
 )
-model.train(env, batch_size, n_episodes=300)
+
+# Train the model using a batch size of 64
+model.train(64, n_episodes=50, display_count=10)
 ```
 
 This code should work 'as is'.
 
-Currently, the framework only supports [Gymnasium [:material-arrow-right-bottom:]](https://gymnasium.farama.org/) environments and is planned to expand to [PettingZoo [:material-arrow-right-bottom:]](https://pettingzoo.farama.org/index.html) for Multi-agent (MARL) tasks.
+Currently, the framework only supports [Gymnasium [:material-arrow-right-bottom:]](https://gymnasium.farama.org/) environments and is planned to expand to [PettingZoo [:material-arrow-right-bottom:]](https://pettingzoo.farama.org/index.html) for Multi-agent (MARL) tasks, with updated adaptations of [CybORG [:material-arrow-right-bottom:]](https://github.com/cage-challenge/CybORG/tree/main) environments.
 
 ## API Structure
 
@@ -95,11 +76,11 @@ from velora.utils import [method]
 
 <div class="grid cards" markdown>
 
--   :fontawesome-solid-droplet:{ .lg .middle } __Use a Liquid RL Model__
+-   :fontawesome-solid-droplet:{ .lg .middle } __NeuroFlow Agents__
 
     ---
 
-    Learn how to use Liquid RL models with Gymnasium environments.
+    Learn how to use NeuroFlow models.
 
     [:octicons-arrow-right-24: Start learning](../learn/tutorial/index.md)
 
@@ -107,8 +88,8 @@ from velora.utils import [method]
 
     ---
 
-    Learn how to build your own custom models.
+    Learn how to build your own models.
 
-    [:octicons-arrow-right-24: Start learning](../learn/customize/index.md)
+    [:octicons-arrow-right-24: Go custom](../learn/customize/index.md)
 
 </div>

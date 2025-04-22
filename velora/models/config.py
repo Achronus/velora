@@ -213,7 +213,6 @@ class RLAgentConfig(BaseModel):
         Updates the training details of the model.
 
         Parameters:
-            env (str): the environment name
             train_params (TrainConfig): a config containing training parameters
 
         Returns:

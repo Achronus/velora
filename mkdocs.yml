@@ -54,7 +54,8 @@ nav:
           - Saving & Loading Models: learn/tutorial/save.md
           - Agents:
               - Agents: learn/tutorial/agents/index.md
-              - DDPG: learn/tutorial/agents/ddpg.md
+              - NeuroFlow - Discrete: learn/tutorial/agents/nf.md
+              - NeuroFlow - Continuous: learn/tutorial/agents/nf-ct.md
           - Training Metrics: learn/tutorial/metrics.md
           - Gymnasium: learn/tutorial/gym.md
           - Utilities: learn/tutorial/utils.md
@@ -63,7 +64,11 @@ nav:
           - Wiring: learn/customize/wiring.md
           - Liquid Networks: learn/customize/liquid.md
           - Buffers: learn/customize/buffers.md
-          - Actor-Critics: learn/customize/acs.md
+          - Modules:
+            - Modules: learn/customize/modules/index.md
+            - Actor: learn/customize/modules/actor.md
+            - Critic: learn/customize/modules/critic.md
+            - Entropy: learn/customize/modules/entropy.md
           - Backbones: learn/customize/backbone.md
       - Theory:
           - Theory: learn/theory/index.md
@@ -75,12 +80,13 @@ nav:
             - backbone: learn/reference/models/backbone.md
             - base: learn/reference/models/base.md
             - config: learn/reference/models/config.md
-            - ddpg: learn/reference/models/ddpg.md
             - lnn: learn/reference/models/lnn.md
+            - nf: learn/reference/models/nf.md
+            - modules: learn/reference/models/modules.md
+            - sac: learn/reference/models/sac.md
           - buffer: learn/reference/buffer.md
           - callbacks: learn/reference/callbacks.md
           - gymnasium: learn/reference/gym.md
-          - noise: learn/reference/noise.md
           - metrics: learn/reference/metrics.md
           - state: learn/reference/state.md
           - training: learn/reference/training.md

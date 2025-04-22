@@ -255,7 +255,7 @@ from velora.wiring import Wiring
 import torch
 
 wiring = Wiring(4, 10, 1)
-l1 = SparseLinear(4, 1, torch.abs(wiring.masks.inter.T))
+l1 = SparseLinear(4, 1, torch.abs(wiring.masks.motor.T))
 ```
 
 This code should work 'as is'.

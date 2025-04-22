@@ -12,31 +12,26 @@ Found on:
 
 # Velora
 
-**Velora** is a lightweight and extensible framework built on top of powerful libraries like [Gymnasium](https://gymnasium.farama.org/) and [PyTorch](https://pytorch.org/), specializing in a unique approach to Deep Reinforcement Learning (RL) algorithms, a paradigm we call *Liquid RL*.
+**Velora** is a lightweight and modular framework built on top of powerful libraries like [Gymnasium](https://gymnasium.farama.org/) and [PyTorch](https://pytorch.org/). It is home to a new type of RL agent called ***NeuroFlow*** (NF) that specializes in Autonomous Cyber Defence through a novel Deep Reinforcement Learning (RL) approach we call ***Liquid RL***.
 
-Instead of Fully-connected Networks, Velora combines [Liquid Neural Networks](https://arxiv.org/abs/2006.04439) (LNNs) with [Neural Circuit Policies](https://arxiv.org/abs/1803.08554) (NCPs), specifically [Ordinary Neural Circuits](https://proceedings.mlr.press/v119/hasani20a.html) (ONCs).
+## Benefits
 
-These two components have interesting benefits:
-
-- LNNs are a powerful RNN architecture that learns system dynamics, not just data patterns.
-- NCPs focus on sparsely connected neurons with distinct functions, mimicking biological behaviour.
-
-From what we've seen, these networks are powerful, small-scale architectures that excel in model explainability, making them perfect for control tasks.
-
-Velora offers Liquidfied PyTorch-based implementations of RL algorithms, designed to be intuitive, easy to use, and customizable.
-
-In other frameworks, we've seen a trend of heavy abstraction in favour of minimal lines of code. Our approach aims to offer a best of both worlds, abstracting code away but making the details explainable on the backend, while giving you the freedom to customize as needed.
+- **Explainability**: NF agents use [Liquid Neural Networks](https://arxiv.org/abs/2006.04439) (LNNs) and [Neural Circuit Policies](https://arxiv.org/abs/1803.08554) (NCPs) to model Cyber system dynamics, not just data patterns. Also, they use sparse NCP connections to mimic biological efficiency, enabling clear, interpretable strategies via a labeled Strategy Library.
+- **Adaptability**: NF agents dynamically grow their networks using a fitness score, adding more neurons to a backbone only when new Cyber strategies emerge, keeping agents compact and robust.
+- **Planning**: NF agents use a Strategy Library and learned environment model to plan strategic sequences for proactive Cyber defense.
+- **Always Learning**: using [EWC](https://arxiv.org/abs/1612.00796), NF agents refine existing strategies and learn new ones post-training, adapting to evolving Cyber threats like new attack patterns.
+- **Customizable**: NF agents are PyTorch-based, designed to be intuitive, easy to use, and modular so you can easily build your own!
 
 ## Installation
 
-To get started, simply install it through [pip](https://pypi.org/) using one of the options below.
+To get started, simply install it through [pip](https://pypi.org/project/velora) using one of the options below.
 
 ### GPU Enabled
 
 For [PyTorch](https://pytorch.org/get-started/locally/) with CUDA (recommended):
 
 ```bash
-pip install torch torchvision velora --extra-index-url https://download.pytorch.org/whl/cu124
+pip install torch torchvision velora --extra-index-url https://download.pytorch.org/whl/cu126
 ```
 
 ### CPU Only
@@ -52,53 +47,34 @@ pip install torch torchvision velora
 Here's a simple example that should work 'as is':
 
 ```python
-from functools import partial
+from velora.models import NeuroFlow, NeuroFlowCT
+from velora.utils import set_device
 
-from velora.models import LiquidDDPG
-from velora.gym import wrap_gym_env
-from velora.utils import set_device, set_seed
-
-import gymnasium as gym
-from gymnasium.wrappers import NormalizeObservation, NormalizeReward, ClipReward
-
-# Setup reproducibility and PyTorch device
-seed = 64
-set_seed(seed)
-
+# Setup PyTorch device
 device = set_device()
 
-# Add extra wrappers to our environment
-env = wrap_gym_env("InvertedPendulum-v5", [
-    partial(NormalizeObservation, epsilon=1e-8),
-    partial(NormalizeReward, gamma=0.99, epsilon=1e-8),
-    partial(ClipReward, max_reward=10.0),
-    # RecordEpisodeStatistics,  # Applied automatically!
-    # partial(NumpyToTorch, device=device),  # Applied automatically!
-])
+# For continuous tasks
+model = NeuroFlowCT(
+    "InvertedPendulum-v5",
+    20,  # actor neurons 
+    128,  # critic neurons
+    device=device,
+    seed=64,  # remove for automatic generation
+)
 
-# Or, use the standard gym API (recommended for this env)
-env = gym.make("InvertedPendulum-v5")
-
-# Set core variables
-state_dim = env.observation_space.shape[0]  # in features
-n_neurons = 20  # decision/hidden nodes
-action_dim = env.action_space.shape[0]  # out features
-
-buffer_size = 100_000
-batch_size = 128
-
-# Train a model
-model = LiquidDDPG(
-    state_dim, 
-    n_neurons, 
-    action_dim, 
-    buffer_size=buffer_size,
+# For discrete tasks
+model = NeuroFlow(
+    "CartPole-v1",
+    20,  # actor neurons 
+    128,  # critic neurons
     device=device,
 )
-model.train(env, batch_size, n_episodes=300)
+
+# Train the model using a batch size of 64
+model.train(64, n_episodes=50, display_count=10)
 ```
 
-Currently, the framework only supports [Gymnasium](https://gymnasium.farama.org/) environments and is planned to expand to [PettingZoo](https://pettingzoo.farama.org/index.html) for Multi-agent (MARL) tasks.
+Currently, the framework only supports [Gymnasium](https://gymnasium.farama.org/) environments and is planned to expand to [PettingZoo](https://pettingzoo.farama.org/index.html) for Multi-agent (MARL) tasks, with updated adaptations of [CybORG](https://github.com/cage-challenge/CybORG/tree/main) environments.
 
 ## API Structure
 
@@ -122,16 +98,10 @@ from velora.gym import [method]
 from velora.utils import [method]
 ```
 
-## Customization
-
-Customization is at the heart of Velora but requires a deeper understanding of the API.
-
-You can read more about it in the [documentation tutorials](https://velora.achronus.dev/learn/customize).
-
 ## Active Development
 
 🚧 View the [Roadmap](https://velora.achronus.dev/starting/roadmap) 🚧
 
-**Velora** is a tool that is continuously being developed. There's still a lot to do to make it a fully functioning framework, such as detailed API documentation, and more RL algorithms.
+**Velora** is a tool that is continuously being developed. There's still a lot to do to make it a great framework, such as detailed API documentation, and expanding our NeuroFlow agents.
 
 Our goal is to provide a quality open-source product that works 'out-of-the-box' that everyone can experiment with, and then gradually fix unexpected bugs and introduce more features on the road to a `v1` release.

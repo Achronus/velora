@@ -190,7 +190,7 @@ class ActorModule(BaseModule):
 class ActorModuleDiscrete(BaseModule):
     """
     An Actor module for NeuroFlow. Uses a Liquid NCP SAC Actor with a
-    categorical policy.
+    Categorical policy.
 
     Usable with discrete action spaces.
     """
@@ -270,7 +270,7 @@ class ActorModuleDiscrete(BaseModule):
 
     def forward(
         self, obs: torch.Tensor, hidden: torch.Tensor | None = None
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Performs a forward pass through the network.
 

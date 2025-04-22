@@ -18,7 +18,7 @@ class LiquidNCPNetwork(nn.Module):
     2. Command (hidden) - a `NCPLiquidCell` layer
     3. Motor (output) - a `SparseLinear` layer
 
-    !!! note "Decision nodes"
+    ??? note "Decision nodes"
 
         `inter` and `command` neurons are automatically calculated using:
 
@@ -188,7 +188,7 @@ class NCPNetwork(nn.Module):
 
     Uses the Mish activation function between each layer.
 
-    !!! note "Decision nodes"
+    ??? note "Decision nodes"
 
         `inter` and `command` neurons are automatically calculated using:
 

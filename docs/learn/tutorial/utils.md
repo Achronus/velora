@@ -44,6 +44,8 @@ print(seed)  # A random seed
 
 This code should work 'as is'.
 
+Then, you would pass the `seed` to the `seed` parameter of to any of Velora's agents `init` method.
+
 ### Setting a Device
 
 ???+ api "API Docs"
@@ -65,6 +67,8 @@ device = set_device("cuda:1")  # torch.device('cuda:1')
 ```
 
 This code should work 'as is'.
+
+Then, you would pass the `device` to the `device` parameter to any of Velora's agents `init` method.
 
 ## Torch
 
@@ -154,18 +158,18 @@ Like [`to_tensor`](#item-list-to-tensor), we use `dtype=torch.float32` and `devi
 
     [`velora.utils.soft_update(source, target, tau)`](../reference/utils.md#velora.utils.torch.soft_update)
 
-Some algorithms, like [`DDPG`](../tutorial/agents/ddpg.md), perform soft target parameter updates using a hyperparameter $\tau$.
+Some algorithms, like [`NeuroFlow`](../tutorial/agents/nf.md), perform soft target parameter updates using a hyperparameter $\tau$.
 
 This method performs that exact process. Given a `source` network, `target` network, and soft update factor `tau`, we iterate through our parameters and perform a soft update:
 
 ```python
 from copy import deepcopy
 
-from velora.models.ddpg import DDPGActor
+from velora.models.sac.discrete import SACActorDiscrete
 from velora.utils import soft_update
 
 # Set two networks
-actor = DDPGActor(4, 10, 1)
+actor = SACActorDiscrete(4, 10, 1)
 target = deepcopy(actor)
 
 # Perform soft parameter update
@@ -185,11 +189,11 @@ Are soft updates too slow? We can perform a hard parameter update (without the $
 ```python
 from copy import deepcopy
 
-from velora.models.ddpg import DDPGActor
+from velora.models.sac.discrete import SACActorDiscrete
 from velora.utils import hard_update
 
 # Set two networks
-actor = DDPGActor(4, 10, 1)
+actor = SACActorDiscrete(4, 10, 1)
 target = deepcopy(actor)
 
 # Perform hard parameter update
@@ -211,13 +215,14 @@ Ever been curious about the number of parameters a model has? We've got a few me
 `total_parameters()` for ALL parameters, and `active_parameters()` for ones in use:
 
 ```python
-from velora.models import LiquidDDPG
+from velora.models import SACActorDiscrete
 from velora.utils import total_parameters, active_parameters
 
-model = LiquidDDPG(4, 10, 1)
+model = SACActorDiscrete(4, 10, 1)
 
-total_params = total_parameters(model.actor)
-active_params = active_parameters(model.actor)
+total_params = total_parameters(model)
+active_params = active_parameters(model)
+print(total_params, active_params)
 ```
 
 This code should work 'as is'.

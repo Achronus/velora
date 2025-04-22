@@ -8,7 +8,7 @@ Velora has two prebuilt options for this: an `MLP` and a `BasicCNN`.
 
 ???+ api "API Docs"
 
-    [`velora.models.backbone.MLP`](../reference/models/backbone.md#velora.models.backbone.MLP)
+    [`velora.models.backbone.MLP(in_features, n_hidden, out_features)`](../reference/models/backbone.md#velora.models.backbone.MLP)
 
 The `MLP` is a dynamic class for building Multi-layer Perceptron Networks - the traditional fully-connected neuron architecture.
 
@@ -50,7 +50,7 @@ This code should work 'as is'.
 
 ???+ api "API Docs"
 
-    [`velora.models.backbone.BasicCNN`](../reference/models/backbone.md#velora.models.backbone.BasicCNN)
+    [`velora.models.backbone.BasicCNN(in_channels)`](../reference/models/backbone.md#velora.models.backbone.BasicCNN)
 
 The `BasicCNN` uses a static architecture from the DQN Nature paper: [Human-level control through deep reinforcement learning [:material-arrow-right-bottom:]](https://www.nature.com/articles/nature14236).
 
@@ -58,11 +58,11 @@ The paper used it for Atari games, but has been adopted in other libraries such 
 
 As an added bonus, it makes things easier for comparing SB3 baselines with our algorithms 😉.
 
-???+ note "Backbones with Velora algorithms"
+???+ abstract "Backbones with Velora agents"
 
-    Currently, Velora doesn't directly use backbones in it's prebuilt algorithms, they are strictly LNN architectures. So, you need to manually apply them yourself (we'll show you how to do this shortly).
+    Currently, Velora doesn't directly use backbones in it's agents, they are strictly LNN or NCP architectures. So, you need to manually apply them yourself (we'll show you how to do this shortly).
     
-    We plan to change this in the future, but right now we are focusing on building a robust baseline for our algorithms.
+    Typically, cyber environments don't use images as inputs, so we have no intention of changing this.
 
 To use the `BasicCNN` architecture, we pass in the number of `in_channels` and then can call the `forward()` or `out_size()` methods:
 

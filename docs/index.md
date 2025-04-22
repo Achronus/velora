@@ -11,7 +11,7 @@ hide:
 
 <p id="slogan" align="center" markdown>
 
-*Velora, a lightweight and modular <span style="color: #38e2e2;">Liquid Reinforcement Learning (RL)</span> framework.*
+*Velora, a <span style="color: #38e2e2;">Liquid RL</span> framework for <span style="color: #38e2e2;">NeuroFlow</span> agents, empowering <span style="color: #38e2e2;">Autonomous Cyber Defence</span>.*
 
 </p>
 
@@ -30,20 +30,15 @@ hide:
 
 ---
 
-**Velora** is a lightweight and extensible framework built on top of powerful libraries like [Gymnasium [:material-arrow-right-bottom:]](https://gymnasium.farama.org/) and [PyTorch [:material-arrow-right-bottom:]](https://pytorch.org/), specializing in a unique approach to Deep Reinforcement Learning (RL) algorithms, a paradigm we call *Liquid RL*.
+**Velora** is a lightweight and modular framework built on top of powerful libraries like [Gymnasium [:material-arrow-right-bottom:]](https://gymnasium.farama.org/) and [PyTorch [:material-arrow-right-bottom:]](https://pytorch.org/). It is home to a new type of RL agent called ***NeuroFlow*** (NF) that specializes in Autonomous Cyber Defence through a novel Deep Reinforcement Learning (RL) approach we call ***Liquid RL***.
 
-Instead of Fully-connected Networks, Velora combines [Liquid Neural Networks [:material-arrow-right-bottom:]](https://arxiv.org/abs/2006.04439) (LNNs) with [Neural Circuit Policies [:material-arrow-right-bottom:]](https://arxiv.org/abs/1803.08554) (NCPs), specifically [Ordinary Neural Circuits [:material-arrow-right-bottom:]](https://proceedings.mlr.press/v119/hasani20a.html) (ONCs).
+## Benefits
 
-These two components have interesting benefits:
-
-- LNNs are a powerful RNN architecture that learns system dynamics, not just data patterns.
-- NCPs focus on sparsely connected neurons with distinct functions, mimicking biological behaviour.
-
-From what we've seen, these networks are powerful, small-scale architectures that excel in model explainability, making them perfect for control tasks.
-
-Velora offers Liquidfied PyTorch-based implementations of RL algorithms, designed to be intuitive, easy to use, and customizable.
-
-In other frameworks, we've seen a trend of heavy abstraction in favour of minimal lines of code. Our approach aims to offer a best of both worlds, abstracting code away but making the details explainable on the backend, while giving you the freedom to customize as needed.
+- **Explainability**: NF agents use [Liquid Neural Networks [:material-arrow-right-bottom:]](https://arxiv.org/abs/2006.04439) (LNNs) and [Neural Circuit Policies [:material-arrow-right-bottom:]](https://arxiv.org/abs/1803.08554) (NCPs) to model Cyber system dynamics, not just data patterns. Also, they use sparse NCP connections to mimic biological efficiency, enabling clear, interpretable strategies via a labeled Strategy Library.
+- **Adaptability**: NF agents dynamically grow their networks using a fitness score, adding more neurons to a backbone only when new Cyber strategies emerge, keeping agents compact and robust.
+- **Planning**: NF agents use a Strategy Library and learned environment model to plan strategic sequences for proactive Cyber defense.
+- **Always Learning**: using [EWC [:material-arrow-right-bottom:]](https://arxiv.org/abs/1612.00796), NF agents refine existing strategies and learn new ones post-training, adapting to evolving Cyber threats like new attack patterns.
+- **Customizable**: NF agents are [PyTorch-based [:material-arrow-right-bottom:]](https://pytorch.org/), designed to be intuitive, easy to use, and modular so you can easily build your own!
 
 <div class="grid cards" markdown>
 
@@ -67,7 +62,7 @@ In other frameworks, we've seen a trend of heavy abstraction in favour of minima
 
 ## Active Development
 
-**Velora** is a tool that is continuously being developed. There's still a lot to do to make it a fully functioning framework, such as detailed API documentation, and more RL algorithms.
+**Velora** is a tool that is continuously being developed. There's still a lot to do to make it a great framework, such as detailed API documentation, and expanding our NeuroFlow agents.
 
 Our goal is to provide a quality open-source product that works 'out-of-the-box' that everyone can experiment with, and then gradually fix unexpected bugs and introduce more features on the road to a [`v1`](#active-development) release.
 

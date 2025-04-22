@@ -34,7 +34,7 @@ buffer = ReplayBuffer(
 )
 ```
 
-### Add Items
+### Add One Item
 
 ???+ api "API Docs"
 
@@ -63,6 +63,37 @@ buffer.add(
 )
 ```
 
+### Add Multiple Items
+
+???+ api "API Docs"
+
+    [`velora.buffer.ReplayBuffer.add_multi(state, action, reward, next_state, done)`](../reference/buffer.md#velora.buffer.BufferBase.add_multi)
+
+Or, we can add multiple values at once using the `add_multi()` method. Like before, we can use a set of experience from a `Tuple` or the individual items.
+
+The only difference, is that everything must be a `torch.Tensor`:
+
+```python
+import torch
+
+exp = (
+    torch.zeros((5, 4)),
+    torch.ones((5, 1)),
+    torch.ones((5, 1)),
+    torch.zeros((5, 4)),
+    torch.zeros(5, 1),
+)
+
+buffer.add_multi(*exp)
+buffer.add_multi(
+    torch.zeros((5, 4)),
+    torch.ones((5, 1)),
+    torch.ones((5, 1)),
+    torch.zeros((5, 4)),
+    torch.zeros(5, 1),
+)
+```
+
 ### Get Samples
 
 ???+ api "API Docs"
@@ -77,7 +108,7 @@ batch = buffer.sample(batch_size=128)
 
 This gives us a `BatchExperience` object. We'll talk about this later.
 
-!!! note
+!!! warning
 
     We can only sample from the buffer after we have enough experience. This is dictated by your `batch_size`.
 
@@ -85,20 +116,27 @@ This gives us a `BatchExperience` object. We'll talk about this later.
 
 ???+ api "API Docs"
 
-    [`velora.buffer.ReplayBuffer.warm(agent, env_name, n_samples)`](../reference/buffer.md#velora.buffer.ReplayBuffer.warm)
+    [`velora.buffer.ReplayBuffer.warm(agent, n_samples)`](../reference/buffer.md#velora.buffer.ReplayBuffer.warm)
 
-The `ReplayBuffer` needs to have samples in it before we can `sample` from it. We call this the *warming* process.
+Since the `ReplayBuffer` needs to have samples in it before we can `sample` from it. We can use a *warming* process to pre-populate the buffer.
 
-We have a dedicated method for this called `warm()` that automatically gathers experience up to `n_samples` without effecting your `episode` count during training.
+We have a dedicated method for this called `warm()` that automatically gathers experience up to `n_samples` without affecting your `episode` count during training.
 
-It takes three parameters:
+It requires two parameters:
 
-- `agent` - the `RLAgent` instance to generate samples with. E.g., [`LiquidDDPG`](../reference/models/ddpg.md)
-- `env_name` - the [Gymnasium [:material-arrow-right-bottom:]](https://gymnasium.farama.org/) environment name ID (`env.spec.id`). E.g., `InvertedPendulum-v5`.
-- `n_samples` - the number of samples to generate. E.g., the `batch_size`
+| Parameter | Description | Example |
+| --------- | ----------- | ------- |
+| `agent`  | The Velora agent instance to generate samples with. | [`NeuroFlow`](../reference/models/nf.md) |
+| `n_samples` | The number of samples to generate. | `batch_size * 2` |
+
+And has one optional parameter:
+
+| Parameter | Description            | Default            |
+| --------- | ---------------------- | ------------------ |
+| `num_envs`   | The number of vectorized environments to use for warming. | `8` |
 
 ```python
-buffer.warm(agent, env.spec.id, 128)
+buffer.warm(agent, 1024)
 ```
 
 ### Check Size
@@ -114,80 +152,111 @@ len(buffer)  # 1
 Here's a complete example of the code we've just seen:
 
 ```python
-from velora.buffer import ReplayBuffer
 from velora.utils import set_device
-from velora.models.ddpg import LiquidDDPG
+from velora.models import NeuroFlow
 
-import gymnasium as gym
 import torch
 
 device = set_device()
 
-env = gym.make("InvertedPendulum-v5", render_mode="rgb_array")
+agent = NeuroFlow("CartPole-v1", 20, 128, device=device)
 
-state_dim = env.observation_space.shape[0]
-action_dim = env.action_space.shape[0]
-
-agent = LiquidDDPG(state_dim, 10, action_dim, device=device)
-buffer = ReplayBuffer(
-    100_000, 
-    state_dim, 
-    action_dim, 
-    agent.actor.ncp.hidden_size,
-    device=device
-)
-
-# Warm with 5 samples
-buffer.warm(agent, env.spec.id, 5)
+# Warm with at least 5 samples - can go over!
+agent.buffer.warm(agent, 5, num_envs=2)
 
 # Single experience
 exp = (
-    torch.zeros(state_dim, device=device),
+    torch.zeros(agent.state_dim, device=device),
     torch.tensor((1.), device=device),
     2.,
-    torch.zeros(state_dim, device=device),
+    torch.zeros(agent.state_dim, device=device),
     False,
+    torch.zeros(agent.actor.hidden_size, device=device),
 )
-buffer.add(*exp)
+agent.buffer.add(*exp)
+
+# 3 more samples
+exp = (
+    torch.zeros((3, agent.state_dim), device=device),
+    torch.ones((3, 1), device=device),
+    torch.ones((3, 1), device=device),
+    torch.zeros((3, agent.state_dim), device=device),
+    torch.ones((3, 1), device=device),
+    torch.zeros((3, agent.actor.hidden_size), device=device),
+)
+agent.buffer.add_multi(*exp)
 
 # Get a batch
-batch = buffer.sample(batch_size=5)
+batch = agent.buffer.sample(batch_size=5)
 
-len(buffer)  # 6
+len(agent.buffer)  # 10
 ```
 
 This code should work 'as is'.
 
 ## Saving and Loading Buffers
 
-???+ api "API Docs"
-
-    [`velora.buffer.BufferBase.save(filepath)`](../reference/buffer.md#velora.buffer.BufferBase.save)
-
-    [`velora.buffer.BufferBase.load(filepath)`](../reference/buffer.md#velora.buffer.BufferBase.load)
-
 Sometimes you might want to reuse a buffers state in a different project. Well, now you can!
 
 We provide both a `save()` and `load()` feature for all buffers 😎.
 
-Once you've created a buffer and used it, simply pass in a `filepath` to the `save` method to store it like `PyTorch` parameters:
+### Saving
 
-```python
+???+ api "API Docs"
+
+    [`velora.buffer.BufferBase.save(dirpath)`](../reference/buffer.md#velora.buffer.BufferBase.save)
+
+Once you've created a buffer and used it, simply pass in a `dirpath` to the `save` method. The final folder in the `dirpath` will be used to store the buffer's state. This includes:
+
+- `buffer_metadata.json` - the buffers metadata
+- `buffer_state.safetensors` - the buffers tensor state
+
+You can change the filename prefix `buffer_` with the optional `prefix` parameter:
+
+```python hl_lines="7"
 from velora.buffer import ReplayBuffer
 
-buffer = ReplayBuffer(100, 11, 3, device="cpu")
+buffer = ReplayBuffer(100, 11, 3, 8, device="cpu")
 
-buffer.save('checkpoints/buffer_100_cpu.pt')
+buffer.save(
+    'checkpoints/nf/CartPole_100', 
+    prefix="buffer_" # (1)
+)
 ```
+
+1. Optional
 
 This code should work 'as is'.
 
-Then, to restore it into a new buffer instance, we use `load()` like so:
+### Loading
+
+???+ api "API Docs"
+
+    [`velora.buffer.BufferBase.load(state_path, metadata)`](../reference/buffer.md#velora.buffer.BufferBase.load)
+
+Then, to restore it into a new buffer instance, we use the `load()` method with the path to the `safetensors` file and the preloaded `metadata`:
 
 ```python
+import json
+from pathlib import Path
 from velora.buffer import ReplayBuffer
 
-buffer = ReplayBuffer.load('checkpoints/buffer_100_cpu.pt')
+root_path = 'checkpoints/nf/CartPole_100'
+
+with Path(root_path, 'buffer_metadata.json').open("r") as f:
+    metadata = json.load(f)
+
+buffer = ReplayBuffer.load(Path(root_path, 'buffer_state'), metadata)
+print(buffer.metadata())
+# {
+# 'capacity': 100,
+# 'state_dim': 11,
+# 'action_dim': 3,
+# 'hidden_dim': 8,
+# 'position': 0,
+# 'size': 0,
+# 'device': 'cpu'
+# }
 ```
 
 This code should work 'as is'.

@@ -6,7 +6,7 @@ For two years LLMs continued to reign supreme without any hope of slowing down. 
 
 We focus on RL because of how fascinating the topic is. Agents that learn through trial-and-error, just like humans do. Does that not sound like true Artificial Intelligence to you? Our only problem was the size of models.
 
-One fateful day, browsing our YouTube feed, a hidden gem presented itself - *[Liquid Neural Networks [:material-arrow-right-bottom:]](https://www.youtube.com/watch?v=IlliqYiRhMU)*.
+One fateful day, browsing our YouTube feed, a hidden gem presented itself - *[Liquid Neural Networks [:material-arrow-right-bottom:]](https://www.youtube.com/watch?v=IlliqYiRhMU)* (LNNs).
 
 An architecture that is powerful, small, robust and explainable. Yet, no one was talking about it. Have people not seen the architecture? Are they blinded by the power of LLMs? We couldn't put our finger on it. Months went by and LLMs still boomed, achieving great results but still growing in size without an end in sight, until finally we had enough.
 
@@ -51,7 +51,11 @@ This was it, the first real step on our journey to making Velora a reality.
 
 That was on the 17th February 2025 and marks the true birth 🎂 of Velora, our Liquid RL framework.
 
-At the time of writing, this is only a day after its birth 🤭. We have big plans for Velora and hope that LNNs meet our expectations and help us understand these 5 pillars:
+After experimenting with different RL algorithms for two months (DDPG, PPO, SAC), we started to reconsider the direction to take for our framework. Rebuilding the same algorithms with a different architecture seemed like a pointless endeavor. We weren't pushing the field forward, just toying with the idea that LNNs are better.
+
+On the 12th April 2025, we decided to shift our focus to a single agent architecture, one of our own making that's fully autonomous and learns strictly through experience - ***NeuroFlow***. This has now become our obsession and main focus of the framework.
+
+We have big plans for NeuroFlow and are interested to see where it takes us! It still uses LNNs as a baseline and we intend to keep explainability in mind, focusing on these 5 pillars:
 
 - **Causality** - how changes in parameters and elements (e.g., NN building blocks) of the agent alter the decision making process.
 - **Fairness** - the decisions made by the agent are not biased and are independent of a selected group of sensitive features (e.g., gender, ethnicity, image backgrounds).
@@ -61,4 +65,4 @@ At the time of writing, this is only a day after its birth 🤭. We have big pla
 
 We've got a long road ahead but we are excited to make it happen! 🚀
 
-We hope you all enjoy using Velora as much as we do making it and we look forward to seeing what you all create with it! 🍻
+We hope you all enjoy using Velora and our NeuroFlow agents as much as we do making it and we look forward to seeing what you all create with it! 🍻

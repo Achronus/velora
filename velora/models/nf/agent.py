@@ -37,33 +37,13 @@ StateDictKeys = Literal["modules", "optimizers"]
 
 class NeuroFlowCT(RLModuleAgent):
     """
-    A custom Liquid model that combines a variety of RL techniques. Designed for
-    `continuous` action spaces.
+    ???+ abstract "Documentation"
 
-    Includes:
+        > [User Guide - Tutorials: NeuroFlow - Continuous](https://velora.achronus.dev/learn/tutorial/agents/nf)
 
-    - Soft Actor-Critic (SAC) - for `continuous` action spaces.
-    - Differing Actor and Critic network sizes and architectures - the actor uses a small `LiquidNCPNetwork` and the critic's use large `NCPNetworks`.
+    A custom Liquid RL agent that combines a variety of RL techniques.
 
-    Coming soon:
-
-    - Curiosity-Aware Entropy Temperature (CAT) - for curiosity exploration.
-
-    Paper references:
-
-    - [Soft Actor-Critic: Off-Policy Maximum Entropy Deep Reinforcement Learning with a Stochastic Actor](https://arxiv.org/abs/1801.01290)
-    - [Soft Actor-Critic Algorithms and Applications](https://arxiv.org/abs/1812.05905)
-    - [CAT-SAC: Soft Actor-Critic with Curiosity-Aware Entropy Temperature](https://openreview.net/forum?id=paE8yL0aKHo)
-    - [Honey, I Shrunk The Actor: A Case Study on Preserving Performance with Smaller Actors in Actor-Critic RL](https://arxiv.org/abs/2102.11893)
-
-    !!! note "Decision nodes"
-
-        `inter` and `command` neurons are automatically calculated using:
-
-        ```python
-        command_neurons = max(int(0.4 * n_neurons), 1)
-        inter_neurons = n_neurons - command_neurons
-        ```
+    Designed for `continuous` action spaces.
     """
 
     def __init__(
@@ -430,32 +410,13 @@ class NeuroFlowCT(RLModuleAgent):
 
 class NeuroFlow(RLModuleAgent):
     """
-    A custom Liquid model that combines a variety of RL techniques. Designed for
-    `discrete` action spaces.
+    ???+ abstract "Documentation"
 
-    Includes:
+        > [User Guide - Tutorials: NeuroFlow - Discrete](https://velora.achronus.dev/learn/tutorial/agents/nf2)
 
-    - Soft Actor-Critic (SAC) - for `continuous` action spaces.
-    - Differing Actor and Critic network sizes and architectures - the actor uses a small `LiquidNCPNetwork` and the critic's use large `NCPNetworks`.
+    A custom Liquid RL agent that combines a variety of RL techniques.
 
-    Coming soon:
-
-    - Curiosity-Aware Entropy Temperature (CAT) - for curiosity exploration.
-
-    Paper references:
-
-    - [Soft Actor-Critic for Discrete Action Settings](https://arxiv.org/abs/1910.07207)
-    - [CAT-SAC: Soft Actor-Critic with Curiosity-Aware Entropy Temperature](https://openreview.net/forum?id=paE8yL0aKHo)
-    - [Honey, I Shrunk The Actor: A Case Study on Preserving Performance with Smaller Actors in Actor-Critic RL](https://arxiv.org/abs/2102.11893)
-
-    !!! note "Decision nodes"
-
-        `inter` and `command` neurons are automatically calculated using:
-
-        ```python
-        command_neurons = max(int(0.4 * n_neurons), 1)
-        inter_neurons = n_neurons - command_neurons
-        ```
+    Designed for `discrete` action spaces.
     """
 
     def __init__(
