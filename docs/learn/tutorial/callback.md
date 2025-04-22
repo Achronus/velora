@@ -20,19 +20,15 @@ To do this, we use the `EarlyStopping` callback:
 
 ```python
 from velora.callbacks import EarlyStopping
-from velora.models import LiquidDDPG
+from velora.models import NeuroFlow
 
-import gymnasium as gym
-
-
-env = gym.make("InvertedPendulum-v5")
-model = LiquidDDPG(4, 10, 1)
+model = NeuroFlow("InvertedPendulum-v5", 20, 128)
 
 callbacks = [
     EarlyStopping(target=15.0, patience=3),
 ]
 
-model.train(env, 128, n_episodes=100_000, callbacks=callbacks)
+model.train(128, callbacks=callbacks)
 ```
 
 This code should work 'as is'.
@@ -101,37 +97,37 @@ We can do this with the `SaveCheckpoints` callback. It requires one parameter:
 
 Checkpoints are automatically added to a `checkpoints` directory inside a `<dirname>/saves` folder. This design choice compliments the [`RecordVideos`](#recording-videos) callback to help keep the experiments tidy.
 
-For example, if we want to train a `DDPG` model and store its checkpoints in a model directory called `ddpg` we'd use the following code:
+For example, if we want to train a `NeuroFlow` model and store its checkpoints in a model directory called `nf` we'd use the following code:
 
 ```python
 from velora.callbacks import SaveCheckpoints
 
 callbacks = [
-    SaveCheckpoints("ddpg"),
+    SaveCheckpoints("nf"),
 ]
 ```
 
 Notice how we don't allow you to set a `prefixed` name for checkpoints. It's set automatically with the environment name and episode count, such as:
 
-- `InvertedPendulum_ep100.pt`
-- `InvertedPendulum_final.pt`
+- `InvertedPendulum_100/`
+- `InvertedPendulum_final/`
 
 We limit your control to the directory name to simplify the checkpoint process and to keep them organised.
 
 ??? question "Why only the `dirname`?"
 
-    Under the hood, we use the `agent.save()` method for storing checkpoints (more on this later), so each checkpoint folder will also contain a `model_config.json` file containing comprehensive details of the trained agent.
+    Under the hood, we use the `agent.save()` method for storing checkpoints (more on this later). It stores a variety of state files and two additional ones in the `saves` folder - `model_config.json` a file containing config details about the agent, and a `completed.json` file after training terminates with final stats and duration (`episodes`, `steps` and `time taken`).
     
     That way, you don't need any complex `dirnames`! 😉
 
 Only setting the required parameters will create an instance of the callback with the following default `optional` parameters:
 
 - `frequency=100` - the `episode` save frequency.
-- `buffer=False` - whether to save the final buffer state.
+- `buffer=False` - whether to save the buffer state.
 
 You can customize these freely using the required parameter name.
 
-When `buffer=True` only the final checkpoint state's `buffer` is saved. We'll discuss more about this in the [Saving and Loading Models](../tutorial/save.md) section.
+When `buffer=True` the checkpoint state's `buffer` is saved at that episode. We'll discuss more about this in the [Saving and Loading Models](../tutorial/save.md) section.
 
 ## Recording Videos
 
@@ -141,13 +137,11 @@ When `buffer=True` only the final checkpoint state's `buffer` is saved. We'll di
 
 Sometimes it's useful to see how the agent is performing while it is training. The best way to do this is visually, by watching the agent interact with its environment.
 
-Normally, you would use [Gymnasium's RecordVideo [:material-arrow-right-bottom:]](https://gymnasium.farama.org/api/wrappers/misc_wrappers/#gymnasium.wrappers.RecordVideo) wrapper for this, but instead, we recommend you use the `RecordVideos` callback.
-
-It uses the same approach as the wrapper but integrates seamlessly with other callbacks and adds a minor expansion - it *always* records the final training episode.
+To do this, we use the `RecordVideos` callback. Under-the-hood, we apply [Gymnasium's RecordVideo [:material-arrow-right-bottom:]](https://gymnasium.farama.org/api/wrappers/misc_wrappers/#gymnasium.wrappers.RecordVideo) wrapper to the environment with a minor expansion - it *always* records the final training episode.
 
 It has one required parameter:
 
-- `dirname` - the model directory name to store the videos. E.g., `ddpg`.
+- `dirname` - the model directory name to store the videos. E.g., `nf`.
 
 Videos are automatically added to a `checkpoints` directory inside a `<dirname>/videos` folder. This design choice compliments the [`SaveCheckpoints`](#model-checkpoints) callback to help keep the experiments tidy.
 
@@ -156,16 +150,16 @@ from velora.callbacks import EarlyStopping, SaveCheckpoints, RecordVideos
 
 # Solo
 callbacks = [
-    RecordVideos("ddpg"),
+    RecordVideos("nf"),
 ]
 
 # With other callbacks
-CP_DIR = "ddpg"
+CP_DIR = "nf"
 FREQ = 5
 
 callbacks = [
     SaveCheckpoints(CP_DIR, frequency=FREQ, buffer=True),
-    EarlyStopping(target=15.),
+    EarlyStopping(target=15., patience=10),
     RecordVideos(CP_DIR, frequency=FREQ),
 ]
 ```
@@ -236,7 +230,7 @@ To use it, we need 3 things -
 
     callbacks = [
         # other callbacks
-        CometAnalytics("liquid-ddpg"),
+        CometAnalytics("nf"),
     ]
     ```
 
@@ -244,11 +238,11 @@ The callback has one required parameter:
 
 - `project_name` - the name of the Comet ML project to add the experiment to.
 
-And two optional parameters:
+And three optional parameters:
 
 - `experiment_name` - the name of the experiment. If `None`, automatically creates the name using the format: `<agent_classname>_<env_name>_<n_episodes>ep`.
 
-    > E.g., `LiquidDDPG_InvertedPendulum_100ep`.
+    > E.g., `NeuroFlow_InvertedPendulum_1000ep`.
 
 - `tags` - a list of tags associated with experiment. If `None`, sets tags automatically as: `[agent_classname, env_name]`.
 
@@ -260,13 +254,14 @@ And two optional parameters:
 
 We primarily focus on sending episodic metrics to Comet that provide a detailed overview of the training process. These include:
 
-- `ep_reward` - the raw episodic reward (return).
-- `ep_length` - the number of steps completed in the episode.
-- `ep_reward_moving_avg` - the episodic reward moving average based on the training `window_size`.
-- `ep_reward_moving_upper` - the episodic reward moving upper bound (`moving_avg + moving_std`) based on the training `window_size`.
-- `ep_reward_moving_lower` - the episodic reward moving lower bound (`moving_avg - moving_std`) based on the training `window_size`.
-- `ep_actor_loss` - the average Actor loss for each episode.
-- `ep_critic_loss` - the average Critic loss for each episode.
+- `episode/return` - the raw episodic reward (return).
+- `episode/length` - the number of steps completed in the episode.
+- `reward/moving_avg` - the episodic reward moving average based on the training `window_size`.
+- `reward/moving_upper` - the episodic reward moving upper bound (`moving_avg + moving_std`) based on the training `window_size`.
+- `reward/moving_lower` - the episodic reward moving lower bound (`moving_avg - moving_std`) based on the training `window_size`.
+- `losses/actor_loss` - the average Actor loss for each episode.
+- `losses/critic_loss` - the average Critic loss for each episode.
+- `losses/entropy_loss` - the average Entropy loss for each episode.
 
 ---
 

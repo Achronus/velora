@@ -3,8 +3,6 @@ from abc import abstractmethod
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Tuple, get_args
 
-from velora.utils.format import number_to_short
-
 try:
     from typing import override
 except ImportError:  # pragma: no cover
@@ -14,10 +12,11 @@ import gymnasium as gym
 
 if TYPE_CHECKING:
     from velora.state import TrainState  # pragma: no cover
+    from velora.models.base import RLModuleAgent  # pragma: no cover
 
 from velora.metrics.db import get_current_episode
-from velora.models.base import RLAgent
 from velora.state import AnalyticsState, RecordMethodLiteral, RecordState
+from velora.utils.format import number_to_short
 
 
 class TrainCallback:
@@ -91,10 +90,6 @@ class EarlyStopping(TrainCallback):
                 self.count += 1
 
                 if self.count >= self.patience:
-                    print(
-                        f"Early stopping target reached in {state.current_ep} "
-                        "episodes! Training complete."
-                    )
                     state.stop_training = True
             else:
                 self.count = 0
@@ -132,8 +127,8 @@ class SaveCheckpoints(TrainCallback):
 
                 Compliments `TrainCallback.RecordVideos` callback.
 
-            frequency (int, optional): save frequency (in episodes)
-            buffer (bool, optional): whether to save the final buffer state
+            frequency (int, optional): save frequency (in episodes or steps)
+            buffer (bool, optional): whether to save the buffer state
         """
         self.dirname = dirname
         self.frequency = frequency
@@ -147,6 +142,10 @@ class SaveCheckpoints(TrainCallback):
             )
 
     def __call__(self, state: "TrainState") -> "TrainState":
+        if state.status == "start":
+            state.saving_enabled = True
+            state.checkpoint_dir = self.filepath
+
         # Only perform checkpoint operations on episode and complete events
         if state.status != "episode" and state.status != "complete":
             return state
@@ -158,37 +157,33 @@ class SaveCheckpoints(TrainCallback):
 
         should_save = False
         filename = f"{state.env.spec.name}_"
-        buffer = False
 
         # Save checkpoint at specified frequency
         if state.status == "episode" and ep_idx != state.total_episodes:
             if ep_idx % self.frequency == 0:
                 should_save = True
-                filename += f"ep{number_to_short(ep_idx)}"
+                filename += f"{number_to_short(ep_idx)}"
 
         # Perform final checkpoint save
         elif state.status == "complete":
             should_save = True
             filename += "final"
-            buffer = self.buffer
 
         if should_save:
-            self.save_checkpoint(state.agent, filename, buffer)
+            self.save_checkpoint(state.agent, filename)
 
         return state
 
-    def save_checkpoint(self, agent: RLAgent, dirname: str, buffer: bool) -> None:
+    def save_checkpoint(self, agent: "RLModuleAgent", dirname: str) -> None:
         """
         Saves a checkpoint at a given episode with the given suffix.
 
         Parameters:
-            agent (RLAgent): the agent being trained
+            agent (RLModuleAgent): the agent being trained
             dirname (str): the checkpoint directory name
-            buffer (bool): whether to save the buffer state
         """
         checkpoint_path = Path(self.filepath, dirname)
-        agent.save(checkpoint_path, buffer=buffer, config=True)
-        print(f"Checkpoint saved at: {checkpoint_path}")
+        agent.save(checkpoint_path, buffer=self.buffer, config=True)
 
     def config(self) -> Tuple[str, Dict[str, Any]]:
         return self.__class__.__name__, {
@@ -198,7 +193,10 @@ class SaveCheckpoints(TrainCallback):
         }
 
     def info(self) -> str:
-        return f"'{self.__class__.__name__}' enabled with 'dirname={self.dirname}', 'frequency={self.frequency}' and 'buffer={self.buffer}'."
+        return (
+            f"'{self.__class__.__name__}' enabled with 'frequency={self.frequency}' and 'buffer={self.buffer}'.\n"
+            f"    Files will be saved in the 'checkpoints/{self.dirname}/saves' directory."
+        )
 
 
 class RecordVideos(TrainCallback):
@@ -216,6 +214,7 @@ class RecordVideos(TrainCallback):
         *,
         method: RecordMethodLiteral = "episode",
         frequency: int = 100,
+        force: bool = False,
     ) -> None:
         """
         Parameters:
@@ -229,6 +228,8 @@ class RecordVideos(TrainCallback):
                 When `episode` records episodically. When `step` records during
                 training steps.
             frequency (int, optional): the `episode` or `step` record frequency
+            force (bool, optional): enables file overwriting, ignoring existing
+                video files. Useful for continuing model training
         """
         if method not in get_args(RecordMethodLiteral):
             raise ValueError(
@@ -238,12 +239,13 @@ class RecordVideos(TrainCallback):
         self.dirname = dirname
         self.method = method
         self.frequency = frequency
+        self.force = force
 
         self.dirpath = Path("checkpoints", dirname, "videos")
 
-        if self.dirpath.exists():
+        if not force and self.dirpath.exists():
             raise FileExistsError(
-                f"Files already exist in the '{self.dirpath.parent}' directory! Either change the 'dirname' or delete/move the folder and its contents."
+                f"Files already exist in the '{self.dirpath.parent}' directory! Either change the 'dirname', delete/move the folder and its contents, or use 'force=True' to allow overwriting."
             )
 
         def trigger(t: int) -> bool:
@@ -279,10 +281,14 @@ class RecordVideos(TrainCallback):
             "dirname": self.dirname,
             "method": self.method,
             "frequency": self.frequency,
+            "force": self.force,
         }
 
     def info(self) -> str:
-        return f"'{self.__class__.__name__}' enabled with 'dirname={self.dirname}', 'method={str(self.method)}' and 'frequency={self.frequency}'."
+        return (
+            f"'{self.__class__.__name__}' enabled with 'method={str(self.method)}' and 'frequency={self.frequency}'.\n"
+            f"    Files will be saved in the 'checkpoints/{self.dirname}/videos' directory."
+        )
 
 
 class CometAnalytics(TrainCallback):
@@ -306,6 +312,7 @@ class CometAnalytics(TrainCallback):
         experiment_name: str | None = None,
         *,
         tags: List[str] | None = None,
+        experiment_key: str | None = None,
     ) -> None:
         """
         Parameters:
@@ -313,10 +320,13 @@ class CometAnalytics(TrainCallback):
                 experiment to
             experiment_name (str, optional): the name of this experiment run.
                 If `None`, automatically creates the name using the format
-                `<agent_classname>_<env_name>_<n_episodes>ep`
+                `<agent_classname>_<env_name>_<n_episodes>ep`. Ignored when
+                using `experiment_key`
             tags (List[str], optional): a list of tags associated with the
                 experiment. If `None` adds the `agent_classname` and `env_name`
-                by default
+                by default. Ignored when using `experiment_key`
+            experiment_key (str, optional): an existing Comet ML experiment key.
+                Used for continuing an experiment
         """
         try:
             from comet_ml import Experiment
@@ -332,6 +342,8 @@ class CometAnalytics(TrainCallback):
             )
 
         self.experiment: Experiment | None = None
+        self.experiment_key = experiment_key
+
         self.state = AnalyticsState(
             project_name=project_name,
             experiment_name=experiment_name,
@@ -355,29 +367,9 @@ class CometAnalytics(TrainCallback):
             self.experiment.log_parameters(state.agent.config.model_dump())
 
         # Send episodic metrics
-        if state.status == "episode":
-            results = get_current_episode(
-                state.session,
-                state.experiment_id,
-                state.current_ep,
-            )
-
-            for episode in results:
-                reward_low = episode.reward_moving_avg - episode.reward_moving_std
-                reward_high = episode.reward_moving_avg + episode.reward_moving_std
-
-                self.experiment.log_metrics(
-                    {
-                        "ep_reward": episode.reward,
-                        "ep_length": episode.length,
-                        "ep_reward_moving_avg": episode.reward_moving_avg,
-                        "ep_reward_moving_upper": reward_high,
-                        "ep_reward_moving_lower": reward_low,
-                        "ep_actor_loss": episode.actor_loss,
-                        "ep_critic_loss": episode.critic_loss,
-                    },
-                    epoch=state.current_ep,
-                )
+        if state.status == "logging":
+            if state.logging_type == "episode":
+                self.log_episode_data(state)
 
         # Finalize training
         if state.status == "complete":
@@ -390,33 +382,80 @@ class CometAnalytics(TrainCallback):
 
         return state
 
+    def log_episode_data(self, state: "TrainState") -> None:
+        """
+        Logs episodic data to the experiment.
+
+        Parameters:
+            state (TrainState): the current training state
+        """
+        results = get_current_episode(
+            state.session,
+            state.experiment_id,
+            state.current_ep,
+        )
+
+        for item in results:
+            reward_low = item.reward_moving_avg - item.reward_moving_std
+            reward_high = item.reward_moving_avg + item.reward_moving_std
+
+            self.experiment.log_metrics(
+                {
+                    "reward/moving_lower": reward_low,
+                    "reward/moving_avg": item.reward_moving_avg,
+                    "reward/moving_upper": reward_high,
+                    "episode/return": item.reward,
+                    "episode/length": item.length,
+                    "losses/actor": item.actor_loss,
+                    "losses/critic": item.critic_loss,
+                    "losses/entropy": item.entropy_loss,
+                },
+                epoch=state.current_ep,
+            )
+
     def init_experiment(self, state: "TrainState") -> None:
         """Setups up a comet experiment and stores it locally.
 
         Parameters:
             state (TrainState): the current training state
         """
-        from comet_ml import Experiment
+        from comet_ml import ExistingExperiment, Experiment
 
-        self.experiment = Experiment(
-            api_key=os.getenv("COMET_API_KEY", None),
-            project_name=state.analytics_state.project_name,
-            auto_param_logging=False,
-            auto_metric_logging=False,
-            auto_output_logging=False,
-            log_graph=False,
-            display_summary_level=0,
-            disabled=bool(os.getenv("VELORA_TEST_MODE", "").lower()) in ("true", "1"),
-        )
+        if self.experiment_key is not None:
+            # Continue existing experiment
+            self.experiment = ExistingExperiment(
+                api_key=os.getenv("COMET_API_KEY", None),
+                project_name=state.analytics_state.project_name,
+                experiment_key=self.experiment_key,
+                disabled=bool(os.getenv("VELORA_TEST_MODE", "").lower())
+                in ("true", "1"),
+                log_env_cpu=True,
+                log_env_gpu=True,
+                log_env_details=True,
+            )
+        else:
+            # Start new experiment
+            self.experiment = Experiment(
+                api_key=os.getenv("COMET_API_KEY", None),
+                project_name=state.analytics_state.project_name,
+                auto_param_logging=False,
+                auto_metric_logging=False,
+                auto_output_logging=False,
+                log_graph=False,
+                display_summary_level=0,
+                disabled=bool(os.getenv("VELORA_TEST_MODE", "").lower())
+                in ("true", "1"),
+            )
 
-        self.experiment.set_name(state.analytics_state.experiment_name)
-        self.experiment.add_tags(state.analytics_state.tags)
+            self.experiment.set_name(state.analytics_state.experiment_name)
+            self.experiment.add_tags(state.analytics_state.tags)
 
     def config(self) -> Tuple[str, Dict[str, Any]]:
         return self.__class__.__name__, {
             "project_name": self.project_name,
             "experiment_name": self.experiment_name,
             "tags": ",".join(self.tags) if isinstance(self.tags, list) else self.tags,
+            "experiment_key": self.experiment_key,
         }
 
     def info(self) -> str:

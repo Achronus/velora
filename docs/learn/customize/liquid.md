@@ -194,9 +194,11 @@ So instead, why don't we use a prebuilt version? 😉
 
 ## Prebuilt Networks
 
+### Liquid NCP Networks
+
 ???+ api "API Docs"
 
-    [`velora.models.lnn.LiquidNCPNetwork`](../reference/models/lnn.md#velora.models.lnn.ncp.LiquidNCPNetwork)
+    [`velora.models.lnn.LiquidNCPNetwork(in_features, n_neurons, out_features)`](../reference/models/lnn.md#velora.models.lnn.ncp.LiquidNCPNetwork)
 
 We can eliminate the need to do the previous step by using our prebuilt `LiquidNCPNetwork`.
 
@@ -217,6 +219,7 @@ The main thing here is that all you need to do is write two lines of code and bo
 
 ```python
 from velora.models import LiquidNCPNetwork
+import torch
 
 x = torch.tensor([-6.6, -1.1, -5.98, -1.69]).unsqueeze(0)  # Must be 2d
 
@@ -228,6 +231,28 @@ This code should work 'as is'.
 
 Notice how we don't need to manually define a hidden state. It's done for us automatically! 😎
 
+### NCP Networks
+
+???+ api "API Docs"
+
+    [`velora.models.lnn.NCPNetwork(in_features, n_neurons, out_features)`](../reference/models/lnn.md#velora.models.lnn.ncp.NCPNetwork)
+
+We also have a non-liquid variant called an `NCPNetwork`. This removes the RNN capabilities and treats the network as a standard sparse linear one using NCP principles.
+
+The API is the same but the output is just a `y_pred` instead of a `(y_pred, h_state)`.
+
+```python
+from velora.models import NCPNetwork
+import torch
+
+x = torch.tensor([-6.6, -1.1, -5.98, -1.69]).unsqueeze(0)  # Must be 2d
+
+ncp = NCPNetwork(4, 10, 1)
+y_pred = ncp(x)
+```
+
+This code should work 'as is'.
+
 ---
 
-Next, we'll look at the `ReplayBuffer` and `RolloutBuffer` classes 🤩.
+Next, we'll look at working with buffers! 🤩

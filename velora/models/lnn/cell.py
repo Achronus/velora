@@ -4,6 +4,7 @@ import torch
 import torch.nn as nn
 
 from velora.models.lnn.sparse import SparseLinear
+from velora.models.weight import WeightInitType
 
 
 class NCPLiquidCell(nn.Module):
@@ -22,12 +23,15 @@ class NCPLiquidCell(nn.Module):
     $$
     """
 
+    sparsity_mask: torch.Tensor
+
     def __init__(
         self,
         in_features: int,
         n_hidden: int,
         mask: torch.Tensor,
         *,
+        init_type: str | WeightInitType = "kaiming_uniform",
         device: torch.device | None = None,
     ) -> None:
         """
@@ -36,6 +40,7 @@ class NCPLiquidCell(nn.Module):
             n_hidden (int): number of hidden nodes.
             mask (torch.Tensor): a matrix of sparse connections
                 usually containing a combination of `[-1, 1, 0]`.
+            init_type (str, optional): the type of weight initialization
             device (torch.device, optional): the device to load tensors on.
         """
 
@@ -44,10 +49,11 @@ class NCPLiquidCell(nn.Module):
         self.in_features = in_features
         self.n_hidden = n_hidden
         self.head_size = n_hidden + in_features
+        self.init_type = init_type
         self.device = device
 
         # Absolute to maintain masking (-1 -> 1)
-        self.sparsity_mask = self._prep_mask(mask.to(device))
+        self.register_buffer("sparsity_mask", self._prep_mask(mask.to(device)))
 
         self.tanh = nn.Tanh()  # Bounded: [-1, 1]
         self.sigmoid = nn.Sigmoid()  # Bounded: [0, 1]
@@ -78,6 +84,7 @@ class NCPLiquidCell(nn.Module):
             self.head_size,
             self.n_hidden,
             self.sparsity_mask,
+            init_type=self.init_type,
             device=self.device,
         )
 
@@ -100,7 +107,7 @@ class NCPLiquidCell(nn.Module):
         """
         n_extras = mask.shape[1]
         extra_nodes = torch.ones((n_extras, n_extras), device=self.device)
-        mask = torch.concatenate([mask, extra_nodes])
+        mask = torch.concatenate([mask.detach(), extra_nodes])
         return torch.abs(mask.T).to(self.device)
 
     def _new_hidden(
@@ -127,6 +134,15 @@ class NCPLiquidCell(nn.Module):
         f_head = 1.0 - gate_out  # σ(-f(x, I, θf), t)
 
         return g_head * f_head + gate_out * h_head
+
+    def update_mask(self, mask: torch.Tensor) -> None:
+        """
+        Updates the sparsity mask with a new one.
+
+        Parameters:
+            mask (torch.Tensor): new mask
+        """
+        self.sparsity_mask = self._prep_mask(mask.to(self.device))
 
     def forward(
         self, x: torch.Tensor, hidden: torch.Tensor

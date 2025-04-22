@@ -1,6 +1,6 @@
 [project]
 name = "velora"
-version = "0.1.1"
+version = "0.2.0"
 description = "A Liquid Reinforcement Learning (RL) framework."
 authors = [{ name = "Ryan Partridge", email = "rpartridge101@gmail.com>" }]
 license = "MIT License"
@@ -40,6 +40,7 @@ pydantic = ">=2.10.6,<3.0.0"
 pydantic-settings = ">=2.8.1,<3.0.0"
 gymnasium = { version = ">=1.1.1,<2.0.0", extras = [
     "classic-control",
+    "box2d",
     "mujoco",
     "other",
 ] }
@@ -90,7 +91,7 @@ scikit-learn = ">=1.6.1,<2.0.0"
 
 [[tool.poetry.source]]
 name = "pytorch-cuda"
-url = "https://download.pytorch.org/whl/cu124"
+url = "https://download.pytorch.org/whl/cu126"
 priority = "explicit"
 
 [build-system]

@@ -1,8 +1,8 @@
 # Gymnasium Utility Methods
 
-Velora uses the [Gymnasium [:material-arrow-right-bottom:]](https://gymnasium.farama.org/) package as it's environment provider, which you'll use to train your agents and view their performance.
+Velora uses the [Gymnasium [:material-arrow-right-bottom:]](https://gymnasium.farama.org/) package as it's main environment provider, which is used to train agents and view their performance.
 
-Most of the time, you will interact with their API like normal, using the `make()` method:
+Normally, you would use the `make()` method to create an environment, like so:
 
 ```python
 import gymnasium as gym
@@ -10,17 +10,31 @@ import gymnasium as gym
 env = gym.make("InvertedPendulum-v5")
 ```
 
-However, sometimes you'll need to expand their existing functionality using [gymnasium.Wrappers [:material-arrow-right-bottom:]](https://gymnasium.farama.org/api/wrappers/table/).
+We've removed the need to do this to simplify the implementation and to allow us to easily integrate the environment with our agents.
 
-Velora offers two simple methods to help with this: `wrap_gym_env` and `add_core_env_wrappers`.
+Instead, now we pass in the `env_id` to the agent of our choice:
 
-## Wrapping Gymnasium Environments
+```python
+from velora.models import NeuroFlow
+
+model = NeuroFlow("InvertedPendulum-v5", 20, 128)
+```
+
+Unfortunately, this takes away a lot of your freedom for adding custom wrappers and we are looking at ways to incorporate this in a future release. For now, we want to keep things simple while we fully flesh out the agents implementation details.
+
+## Utility Methods
+
+Under rare circumstances you might want to use a Gymnasium environment to quickly explore it before using a Velora agent.
+
+To help with this, we've added some utility methods that you might find useful.
+
+### Wrapping Gymnasium Environments
 
 ???+ api "API Docs"
 
     [`velora.gym.wrap_gym_env(env, wrappers)`](../reference/gym.md#velora.gym.wrap_gym_env)
 
-`wrap_gym_env` is a quick way to create new environments that with wrappers automatically applied. Normally, you'd have to apply wrappers, one by one like this:
+`wrap_gym_env` is a quick way to create new environments with wrappers automatically applied. Normally, you'd have to apply wrappers, one by one like this:
 
 ```python
 import gymnasium as gym
@@ -62,7 +76,7 @@ Now, you just supply the environment `name` and a of `List[gym.Wrappers]` or `Li
 
     [`velora.gym.add_core_env_wrappers(env, device)`](../reference/gym.md#velora.gym.add_core_env_wrappers)
 
-We've also added a `add_core_env_wrappers` method that applies specific wrappers that are required by every prebuilt algorithm in Velora.
+We've also added a `add_core_env_wrappers` method that applies specific wrappers required by every Velora agent.
 
 It applies the following wrappers (in order):
 
@@ -90,7 +104,24 @@ env = gym.make("InvertedPendulum-v5")
 env = add_core_env_wrappers(env, device="cpu")
 ```
 
-You'll mainly use this yourself when working with the `predict()` method to quickly convert the environment from `numpy` arrays to `torch` tensors! 😊
+In previous versions, you would manually need to use this yourself when working with the `predict()` method to quickly convert the environment from `numpy` arrays to `torch` tensors.
+
+We found this to be very tedious and quite confusing in some instances, so instead, we've simplified this process by adding a `.eval_env` attribute to every agent to remove this process:
+
+```python
+from velora.models import NeuroFlowCT
+
+model = NeuroFlowCT("InvertedPendulum-v5", 20, 128)
+env = model.eval_env
+
+# 👆 Equivalent to ..
+import gymnasium as gym
+
+env = gym.make("InvertedPendulum-v5")
+env = add_core_env_wrappers(env, device="cpu")
+```
+
+You can see an example of this in the [Agent Basics - Making Predictions](../tutorial/agent.md#making-predictions) section.
 
 ## Finding Environments
 
@@ -100,9 +131,9 @@ You'll mainly use this yourself when working with the `predict()` method to quic
 
     [`velora.gym.EnvResult`](../reference/gym.md#velora.gym.EnvResult)
 
-Sometimes you may want to quickly find a specific environment and use the latest version of it without searching through the [Gymnasium [:material-arrow-right-bottom:]](https://gymnasium.farama.org/) documentation.
+We've also added a unique approach to quickly finding a specific environment at it's latest version without having to search through the [Gymnasium [:material-arrow-right-bottom:]](https://gymnasium.farama.org/) documentation.
 
-We've added a utility class to help with this called `EnvSearch`.
+You can do this with a utility class called `EnvSearch`.
 
 Every method attached to the class returns a `List[EnvResult]` where `EnvResult` are objects that have a `name` and `type` to help you quickly determine which environment fits your use case.
 

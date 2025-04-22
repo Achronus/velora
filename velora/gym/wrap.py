@@ -3,16 +3,16 @@ from typing import Callable, List, Literal
 
 import gymnasium as gym
 import torch
-from gymnasium.wrappers import RecordEpisodeStatistics
-from gymnasium.wrappers.numpy_to_torch import NumpyToTorch
 
 WrapperType = List[gym.Wrapper | gym.vector.VectorWrapper | Callable]
 
-ContinuousGymName = Literal[
+
+ContinuousGymNames = Literal[
     "MountainCarContinuous-v0",
     "Pendulum-v1",
     "LunarLanderContinuous-v3",
     "BipedalWalker-v3",
+    "BipedalWalkerHardcore-v3",
     "CarRacing-v3",
     "Reacher-v5",
     "Pusher-v5",
@@ -27,9 +27,21 @@ ContinuousGymName = Literal[
     "HumanoidStandup-v5",
 ]
 
+DiscreteGymNames = Literal[
+    "Acrobot-v1",
+    "CartPole-v1",
+    "MountainCar-v0",
+    "LunarLander-v3",
+    "Blackjack-v1",
+    "Taxi-v3",
+    "CliffWalking-v0",
+    "FrozenLake-v1",
+    "FrozenLake8x8-v1",
+]
+
 
 def wrap_gym_env(
-    env: gym.Env | str | ContinuousGymName,
+    env: gym.Env | str | DiscreteGymNames | ContinuousGymNames,
     wrappers: List[gym.Wrapper | gym.vector.VectorWrapper | Callable],
 ) -> gym.Env:
     """
@@ -83,7 +95,16 @@ def add_core_env_wrappers(env: gym.Env, device: torch.device) -> gym.Env:
     Parameters:
         env (gym.Env): the Gymnasium environment
         device (torch.device): the PyTorch device to perform computations on
+
+    Returns:
+        env (gym.Env): an updated Gymnasium environment
     """
+    if isinstance(env, gym.Env):
+        from gymnasium.wrappers import RecordEpisodeStatistics
+        from gymnasium.wrappers.numpy_to_torch import NumpyToTorch
+    else:
+        raise ValueError(f"{type(env)}' is not supported.")
+
     has_stats = False
     has_torch = False
 

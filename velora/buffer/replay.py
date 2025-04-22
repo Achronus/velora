@@ -3,13 +3,16 @@ try:
 except ImportError:  # pragma: no cover
     from typing_extensions import override  # pragma: no cover
 
+from typing import TYPE_CHECKING
+
 import gymnasium as gym
 import torch
 
+if TYPE_CHECKING:
+    from velora.models.base import RLModuleAgent  # pragma: no cover
+
 from velora.buffer.base import BufferBase
 from velora.buffer.experience import BatchExperience
-from velora.gym.wrap import add_core_env_wrappers
-from velora.models.base import RLAgent
 from velora.models.config import BufferConfig
 
 
@@ -26,6 +29,7 @@ class ReplayBuffer(BufferBase):
         capacity: int,
         state_dim: int,
         action_dim: int,
+        hidden_dim: int,
         *,
         device: torch.device | None = None,
     ) -> None:
@@ -34,9 +38,10 @@ class ReplayBuffer(BufferBase):
             capacity (int): the total capacity of the buffer
             state_dim (int): dimension of state observations
             action_dim (int): dimension of actions
+            hidden_dim (int): dimension of hidden state
             device (torch.device, optional): the device to perform computations on
         """
-        super().__init__(capacity, state_dim, action_dim, device=device)
+        super().__init__(capacity, state_dim, action_dim, hidden_dim, device=device)
 
     def config(self) -> BufferConfig:
         """
@@ -50,6 +55,7 @@ class ReplayBuffer(BufferBase):
             capacity=self.capacity,
             state_dim=self.state_dim,
             action_dim=self.action_dim,
+            hidden_dim=self.hidden_dim,
         )
 
     @override
@@ -61,7 +67,7 @@ class ReplayBuffer(BufferBase):
             batch_size (int): the number of items to sample
 
         Returns:
-            batch (BatchExperience): an object of samples with the attributes (`states`, `actions`, `rewards`, `next_states`, `dones`).
+            batch (BatchExperience): an object of samples with the attributes (`states`, `actions`, `rewards`, `next_states`, `dones`, `hidden`).
 
                 All items have the same shape `(batch_size, features)`.
         """
@@ -78,34 +84,42 @@ class ReplayBuffer(BufferBase):
             rewards=self.rewards[indices],
             next_states=self.next_states[indices],
             dones=self.dones[indices],
+            hiddens=self.hiddens[indices],
         )
 
-    def warm(self, agent: RLAgent, env_name: str, n_samples: int) -> None:
+    def warm(self, agent: "RLModuleAgent", n_samples: int, num_envs: int = 8) -> None:
         """
         Warms the buffer to fill it to a number of samples by generating them
-        from an agent using a copy of the environment.
+        from an agent using a `vectorized` copy of the environment.
 
         Parameters:
-            agent (RLAgent): the agent to generate samples with
-            env_name (str): the name of environment to generate samples from
+            agent (Any): the agent to generate samples with
             n_samples (int): the maximum number of samples to generate
+            num_envs (int, optional): number of vectorized environments. Cannot
+                be smaller than `2`
         """
-        env = gym.make(env_name)
-        env = add_core_env_wrappers(env, agent.device)
+        if num_envs < 2:
+            raise ValueError(f"'{num_envs=}' cannot be smaller than 2.")
+
+        envs = gym.make_vec(
+            agent.env.spec.id,
+            num_envs=num_envs,
+            vectorization_mode="sync",
+        )
+        envs: gym.vector.SyncVectorEnv = gym.wrappers.vector.NumpyToTorch(
+            envs, agent.device
+        )
 
         hidden = None
-        state, _ = env.reset()
+        states, _ = envs.reset()
 
         while not len(self) >= n_samples:
-            action, hidden = agent.predict(state, hidden)
-            next_state, reward, terminated, truncated, _ = env.step(action)
-            done = terminated or truncated
+            actions, hidden = agent.predict(states, hidden, train_mode=True)
+            next_states, rewards, terminated, truncated, _ = envs.step(actions)
+            dones = terminated | truncated
 
-            self.add(state, action, reward, next_state, done)
+            self.add_multi(states, actions, rewards, next_states, dones, hidden)
 
-            state = next_state
+            states = next_states
 
-            if done:
-                state, _ = env.reset()
-
-        env.close()
+        envs.close()

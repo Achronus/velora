@@ -223,6 +223,57 @@ class TestNCPLiquidCell:
         assert y_pred.shape == (batch_size, cell.n_hidden)
         assert new_hidden.shape == (batch_size, cell.n_hidden)
 
+    def test_update_mask(self, cell: NCPLiquidCell):
+        # Store original mask for comparison
+        original_mask = cell.sparsity_mask.clone()
+
+        # Create a new mask with a different pattern
+        in_features = cell.in_features
+        n_hidden = cell.n_hidden
+        new_mask = torch.ones((in_features, n_hidden))
+        new_mask[0, :] = 0  # First row all zeros
+
+        # Update the mask
+        cell.update_mask(new_mask)
+
+        # Verify that the mask was updated
+        assert not torch.equal(cell.sparsity_mask, original_mask)
+
+    def test_update_mask_affects_forward_pass(self, cell: NCPLiquidCell):
+        # Set a predictable seed for reproducibility
+        torch.manual_seed(42)
+
+        # Process an input with the original mask
+        batch_size = 2
+        x = torch.rand(batch_size, cell.in_features)
+        hidden = torch.rand(batch_size, cell.n_hidden)
+
+        # Record output with original mask
+        original_output, _ = cell(x, hidden)
+
+        # Create a new mask that's very different
+        new_mask = torch.zeros((cell.in_features, cell.n_hidden))
+        new_mask[0, :] = 1  # Completely different pattern from original
+
+        # Update the mask and update weights to ensure difference in output
+        cell.update_mask(new_mask)
+
+        # Reset the weights in layers to make sure they produce different outputs
+        for layer in [
+            cell.g_head,
+            cell.h_head,
+            cell.f_head_to_g,
+            cell.f_head_to_h,
+            cell.proj,
+        ]:
+            nn.init.xavier_uniform_(layer.weight)
+
+        # Process the same input with the new mask and weights
+        new_output, _ = cell(x, hidden)
+
+        # The outputs should be different due to the mask and weight changes
+        assert not torch.allclose(original_output, new_output, rtol=1e-3, atol=1e-3)
+
 
 class TestLiquidNCPNetwork:
     @pytest.fixture
@@ -419,7 +470,7 @@ class TestSparseLinear:
         initial_bias = layer.bias.clone()
 
         # Reset parameters
-        layer.reset_parameters()
+        layer.reset_parameters("kaiming_uniform")
 
         # Check that parameters have changed
         assert not torch.allclose(layer.weight, initial_weight)
@@ -444,3 +495,82 @@ class TestSparseLinear:
         layer_no_bias = SparseLinear(in_features, out_features, mask, bias=False)
         repr_str = layer_no_bias.extra_repr()
         assert "bias=False" in repr_str
+
+    def test_update_mask(self):
+        """Test that update_mask correctly updates the mask."""
+        in_features = 5
+        out_features = 3
+
+        # Initial mask
+        initial_mask = torch.ones(out_features, in_features)
+        initial_mask[0, 0] = 0  # Mask one connection
+
+        layer = SparseLinear(in_features, out_features, initial_mask)
+
+        # New mask with different pattern
+        new_mask = torch.ones(out_features, in_features)
+        new_mask[1, 1] = 0  # Different masked connection
+
+        # Update the mask
+        layer.update_mask(new_mask)
+
+        # Check that the mask was updated
+        assert torch.all(layer.mask == new_mask)
+
+        # Check that weights respect the new mask when forward pass is computed
+        with torch.no_grad():
+            # Set all weights to 1 for testing
+            layer.weight.data = torch.ones_like(layer.weight.data)
+            layer.bias.data = torch.zeros_like(layer.bias.data)
+
+        # Input vector of ones
+        x = torch.ones(1, in_features)
+        output = layer(x)
+
+        # Expected output with the new mask:
+        # First row: sum of 5 ones (all connections)
+        # Second row: sum of 4 ones (one connection masked out)
+        # Third row: sum of 5 ones (all connections)
+        expected = torch.tensor([[5.0, 4.0, 5.0]])
+
+        assert torch.allclose(output, expected)
+
+    def test_update_mask_gradient_maintenance(self):
+        """Test that update_mask preserves weight gradients for unmasked connections."""
+        in_features = 4
+        out_features = 2
+
+        # Create initial mask
+        initial_mask = torch.ones(out_features, in_features)
+        initial_mask[0, 0] = 0  # Mask first connection in first row
+
+        layer = SparseLinear(in_features, out_features, initial_mask)
+
+        # Forward and backward pass to generate gradients
+        x = torch.ones(1, in_features, requires_grad=True)
+        output = layer(x)
+        loss = output.sum()
+        loss.backward()
+
+        # Create new mask: mask a different connection
+        new_mask = torch.ones(out_features, in_features)
+        new_mask[0, 1] = 0  # Mask second connection in first row
+
+        # Update mask
+        layer.update_mask(new_mask)
+
+        # Zero gradients
+        layer.weight.grad.zero_()
+
+        # New forward and backward pass
+        output = layer(x)
+        loss = output.sum()
+        loss.backward()
+
+        # Check that gradients are zero for masked connections
+        assert layer.weight.grad[0, 1] == 0
+
+        # Check gradients are non-zero for unmasked connections
+        assert torch.any(layer.weight.grad[0, 0] != 0)
+        assert torch.any(layer.weight.grad[0, 2:] != 0)
+        assert torch.any(layer.weight.grad[1, :] != 0)

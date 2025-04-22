@@ -1,16 +1,28 @@
+import random
+
 import numpy as np
 import torch
 
 
-def set_seed(value: int) -> None:
+def set_seed(value: int | None = None) -> int:
     """
-    Sets the random seed for the `PyTorch` and `NumPy` packages.
+    Sets the random seed for `Python`, `PyTorch` and `NumPy`.
+    When `None` will create a new one automatically.
 
     Parameters:
-        value (int): the seed value
+        value (int, optional): the seed value
+
+    Returns:
+        seed (int): the used seed value
     """
+    if value is None:
+        value = random.randint(0, 2**32 - 1)
+
+    random.seed(value)
     torch.manual_seed(value)
     np.random.seed(value)
+
+    return value
 
 
 def set_device(device: str = "auto") -> torch.device:

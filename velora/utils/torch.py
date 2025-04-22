@@ -115,12 +115,12 @@ def summary(module: nn.Module) -> Dict[str, str]:
     """
     model_dict = {}
 
-    for name, module in module.named_children():
-        if len(list(module.children())) > 0:
+    for name, mod in module.named_children():
+        if len(list(mod.children())) > 0:
             # If the module has submodules, recurse
-            model_dict[name] = summary(module)
+            model_dict[name] = summary(mod)
         else:
             # If it's a leaf module, store its string representation
-            model_dict[name] = str(module)
+            model_dict[name] = str(mod)
 
     return model_dict

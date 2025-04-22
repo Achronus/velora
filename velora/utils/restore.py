@@ -1,25 +1,31 @@
 import json
 from pathlib import Path
 from pydoc import locate
-from typing import TYPE_CHECKING, Any, Dict, Literal, Type
+from typing import TYPE_CHECKING, Any, Dict, Literal, Type, get_args
+
+if TYPE_CHECKING:
+    from velora.models.base import RLModuleAgent  # pragma: no cover
 
 import torch
 from safetensors.torch import load_file, save_file
 
-if TYPE_CHECKING:
-    from velora.models.base import RLAgent  # pragma: no cover
-
-
-TensorDictKeys = Literal["actor", "critic", "actor_target", "critic_target"]
-MetadataKeys = Literal["model", "critic_optim", "actor_optim", "buffer"]
-ModelMetadataKeys = Literal[
-    "state_dim",
-    "n_neurons",
-    "action_dim",
-    "buffer_size",
-    "device",
+TensorDictKeys = Literal[
+    "actor",
+    "critic",
+    "critic2",
+    "critic_target",
+    "critic2_target",
 ]
-OptimDictKeys = Literal["actor_optim", "critic_optim"]
+MetadataKeys = Literal[
+    "model",
+    "actor_optim",
+    "critic_optim",
+    "critic2_optim",
+    "entropy_optim",
+    "buffer",
+]
+OptimDictKeys = Literal["actor_optim", "critic_optim", "critic2_optim", "entropy_optim"]
+ModuleNames = Literal["actor", "critic", "entropy"]
 
 
 def optim_to_tensor(name: str, state_dict: Dict[str, Any]) -> Dict[str, torch.Tensor]:
@@ -56,14 +62,14 @@ def optim_from_tensor(tensor_dict: Dict[str, torch.Tensor]) -> Dict[OptimDictKey
     Returns:
         state_dict (Dict[str, Any]): the converted state as a normal dictionary
     """
-    state_dict: Dict[OptimDictKeys, Any] = {
-        "actor_optim": {},
-        "critic_optim": {},
-    }
+    state_dict: Dict[OptimDictKeys, Any] = {}
 
     for key, tensor in tensor_dict.items():
         optim_name, param_id, param_key = key.split(".")
         param_id = int(param_id)
+
+        if optim_name not in state_dict:
+            state_dict[optim_name] = {}
 
         if param_id not in state_dict[optim_name]:
             state_dict[optim_name][param_id] = {}
@@ -85,26 +91,26 @@ def model_from_tensor(
     Returns:
         state_dict (Dict[str, Any]): the converted state as a normal dictionary
     """
-    state_dict: Dict[TensorDictKeys, Any] = {
-        "actor": {},
-        "critic": {},
-        "actor_target": {},
-        "critic_target": {},
-    }
+    state_dict: Dict[TensorDictKeys, Any] = {}
 
     for key, tensor in tensor_dict.items():
         model_name, param_name = key.split(".", 1)
+
+        if model_name not in state_dict:
+            state_dict[model_name] = {}
+
         state_dict[model_name][param_name] = tensor
 
     return state_dict
 
 
 def save_model(
-    agent: "RLAgent",
+    agent: "RLModuleAgent",
     dirpath: str | Path,
     *,
     buffer: bool = False,
     config: bool = False,
+    force: bool = False,
 ) -> None:
     """
     Saves the current model state into `safetensors` and `json` files.
@@ -121,11 +127,13 @@ def save_model(
     - `buffer_state.safetensors` - contains the buffer state (only if `buffer=True`)
 
     Parameters:
-        agent (RLAgent): the agent's state to save
+        agent (RLModuleAgent): the agent's state to save
         dirpath (str | Path): the location to store the model state. Should only
             consist of `folder` names. E.g., `<folder>/<folder>`
         buffer (bool, optional): a flag for storing the buffer state
         config (bool, optional): a flag for storing the model's config
+        force (bool, optional): enables file overwriting, ignoring existing state
+            files. Useful for continuing model training
     """
     save_path = Path(dirpath)
     save_path.mkdir(parents=True, exist_ok=True)
@@ -136,57 +144,42 @@ def save_model(
     optim_state_path = Path(save_path, "optim_state").with_suffix(".safetensors")
     buffer_state_path = Path(save_path, "buffer_state").with_suffix(".safetensors")
 
-    if model_state_path.exists():
+    if not force and model_state_path.exists():
         raise FileExistsError(
-            f"A model state already exists in the '{save_path}' directory! Either change the 'dirpath' or delete the folders contents."
+            f"A model state already exists in the '{save_path}' directory! Either change the 'dirpath', delete the folders contents, or use 'force=True' to allow overwriting."
         )
 
-    model_tuples = [
-        ("actor", agent.actor.state_dict()),
-        ("critic", agent.critic.state_dict()),
-    ]
-
-    # Add target networks if used
-    if agent.actor_target is not None:
-        model_tuples.extend(
-            [
-                ("actor_target", agent.actor_target.state_dict()),
-                ("critic_target", agent.critic_target.state_dict()),
-            ]
-        )
-
+    # Handle module state dicts
+    agent_state = agent.state_dict()
     tensor_dict: Dict[str, torch.Tensor] = {}
 
-    for model_name, state_dict in model_tuples:
+    for model_name, state_dict in agent_state["modules"].items():
         for param_name, tensor in state_dict.items():
             tensor_dict[f"{model_name}.{param_name}"] = tensor.contiguous()
 
-    actor_dict = optim_to_tensor("actor_optim", agent.actor_optim.state_dict())
-    critic_dict = optim_to_tensor("critic_optim", agent.critic_optim.state_dict())
-    optim_dict = dict(**actor_dict, **critic_dict)
+    # Handle optimizers
+    optim_dict: Dict[OptimDictKeys, Dict[str, Any]] = {}
+    param_dict: Dict[OptimDictKeys, Dict[str, Any]] = {}
+
+    for optim_name, state_dict in agent_state["optimizers"].items():
+        optim_dict |= optim_to_tensor(optim_name, state_dict)
+        param_dict[optim_name] = state_dict["param_groups"]
+
+    metadata: Dict[MetadataKeys, Any] = {
+        "model": agent.metadata,
+        **param_dict,
+    }
 
     # Save tensors (weights and biases only)
     save_file(tensor_dict, model_state_path)
     save_file(optim_dict, optim_state_path)
 
-    # Store metadata as JSON
-    metadata: Dict[MetadataKeys, Any] = {
-        "model": {
-            "state_dim": agent.state_dim,
-            "n_neurons": agent.n_neurons,
-            "action_dim": agent.action_dim,
-            "buffer_size": agent.buffer_size,
-            "optim": f"torch.optim.{type(agent.actor_optim).__name__}",
-            "device": str(agent.device) if agent.device is not None else "cpu",
-        },
-        "actor_optim": agent.actor_optim.state_dict()["param_groups"],
-        "critic_optim": agent.critic_optim.state_dict()["param_groups"],
-    }
-
+    # Add buffer (if applicable)
     if buffer:
         metadata["buffer"] = agent.buffer.metadata()
         save_file(agent.buffer.state_dict(), buffer_state_path)
 
+    # Write to files
     if config and not config_path.exists():
         with config_path.open("w") as f:
             f.write(agent.config.model_dump_json(indent=2, exclude_none=True))
@@ -197,8 +190,8 @@ def save_model(
 
 
 def load_model(
-    agent: Type["RLAgent"], dirpath: str | Path, *, buffer: bool = False
-) -> "RLAgent":
+    agent: Type["RLModuleAgent"], dirpath: str | Path, *, buffer: bool = False
+) -> Any:
     """
     Creates a new agent instance by loading a saved one from the `dirpath`.
     Also, loads the original training buffer if `buffer=True`.
@@ -210,13 +203,13 @@ def load_model(
     - `buffer_state.safetensors` - contains the buffer state (only if `buffer=True`)
 
     Parameters:
-        agent (Type[RLAgent]): the type of agent to load
+        agent (Type[RLModuleAgent]): the type of agent to load
         dirpath (str | Path): the location to store the model state. Should only
             consist of `folder` names. E.g., `<folder>/<folder>`
         buffer (bool, optional): a flag for storing the buffer state
 
     Returns:
-        agent (RLAgent): a new agent instance with the saved state
+        agent (RLModuleAgent): a new agent instance with the saved state
     """
     load_path = Path(dirpath)
 
@@ -243,40 +236,33 @@ def load_model(
     with metadata_path.open("r") as f:
         metadata: Dict[MetadataKeys, Any] = json.load(f)
 
-    device: str = metadata["model"]["device"] or "cpu"
+    device: str = metadata["model"]["device"]
     metadata["model"]["device"] = torch.device(device)
     metadata["model"]["optim"] = locate(metadata["model"]["optim"])
 
     # Create new model instance
     model = agent(**metadata["model"])
 
-    # Load model parameters from safetensors
+    # Load module and optimizer parameters from safetensors
     tensor_dict: Dict[str, torch.Tensor] = load_file(model_state_path, device)
-    model_state = model_from_tensor(tensor_dict)
+    agent_state = model_from_tensor(tensor_dict)
 
-    model.actor.load_state_dict(model_state["actor"])
-    model.critic.load_state_dict(model_state["critic"])
-
-    if "actor_target" in model_state.keys():
-        model.actor_target.load_state_dict(model_state["actor_target"])
-        model.critic_target.load_state_dict(model_state["critic_target"])
-
-    # Load optimizer parameters from safetensors
     tensor_dict: Dict[str, torch.Tensor] = load_file(optim_state_path, device)
     optim_state = optim_from_tensor(tensor_dict)
 
-    model.actor_optim.load_state_dict(
-        {
-            "state": optim_state["actor_optim"],
-            "param_groups": metadata["actor_optim"],
+    metadata.pop("model")
+    for key in metadata.keys():
+        state = optim_state[key] if key in optim_state else {}
+
+        agent_state[key] = {
+            "state": state,
+            "param_groups": metadata[key],
         }
-    )
-    model.critic_optim.load_state_dict(
-        {
-            "state": optim_state["critic_optim"],
-            "param_groups": metadata["critic_optim"],
-        }
-    )
+
+    # Restore module states
+    for name in get_args(ModuleNames):
+        module = getattr(model, name)
+        module.load_state_dict(agent_state)
 
     # Load buffer
     if buffer:

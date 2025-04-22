@@ -1,8 +1,8 @@
-import math
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+from velora.models.weight import WeightInitType, get_init_fn
 
 
 class SparseLinear(nn.Module):
@@ -17,6 +17,7 @@ class SparseLinear(nn.Module):
         out_features: int,
         mask: torch.Tensor,
         *,
+        init_type: str | WeightInitType = "kaiming_uniform",
         bias: bool = True,
         device: torch.device | None = None,
     ) -> None:
@@ -26,6 +27,7 @@ class SparseLinear(nn.Module):
             out_features (int): number of output features
             mask (torch.Tensor): sparsity mask tensor of shape
                 `(out_features, in_features)`
+            init_type (str, optional): the type of weight initialization
             bias (bool, optional): a flag to enable additive bias
             device (torch.device, optional): device to perform computations on
         """
@@ -33,6 +35,7 @@ class SparseLinear(nn.Module):
 
         self.in_features = in_features
         self.out_features = out_features
+        self.device = device
 
         self.register_buffer("mask", mask.to(device).detach())
 
@@ -44,23 +47,26 @@ class SparseLinear(nn.Module):
         else:
             self.register_parameter("bias", None)
 
-        self.reset_parameters()
+        self.reset_parameters(init_type)
 
         with torch.no_grad():
             self.weight.data.mul_(self.mask)
 
-    def reset_parameters(self) -> None:
+    def reset_parameters(self, style: str | WeightInitType) -> None:
         """
-        Initializes weights and biases using Kaiming uniform initialization.
-
-        Same operation as `torch.nn.Linear`.
+        Initializes weights and biases using an initialization method.
         """
-        nn.init.kaiming_uniform_(self.weight, a=math.sqrt(5))
+        weight_fn = get_init_fn(style)
+        weight_fn(self)
 
-        if self.bias is not None:
-            fan_in, _ = nn.init._calculate_fan_in_and_fan_out(self.weight)
-            bound = 1 / math.sqrt(fan_in) if fan_in > 0 else 0
-            nn.init.uniform_(self.bias, -bound, bound)
+    def update_mask(self, mask: torch.Tensor) -> None:
+        """
+        Updates the sparsity mask with a new one.
+
+        Parameters:
+            mask (torch.Tensor): new mask
+        """
+        self.mask = mask.to(self.device).detach()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """

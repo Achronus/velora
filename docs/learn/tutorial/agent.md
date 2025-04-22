@@ -1,8 +1,8 @@
 # Agent Basics
 
-RL agents are at the heart of Velora's framework and they are one of the main features that you'll often use for your experiments.
+RL agents are at the heart of Velora's framework and are the fastest way to get started with experiments.
 
-Each agent has suitable differences but we've designed them to act like drop-in replacements of each other. Their underlying functionality may differ, but their core API is identical with the exception of optional hyperparameters.
+Each agent has subtle differences but we've designed them to act like drop-in replacements of each other. Their underlying functionality may differ, but their core API is identical with the exception of optional hyperparameters.
 
 At it's core, you have three main operations:
 
@@ -16,32 +16,26 @@ Creating a agent is really easy! We simply declare our agent from the `velora.mo
 
 Each model requires three main parameters:
 
-1. `state_dim` - the number of input nodes
-2. `n_neurons` - the number of hidden nodes
-3. `action_dim` - the number of output nodes
+1. `env_id` - the Gymnasium environment ID. E.g., `CartPole-v1` or `InvertedPendulum-v5`.
+2. `actor_neurons` - the number of decision/hidden nodes for the Actor network (e.g., `20` or `40`).
+3. `critic_neurons` - the number of decision/hidden nodes for the Critic networks. We recommend this to be higher (`128` or `256`) than the Actor network.
 
 And that's it! Here's an example:
 
 ```python
-from velora.models import LiquidDDPG
+from velora.models import NeuroFlowCT
 
-model = LiquidDDPG(4, 10, 1)
+model = NeuroFlowCT("InvertedPendulum-v5", 20, 128)
 ```
 
 This code should work 'as is'.
 
-Want to use a different agent? Just swap out `LiquidDDPG` with a different one!
-
-???+ warning "LiquidPPO"
-
-    `LiquidPPO` will be introduced in a later version of the framework. 
-    
-    We use it here strictly for demonstration purposes.
+Want to use a different agent? Just swap out `NeuroFlowCT` with a different one!
 
 ```python
-from velora.models import LiquidPPO
+from velora.models import NeuroFlow
 
-model = LiquidPPO(4, 10, 1)
+model = NeuroFlow("CartPole-v1", 20, 128)
 ```
 
 It really is that easy! 🤩
@@ -56,44 +50,32 @@ It really is that easy! 🤩
 
 Training an agent is just as easy!
 
-We use the `train` method, supply it with a `Gymnasium` environment and a `batch_size` and boom 💥, your agent will start training for `1000` episodes:
+We use the `train` method, supply it with a `batch_size` and boom 💥, your agent will start training for `1000` episodes:
 
 ```python
-from velora.models import LiquidDDPG
-import gymnasium as gym
+from velora.models import NeuroFlowCT
 
-env = gym.make('InvertedPendulum-v5')
-
-model = LiquidDDPG(4, 10, 1)
-model.train(env, 128)
+model = NeuroFlowCT("InvertedPendulum-v5", 20, 128)
+model.train(128)
 ```
 
 This code should work 'as is'.
 
-Want to change the number of episodes? Use the `n_episodes` parameter! What about the episodic training status rate? Use the `window_size` parameter!
+Want to change the number of episodes? Use the `n_episodes` parameter! What about the console logged training status frequency? Use the `display_count` parameter!
 
 ```python
-model.train(env, 128, n_episodes=10_000, window_size=1000)
+model.train(env, 128, n_episodes=10_000, display_count=10)
 ```
 
-These are two core optional parameters for the `train()` method, with the addition of [`callbacks`](../tutorial/callback.md) but we'll talk about them later.
-
-Each agent has it's own set of unique hyperparameters for it's `train()` method. They vary depending on the algorithm, so we'll leave this for a later section! 😉
-
-??? tip "Want to Look Now?"
-
-    Refer to the 👉 [Agents section](../tutorial/agents/index.md).
+These are only two of the optional parameters for the `train()` method. Another worth mentioning is [`callbacks`](../tutorial/callback.md) but we'll talk about them later.
 
 Like before, need a different agent? Just swap it out!
 
 ```python
-from velora.models import LiquidPPO
-import gymnasium as gym
+from velora.models import NeuroFlow
 
-env = gym.make('InvertedPendulum-v5')
-
-model = LiquidPPO(4, 10, 1)
-model.train(env, 128)
+model = NeuroFlow("CartPole-v1", 20, 128)
+model.train(64)
 ```
 
 The `train()` method will create a [SQLite [:material-arrow-right-bottom:]](https://www.sqlite.org/) database called `metrics.db` in your local directory. This contains useful metrics that can be plotted to visualize the whole training process. How you use them is up to you!
@@ -113,46 +95,31 @@ Liquid Neural Networks are a recurrent architecture so a hidden state is require
 
 By default, we set `hidden` to `None`, so you don't need to provide it for a single prediction:
 
-```python hl_lines="8"
-from velora.models import LiquidDDPG
-from velora.gym import add_core_env_wrappers
+```python
+from velora.models import NeuroFlowCT
 
-import gymnasium as gym
-
-
-env = gym.make('InvertedPendulum-v5')
-env = add_core_env_wrappers(env, device="cpu") # (1)
+# Set prediction environment
+env = model.eval_env
 
 state, _ = env.reset()
 
-model = LiquidDDPG(4, 10, 1)
+model = NeuroFlowCT("InvertedPendulum-v5", 20, 128)
 action, hidden = model.predict(state)
 ```
-
-1. Automatically turns environment states into `torch.Tensors`.
 
 This code should work 'as is'.
 
 Here, we get back an `action` prediction and an updated `hidden` state.
 
-???+ Warning "Preparing the Environment"
-
-    [Gymnasium [:material-arrow-right-bottom:]](https://gymnasium.farama.org/) environments are known to use `numpy` arrays for it's `state` spaces. Velora agents require `torch.Tensors` so you will need to pass the environment through a [NumpyToTorch [:material-arrow-right-bottom:]](https://gymnasium.farama.org/api/wrappers/misc_wrappers/#gymnasium.wrappers.NumpyToTorch) wrapper first.
-
-    To make things easier, we strongly recommend you use the [`velora.gym.add_core_env_wrappers`](../tutorial/gym.md#core-wrappers) method instead. 
-
 Things become slightly more complicated with multiple predictions because we need to feed the `hidden` state back into the `predict()` method like so:
 
 ```python
-from velora.models import LiquidDDPG
-from velora.gym import add_core_env_wrappers
+from velora.models import NeuroFlowCT
 
-import gymnasium as gym
+model = NeuroFlowCT("InvertedPendulum-v5", 20, 128)
 
-env = gym.make('InvertedPendulum-v5')
-env = add_core_env_wrappers(env, device="cpu")
-
-model = LiquidDDPG(4, 10, 1)
+# Set prediction environment
+env = model.eval_env
 
 hidden = None
 state, _ = env.reset()
@@ -171,7 +138,7 @@ env.close()
 
 This code should work 'as is'.
 
-Just like before, if you want to use a different agent, just swap out `LiquidDDPG` with another one. Glorious isn't it? 😉
+Just like before, if you want to use a different agent, just swap out `NeuroFlowCT` with another one. Glorious isn't it? 😉
 
 ---
 

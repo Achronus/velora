@@ -1,6 +1,6 @@
 # Customization - User Guide
 
-This tutorial series shows you how to create your own algorithms using Velora's building blocks, such as the `Wiring`, `ReplayBuffer`, `RolloutBuffer`, `DDPGActor`, and `DDPGCritic` classes.
+This tutorial series shows you how to create your own algorithms using Velora's building blocks, such as the `Wiring`, `ReplayBuffer`, `SACActor`, and `SACCritic` classes.
 
 While we offer predefined algorithms, sometimes you need more flexibility or may want to explore and create your own. In fact, we encourage it! 😁
 

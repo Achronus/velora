@@ -2,7 +2,7 @@ import pytest
 from pathlib import Path
 from unittest.mock import Mock
 
-from velora.models.base import RLAgent
+from velora.models.base import RLModuleAgent
 from velora.state import TrainState, RecordState
 
 import gymnasium as gym
@@ -11,10 +11,10 @@ import gymnasium as gym
 class TestTrainState:
     @pytest.fixture
     def mock_agent(self):
-        agent = Mock(spec=RLAgent)
+        agent = Mock(spec=RLModuleAgent)
         return agent
 
-    def test_init(self, experiment, mock_agent: RLAgent):
+    def test_init(self, experiment, mock_agent: RLModuleAgent):
         # Default init
         state = TrainState(
             agent=mock_agent,
@@ -48,7 +48,7 @@ class TestTrainState:
         assert state.current_ep == 10
         assert state.stop_training is True
 
-    def test_update(self, experiment, mock_agent: RLAgent):
+    def test_update(self, experiment, mock_agent: RLModuleAgent):
         state = TrainState(
             agent=mock_agent,
             env=gym.make("InvertedPendulum-v5"),
