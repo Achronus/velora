@@ -1,25 +1,31 @@
 import jax
 
 from flax import nnx
-from flax.nnx.nn import initializers
+
 from flax.typing import Initializer
 
-
-default_hidden_init = initializers.lecun_uniform()
-default_bias_init = initializers.zeros_init()
+from velora.constants import DEFAULT_BIAS_INIT, DEFAULT_HIDDEN_INIT
 
 
 class SparseLinear(nnx.Module):
     """A linear layer with sparsely weighted connections.
 
+    Equation:
+    $$
+    y = x * (w * m) + b
+    $$
+
     Parameters:
         in_features (int): number of input features
         out_features (int): number of output features
-        mask (jax.Array): sparsity mask tensor of shape
+        mask (jax.Array): sparsity mask (m) tensor of shape
             `(out_features, in_features)`
-        rngs (flax.nnx.Rngs): random number generator key
-        hidden_init (flax.nnx.nn.initializers, optional): initializer function for the weight matrix. Default is `lecun_uniform()`
-        bias_init (flax.nnx.nn.initializers, optional): initializer function for the bias. Default is `zeros_init()`
+        rngs (flax.nnx.Rngs, optional): random number generator key.
+            Must have a `params=[value]` attribute
+        hidden_init (flax.nnx.nn.initializers, optional): initializer function for the weight
+            matrix. Default is `lecun_uniform()`
+        bias_init (flax.nnx.nn.initializers, optional): initializer function for the
+            bias. Default is `zeros_init()`
     """
 
     def __init__(
@@ -28,9 +34,9 @@ class SparseLinear(nnx.Module):
         out_features: int,
         mask: jax.Array,
         *,
-        rngs: nnx.Rngs,
-        hidden_init: Initializer = default_hidden_init,
-        bias_init: Initializer = default_bias_init,
+        rngs: nnx.Rngs = nnx.Rngs(params=0),
+        hidden_init: Initializer = DEFAULT_HIDDEN_INIT,
+        bias_init: Initializer = DEFAULT_BIAS_INIT,
     ) -> None:
         self.in_features = in_features
         self.out_features = out_features

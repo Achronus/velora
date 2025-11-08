@@ -1,13 +1,15 @@
 from typing import Tuple
+import jax
+import jax.numpy as jnp
 
-import torch
-import torch.nn as nn
+from flax import nnx
+from flax.typing import Initializer
 
+from velora.constants import DEFAULT_HIDDEN_INIT
 from velora.models.lnn.sparse import SparseLinear
-from velora.models.weight import WeightInitType
 
 
-class NCPLiquidCell(nn.Module):
+class NCPLiquidCell(nnx.Module):
     """
     A Liquid Time-Constant (LTC) cell using a Closed-form (CfC) approach.
 
@@ -21,42 +23,38 @@ class NCPLiquidCell(nn.Module):
         \\sigma(-f(x, I, θ_f), t) \\; g(x, I, θ_g)
         + \\left[ 1 - \\sigma(-[\\;f(x, I, θ_f)\\;]\\;t) \\right] \\; h(x, I, θ_h)
     $$
-    """
 
-    sparsity_mask: torch.Tensor
+    Parameters:
+        in_features (int): number of input nodes.
+        n_hidden (int): number of hidden nodes.
+        mask (jax.Array): a matrix of sparse connections
+            usually containing a combination of `[-1, 1, 0]` values.
+        rngs (flax.nnx.Rngs, optional): random number generator key.
+            Must have a `params=[value]` attribute
+        init_type (flax.nnx.nn.initializers, optional): initializer function for the
+            weight matrix. Default is `lecun_uniform()`
+    """
 
     def __init__(
         self,
         in_features: int,
         n_hidden: int,
-        mask: torch.Tensor,
+        mask: jax.Array,
         *,
-        init_type: str | WeightInitType = "kaiming_uniform",
-        device: torch.device | None = None,
+        rngs: nnx.Rngs = nnx.Rngs(params=0),
+        init_type: Initializer = DEFAULT_HIDDEN_INIT,
     ) -> None:
-        """
-        Parameters:
-            in_features (int): number of input nodes.
-            n_hidden (int): number of hidden nodes.
-            mask (torch.Tensor): a matrix of sparse connections
-                usually containing a combination of `[-1, 1, 0]`.
-            init_type (str, optional): the type of weight initialization
-            device (torch.device, optional): the device to load tensors on.
-        """
-
-        super().__init__()
-
         self.in_features = in_features
         self.n_hidden = n_hidden
         self.head_size = n_hidden + in_features
         self.init_type = init_type
-        self.device = device
+        self.rngs = rngs
 
         # Absolute to maintain masking (-1 -> 1)
-        self.register_buffer("sparsity_mask", self._prep_mask(mask.to(device)))
+        self.sparsity_mask = self._prep_mask(mask)
 
-        self.tanh = nn.Tanh()  # Bounded: [-1, 1]
-        self.sigmoid = nn.Sigmoid()  # Bounded: [0, 1]
+        self.tanh = nnx.tanh  # Bounded: [-1, 1]
+        self.sigmoid = nnx.sigmoid  # Bounded: [0, 1]
 
         self.g_head = self._make_layer()
         self.h_head = self._make_layer()
@@ -75,7 +73,6 @@ class NCPLiquidCell(nn.Module):
         - `in_features` - `self.n_hidden + self.in_features`.
         - `out_features` - `self.n_hidden`.
         - `mask` - `self.sparsity_mask`.
-        - `device` - `self.device`.
 
         Returns:
             layer (SparseLinear): a `SparseLinear` layer.
@@ -84,45 +81,44 @@ class NCPLiquidCell(nn.Module):
             self.head_size,
             self.n_hidden,
             self.sparsity_mask,
-            init_type=self.init_type,
-            device=self.device,
+            rngs=self.rngs,
+            hidden_init=self.init_type,
         )
 
-    def _prep_mask(self, mask: torch.Tensor) -> torch.Tensor:
+    def _prep_mask(self, mask: jax.Array) -> jax.Array:
         """
         Utility method. Preprocesses mask to match head size.
 
-        !!! note "Performs three operations"
+        !!! note "Performs two operations"
 
             1. Adds a padded matrix of 1s to end of mask in shape
                 `(n_extras, n_extras)` where `n_extras=mask.shape[1]`
-            2. Transposes mask from col matrix -> row matrix
-            3. Gets the absolute values of the mask (swapping `-1 -> 1`)
+            3. Gets the absolute values of the mask (sanity check)
 
         Parameters:
-            mask (torch.Tensor): weight sparsity mask.
+            mask (jax.Array): weight sparsity mask.
 
         Returns:
-            mask (torch.Tensor): an updated mask.
+            mask (jax.Array): an updated mask.
         """
         n_extras = mask.shape[1]
-        extra_nodes = torch.ones((n_extras, n_extras), device=self.device)
-        mask = torch.concatenate([mask.detach(), extra_nodes])
-        return torch.abs(mask.T).to(self.device)
+        extra_nodes = jnp.ones((n_extras, n_extras))
+        mask = jnp.concat([mask, extra_nodes])
+        return jnp.abs(mask)
 
     def _new_hidden(
-        self, x: torch.Tensor, g_out: torch.Tensor, h_out: torch.Tensor
-    ) -> torch.Tensor:
+        self, x: jax.Array, g_out: jax.Array, h_out: jax.Array
+    ) -> jax.Array:
         """
         Helper method. Computes the new hidden state.
 
         Parameters:
-            x (torch.Tensor): input values.
-            g_out (torch.Tensor): g_head output.
-            h_out (torch.Tensor): h_head output.
+            x (jax.Array): input values.
+            g_out (jax.Array): g_head output.
+            h_out (jax.Array): h_head output.
 
         Returns:
-            hidden (torch.Tensor): a new hidden state
+            hidden (jax.Array): a new hidden state
         """
         g_head = self.tanh(g_out)  # g(x, I, θ_g)
         h_head = self.tanh(h_out)  # h(x, I, θ_h)
@@ -135,31 +131,20 @@ class NCPLiquidCell(nn.Module):
 
         return g_head * f_head + gate_out * h_head
 
-    def update_mask(self, mask: torch.Tensor) -> None:
-        """
-        Updates the sparsity mask with a new one.
-
-        Parameters:
-            mask (torch.Tensor): new mask
-        """
-        self.sparsity_mask = self._prep_mask(mask.to(self.device))
-
-    def forward(
-        self, x: torch.Tensor, hidden: torch.Tensor
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    def __call__(self, x: jax.Array, hidden: jax.Array) -> Tuple[jax.Array, jax.Array]:
         """
         Performs a forward pass through the cell.
 
         Parameters:
-            x (torch.Tensor): input values.
-            hidden (torch.Tensor): current hidden state.
+            x (jax.Array): input values.
+            hidden (jax.Array): current hidden state.
 
         Returns:
-            y_pred (torch.Tensor): the cell prediction.
-            h_state (torch.Tensor): the hidden state.
+            y_pred (jax.Array): the cell prediction.
+            h_state (jax.Array): the hidden state.
         """
-        x, hidden = x.to(self.device), hidden.to(self.device)
-        x = torch.cat([x, hidden], dim=1)
+        x, hidden = x, hidden
+        x = jnp.concat([x, hidden], axis=1)
 
         g_out = self.g_head(x)
         h_out = self.h_head(x)
