@@ -2,13 +2,12 @@ from typing import Optional, Tuple
 
 import jax
 import jax.numpy as jnp
-
 from flax import nnx
 from flax.typing import Initializer
 
 from velora.constants import DEFAULT_HIDDEN_INIT
 from velora.models.lnn.cell import NCPLiquidCell
-from velora.models.lnn.sparse import SparseLinear
+from velora.models.sparse import SparseLinear
 from velora.utils.nn import active_parameters, total_parameters
 from velora.wiring import build_ncp_wiring
 

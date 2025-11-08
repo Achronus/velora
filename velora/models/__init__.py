@@ -1,9 +1,8 @@
-from velora.models.lnn import LiquidNCPNetwork, NCPNetwork
-from velora.models.nf import NeuroFlowCT, NeuroFlow
+from velora.models.lnn import LiquidNCPNetwork, NCPLiquidCell
+from velora.models.sparse import SparseLinear
 
 __all__ = [
     "LiquidNCPNetwork",
-    "NCPNetwork",
-    "NeuroFlowCT",
-    "NeuroFlow",
+    "NCPLiquidCell",
+    "SparseLinear",
 ]

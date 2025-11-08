@@ -1,7 +1,5 @@
 import jax
-
 from flax import nnx
-
 from flax.typing import Initializer
 
 from velora.constants import DEFAULT_BIAS_INIT, DEFAULT_HIDDEN_INIT

@@ -1,7 +1,6 @@
-import jax
-
-import numpy as np
 import flax.nnx as nnx
+import jax
+import numpy as np
 
 
 def total_parameters(model: nnx.Module) -> int:

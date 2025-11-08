@@ -1,8 +1,4 @@
-from typing import TYPE_CHECKING, List
-
-if TYPE_CHECKING:
-    from velora.models.base import RLModuleAgent  # pragma: no cover
-    from velora.callbacks import TrainCallback  # pragma: no cover
+from typing import List
 
 from velora.utils.format import number_to_short
 
