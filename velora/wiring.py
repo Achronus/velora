@@ -1,4 +1,4 @@
-import jax
+import chex
 import jax.numpy as jnp
 import numpy as np
 from flax import struct
@@ -16,7 +16,7 @@ class NCPMaskWithCounts:
         n_connections (int): number of synapse connections (weights)
     """
 
-    mask: jax.Array
+    mask: chex.Array
     n_nodes: int
     n_connections: int
 
@@ -73,9 +73,10 @@ def build_ncp_wiring(
         raise ValueError(f"'{sparsity_level=}' must be between '[0.1, 0.9]'.")
 
     density_level = 1.0 - sparsity_level
+    n_inter_and_command = n_neurons - out_features
 
-    n_command = max(int(0.4 * n_neurons), 1)
-    n_inter = n_neurons - n_command
+    n_command = max(int(0.4 * n_inter_and_command), 1)
+    n_inter = n_inter_and_command - n_command
 
     inter_count = synapse_count(n_inter, density_level)
     command_count = synapse_count(n_command, density_level)
@@ -150,11 +151,11 @@ def make_mask(mask: np.ndarray, count: int, seed: int) -> np.ndarray:
     """
     rng = np.random.default_rng(seed)
 
-    n_nodes, n_cols = mask.shape
+    n_nodes, n_cols = jnp.shape(mask)
 
     # Add required connection count
     col_indices = rng.choice(n_cols, (n_nodes, count))
-    polarities = rng.choice([-1, 1], col_indices.shape)
+    polarities = rng.choice([-1, 1], jnp.shape(col_indices))
     row_indices = np.expand_dims(np.arange(n_nodes), 1)
 
     mask[row_indices, col_indices] = polarities

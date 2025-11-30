@@ -1,6 +1,6 @@
 from typing import Tuple
 
-import jax
+import chex
 import jax.numpy as jnp
 from flax import nnx
 from flax.typing import Initializer
@@ -39,7 +39,7 @@ class NCPLiquidCell(nnx.Module):
         self,
         in_features: int,
         n_hidden: int,
-        mask: jax.Array,
+        mask: chex.Array,
         *,
         rngs: nnx.Rngs = nnx.Rngs(params=0),
         init_type: Initializer = DEFAULT_HIDDEN_INIT,
@@ -63,9 +63,6 @@ class NCPLiquidCell(nnx.Module):
         self.f_head_to_g = self._make_layer()
         self.f_head_to_h = self._make_layer()
 
-        # Hidden state projection
-        self.proj = self._make_layer()
-
     def _make_layer(self) -> SparseLinear:
         """
         Helper method. Creates a new `SparseLinear` layer with the following values:
@@ -85,7 +82,7 @@ class NCPLiquidCell(nnx.Module):
             hidden_init=self.init_type,
         )
 
-    def _prep_mask(self, mask: jax.Array) -> jax.Array:
+    def _prep_mask(self, mask: chex.Array) -> chex.Array:
         """
         Utility method. Preprocesses mask to match head size.
 
@@ -101,14 +98,17 @@ class NCPLiquidCell(nnx.Module):
         Returns:
             mask (jax.Array): an updated mask.
         """
-        n_extras = mask.shape[1]
-        extra_nodes = jnp.ones((n_extras, n_extras))
+        extra_nodes = jnp.ones((self.n_hidden, self.n_hidden))
         mask = jnp.concat([mask, extra_nodes])
         return jnp.abs(mask)
 
     def _new_hidden(
-        self, x: jax.Array, g_out: jax.Array, h_out: jax.Array
-    ) -> jax.Array:
+        self,
+        x: chex.Array,
+        g_out: chex.Array,
+        h_out: chex.Array,
+        ts: chex.Array,
+    ) -> chex.Array:
         """
         Helper method. Computes the new hidden state.
 
@@ -116,6 +116,7 @@ class NCPLiquidCell(nnx.Module):
             x (jax.Array): input values.
             g_out (jax.Array): g_head output.
             h_out (jax.Array): h_head output.
+            ts (jax.Array): time elapsed since previous timestep.
 
         Returns:
             hidden (jax.Array): a new hidden state
@@ -126,29 +127,34 @@ class NCPLiquidCell(nnx.Module):
         fh_g = self.f_head_to_g(x)
         fh_h = self.f_head_to_h(x)
 
-        gate_out = self.sigmoid(fh_g + fh_h)  # [1 - σ(-[f(x, I, θf)], t)]
+        gate_out = self.sigmoid(fh_g * ts + fh_h)  # [1 - σ(-[f(x, I, θf)], t)]
         f_head = 1.0 - gate_out  # σ(-f(x, I, θf), t)
 
         return g_head * f_head + gate_out * h_head
 
-    def __call__(self, x: jax.Array, hidden: jax.Array) -> Tuple[jax.Array, jax.Array]:
+    def __call__(
+        self, x: chex.Array, hidden: chex.Array, timespans: chex.Array
+    ) -> Tuple[chex.Array, chex.Array]:
         """
         Performs a forward pass through the cell.
+
+        Uses `timespans` to control the temporal gating mechanism for
+        continuous-time dynamics between hidden states.
 
         Parameters:
             x (jax.Array): input values.
             hidden (jax.Array): current hidden state.
+            timespans (jax.Array): time elapsed since previous timestep.
+                Shape should be `(T,)`
 
         Returns:
             y_pred (jax.Array): the cell prediction.
             h_state (jax.Array): the hidden state.
         """
-        x, hidden = x, hidden
         x = jnp.concat([x, hidden], axis=1)
 
         g_out = self.g_head(x)
         h_out = self.h_head(x)
 
-        new_hidden = self._new_hidden(x, g_out, h_out)
-        y_pred = self.proj(x) + new_hidden
-        return y_pred, new_hidden
+        new_hidden = self._new_hidden(x, g_out, h_out, timespans)
+        return new_hidden, new_hidden

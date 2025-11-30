@@ -1,5 +1,6 @@
 from typing import Optional, Tuple
 
+import chex
 import jax
 import jax.numpy as jnp
 from flax import nnx
@@ -7,7 +8,6 @@ from flax.typing import Initializer
 
 from velora.constants import DEFAULT_HIDDEN_INIT
 from velora.models.lnn.cell import NCPLiquidCell
-from velora.models.sparse import SparseLinear
 from velora.utils.nn import active_parameters, total_parameters
 from velora.wiring import build_ncp_wiring
 
@@ -16,9 +16,9 @@ class LiquidNCPNetwork(nnx.Module):
     """
     A CfC Liquid Neural Circuit Policy (NCP) Network with three layers:
 
-    1. Inter (input) - a `SparseLinear` layer
+    1. Inter (input) - a `NCPLiquidCell` layer
     2. Command (hidden) - a `NCPLiquidCell` layer
-    3. Motor (output) - a `SparseLinear` layer
+    3. Motor (output) - a `NCPLiquidCell` layer
 
     ??? note "Decision nodes"
 
@@ -68,6 +68,7 @@ class LiquidNCPNetwork(nnx.Module):
         self.rngs = nnx.Rngs(params=seed)
 
         self.n_units = n_neurons + out_features  # inter + command + motor
+        self.hidden_size = self.n_neurons
 
         self.wiring = nnx.data(
             build_ncp_wiring(
@@ -79,12 +80,12 @@ class LiquidNCPNetwork(nnx.Module):
             )
         )
 
-        self.inter = SparseLinear(
+        self.inter = NCPLiquidCell(
             in_features,
             self.wiring.inter.n_nodes,
-            jnp.abs(self.wiring.inter.mask.T),
+            self.wiring.inter.mask,
             rngs=self.rngs,
-            hidden_init=init_type,
+            init_type=init_type,
         )
 
         self.command = NCPLiquidCell(
@@ -94,14 +95,13 @@ class LiquidNCPNetwork(nnx.Module):
             rngs=self.rngs,
             init_type=init_type,
         )
-        self.hidden_size = self.wiring.command.n_nodes
 
-        self.motor = SparseLinear(
+        self.motor = NCPLiquidCell(
             self.wiring.command.n_nodes,
             self.wiring.motor.n_nodes,
-            jnp.abs(self.wiring.motor.mask.T),
+            self.wiring.motor.mask,
             rngs=self.rngs,
-            hidden_init=init_type,
+            init_type=init_type,
         )
 
         self.act = jax.nn.mish
@@ -129,48 +129,98 @@ class LiquidNCPNetwork(nnx.Module):
         """
         return self._active_params
 
+    def _split_h_state(
+        self, h: chex.Array
+    ) -> Tuple[chex.Array, chex.Array, chex.Array]:
+        """
+        Helper method. Splits the NCPs hidden state into layer-specific states.
+
+        Parameters:
+            h (jax.Array): the network hidden state
+
+        Returns:
+            h_split (Tuple[chex.Array, chex.Array, chex.Array]): hidden state split
+            into layers `(inter, command, motor)`
+        """
+        split_indices = jnp.cumsum(
+            jnp.array([self.wiring.inter.n_nodes, self.wiring.command.n_nodes])
+        )
+        h_inter, h_command, h_motor = jnp.split(h, split_indices, axis=1)
+        return h_inter, h_command, h_motor
+
     def __call__(
-        self, x: jax.Array, h_state: Optional[jax.Array] = None
-    ) -> Tuple[jax.Array, jax.Array]:
+        self,
+        x: chex.Array,
+        *,
+        h_state: Optional[chex.Array] = None,
+        timespans: Optional[chex.Array] = None,
+    ) -> Tuple[chex.Array, chex.Array]:
         """
         Performs a forward pass through the network.
 
         Parameters:
-            x (jax.Array): an input tensor of shape: `(batch_size, features)`.
+            x (jax.Array): an input tensor of shape: `(F, T)` or `(B, F, T)`.
 
-                - `batch_size` the number of samples per timestep.
-                - `features` the features at each timestep (e.g.,
+                - `batch_size (B)` the number of samples per timestep.
+                - `features (F)` the features at each timestep (e.g.,
                 image features, joint coordinates, word embeddings, raw amplitude
                 values).
+                - `seq_length (T)` the number of sequences (e.g., trajectories,
+                channels).
             h_state (jax.Array, optional): initial hidden state of the RNN with
-                shape: `(batch_size, n_units)`.
+                shape: `(B, H)`.
 
-                - `batch_size` the number of samples.
-                - `n_units` the total number of hidden neurons
+                - `batch_size (B)` the number of samples.
+                - `n_units (H)` the total number of hidden neurons
                     (`n_neurons + out_features`).
 
+            timespans (jax.Array, optional): time elapsed since previous timestep.
+                For fixed intervals set to `None`. For varying timesteps shape
+                should be `(T,)`
         Returns:
-            y_pred (jax.Array): the network prediction. When `batch_size=1`. Out shape is `(out_features)`. Otherwise, `(batch_size, out_features)`.
-            h_state (jax.Array): the final hidden state. Output shape is `(batch_size, n_units)`.
+            y_pred (jax.Array): the network prediction. Shape `(B, F, T)`.
+            h_state (jax.Array): the final hidden state. Shape `(B, H)`.
         """
-        if x.ndim != 2:
-            raise ValueError(
-                f"Unsupported dimensionality: '{x.shape}'. Should be 2 dimensional with: '(batch_size, features)'."
-            )
+        if x.ndim not in (2, 3):
+            raise ValueError(f"Expected 2D or 3D input, got shape {jnp.shape(x)}")
 
-        batch_size, features = x.shape
+        if x.ndim == 2:
+            x = jnp.expand_dims(x, 0)
+
+        B, F, T = jnp.shape(x)
 
         if h_state is None:
-            h_state = jnp.zeros((batch_size, self.hidden_size))
+            h_state = jnp.zeros((B, self.hidden_size))
 
-        # Batch -> (batch_size, out_features)
-        x = self.act(self.inter(x))
-        x, h_state = self.command(x, h_state)
-        y_pred = self.motor(self.act(x))
+        timespans = jnp.ones(T) if timespans is None else timespans
 
-        # Single item -> (out_features)
-        if y_pred.shape[0] == 1:
-            y_pred = y_pred.squeeze(0)
+        def _step(
+            h: Tuple[chex.Array, chex.Array, chex.Array],
+            inputs: Tuple[chex.Array, chex.Array],
+        ) -> Tuple[Tuple[chex.Array, chex.Array, chex.Array], chex.Array]:
+            """Single step function."""
+            h_inter, h_command, h_motor = h
+            x_t, ts_t = inputs  # x_t -> (B, F), ts_t -> scalar
 
-        # h_state -> (batch_size, n_units)
+            # Forward through each liquid layer
+            x_t, new_h_inter = self.inter(x_t, h_inter, ts_t)
+            x_t, new_h_command = self.command(x_t, h_command, ts_t)
+            y_t, new_h_motor = self.motor(x_t, h_motor, ts_t)  # y_t -> (B, F)
+
+            new_h = (new_h_inter, new_h_command, new_h_motor)
+            return new_h, y_t
+
+        # x -> (T, B, F) for scanning over time dimension
+        x_transposed = jnp.transpose(x, (2, 0, 1))
+
+        # Split hidden states per layer
+        h_split = self._split_h_state(h_state)
+        scan_inputs = (x_transposed, timespans)
+
+        new_h, y_pred = jax.lax.scan(_step, h_split, scan_inputs, length=T)
+
+        h_state = jnp.concatenate(new_h, axis=1)
+        y_pred = jnp.transpose(y_pred, (1, 2, 0))
+
+        # y_pred, h_state -> (B, F, T), (B, H)
         return y_pred, h_state
