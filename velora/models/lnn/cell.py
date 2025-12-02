@@ -84,13 +84,16 @@ class NCPLiquidCell(nnx.Module):
 
     def _prep_mask(self, mask: chex.Array) -> chex.Array:
         """
-        Utility method. Preprocesses mask to match head size.
+        Utility method. Preprocesses mask to match layer size (`head_size`),
+        adding the hidden-to-hidden recurrent connections for continuous-time
+        dynamics.
 
         !!! note "Performs two operations"
 
             1. Adds a padded matrix of 1s to end of mask in shape
-                `(n_extras, n_extras)` where `n_extras=mask.shape[1]`
-            3. Gets the absolute values of the mask (sanity check)
+                `(n_hidden, n_hidden)` for dense recurrent connections
+            2. Gets the absolute values of the mask to maintain weight stability,
+                converting `-1` to `1`
 
         Parameters:
             mask (jax.Array): weight sparsity mask.
