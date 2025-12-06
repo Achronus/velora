@@ -8,8 +8,8 @@ from flax.typing import Initializer
 
 from velora.constants import DEFAULT_HIDDEN_INIT
 from velora.models.lnn.cell import NCPLiquidCell
+from velora.models.lnn.wiring import build_ncp_wiring
 from velora.utils.nn import active_parameters, total_parameters
-from velora.wiring import build_ncp_wiring
 
 
 class LiquidNCPNetwork(nnx.Module):
