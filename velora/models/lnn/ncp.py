@@ -12,7 +12,7 @@ from velora.models.lnn.wiring import build_ncp_wiring
 from velora.utils.nn import active_parameters, total_parameters
 
 
-class LiquidNCPNetwork(nnx.Module):
+class LNN(nnx.Module):
     """
     A CfC Liquid Neural Circuit Policy (NCP) Network with three layers:
 
@@ -44,8 +44,8 @@ class LiquidNCPNetwork(nnx.Module):
 
             Must be a value between `[0.1, 0.9]` -
 
-            - When `0.1` neurons are very dense.
-            - When `0.9` they are very sparse.
+            - Where `0.1` neurons are very dense.
+            - Where `0.9` they are very sparse.
 
         init_type (flax.nnx.nn.initializers, optional): initializer function for the
             weight matrix. Default is `lecun_uniform()`
@@ -159,18 +159,16 @@ class LiquidNCPNetwork(nnx.Module):
         Performs a forward pass through the network.
 
         Parameters:
-            x (jax.Array): an input tensor of shape: `(F, T)` or `(B, F, T)`.
+            x (jax.Array): an input array of shape: `(F, T)` or `(B, F, T)`.
 
                 - `batch_size (B)` the number of samples per timestep.
-                - `features (F)` the features at each timestep (e.g.,
-                image features, joint coordinates, word embeddings, raw amplitude
-                values).
+                - `features (F)` the features at each timestep
                 - `seq_length (T)` the number of sequences (e.g., trajectories,
                 channels).
             h_state (jax.Array, optional): initial hidden state of the RNN with
                 shape: `(B, H)`.
 
-                - `batch_size (B)` the number of samples.
+                - `batch_size (B)` the number of samples per timestep.
                 - `n_units (H)` the total number of hidden neurons
                     (`n_neurons + out_features`).
 
