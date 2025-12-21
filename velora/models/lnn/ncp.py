@@ -40,12 +40,12 @@ class LNN(nnx.Module):
         out_features (int): number of out features (motor nodes)
         seed (int, optional): random number generator seed. Default is `28`
         sparsity_level (float, optional): controls the connection sparsity
-            between neurons.
+            between neurons. Default is `0.5`.
 
             Must be a value between `[0.1, 0.9]` -
 
             - Where `0.1` neurons are very dense.
-            - Where `0.9` they are very sparse.
+            - Where `0.9` neurons are very sparse.
 
         init_type (flax.nnx.nn.initializers, optional): initializer function for the
             weight matrix. Default is `lecun_uniform()`
@@ -82,23 +82,23 @@ class LNN(nnx.Module):
 
         self.inter = NCPLiquidCell(
             in_features,
-            self.wiring.inter.n_nodes,
+            self.wiring.inter.n_hidden,
             self.wiring.inter.mask,
             rngs=self.rngs,
             init_type=init_type,
         )
 
         self.command = NCPLiquidCell(
-            self.wiring.inter.n_nodes,
-            self.wiring.command.n_nodes,
+            self.wiring.inter.n_hidden,
+            self.wiring.command.n_hidden,
             self.wiring.command.mask,
             rngs=self.rngs,
             init_type=init_type,
         )
 
         self.motor = NCPLiquidCell(
-            self.wiring.command.n_nodes,
-            self.wiring.motor.n_nodes,
+            self.wiring.command.n_hidden,
+            self.wiring.motor.n_hidden,
             self.wiring.motor.mask,
             rngs=self.rngs,
             init_type=init_type,
@@ -143,7 +143,7 @@ class LNN(nnx.Module):
             into layers `(inter, command, motor)`
         """
         split_indices = jnp.cumsum(
-            jnp.array([self.wiring.inter.n_nodes, self.wiring.command.n_nodes])
+            jnp.array([self.wiring.inter.n_hidden, self.wiring.command.n_hidden])
         )
         h_inter, h_command, h_motor = jnp.split(h, split_indices, axis=1)
         return h_inter, h_command, h_motor
