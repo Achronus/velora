@@ -1,3 +1,18 @@
+# Copyright 2025 Achronus
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ==============================================================================
+
 from typing import Optional, Tuple
 
 import chex
@@ -29,13 +44,15 @@ class ACM(nnx.Module):
 
     Parameters:
         in_features (int): number of inputs (sensory nodes)
-        n_neurons (int): number of decision nodes (inter and command nodes)
+        n_neurons (int): number of decision nodes (inter + command nodes)
         prediction_size (int): size of the action-conditioned prediction vector
         n_actions (int): number of discrete actions
         q_dim (int, optional): dimension of action-value prediction head.
             Default is `1` (scalar). Use higher values for distributional Q-values
             (e.g., `51` for C51).
         seed (int, optional): random number generator seed. Default is `28`
+        sparsity_level (float, optional): network connection sparsity
+            between neurons. Default is `0.5`.
     """
 
     def __init__(
@@ -47,6 +64,7 @@ class ACM(nnx.Module):
         *,
         q_dim: int = 1,
         seed: int = 28,
+        sparsity_level: float = 0.5,
     ) -> None:
         self.z_dim = prediction_size
         self.n_actions = n_actions  # aux_pi
@@ -65,6 +83,7 @@ class ACM(nnx.Module):
                 self.n_actions,
                 self.q_dim,
                 seed=seed,
+                sparsity_level=sparsity_level,
             )
         )
 
@@ -295,10 +314,12 @@ class OCM(nnx.Module):
 
     Parameters:
         in_features (int): number of inputs (sensory nodes)
-        n_neurons (int): number of decision nodes (inter and command nodes)
+        n_neurons (int): number of decision nodes (inter + command nodes)
         prediction_size (int): size of the observation-conditioned prediction vector
         n_actions (int): number of discrete actions
         seed (int, optional): random number generator seed. Default is `28`
+        sparsity_level (float, optional): network connection sparsity
+            between neurons. Default is `0.5`.
     """
 
     def __init__(
@@ -309,6 +330,7 @@ class OCM(nnx.Module):
         n_actions: int,
         *,
         seed: int = 28,
+        sparsity_level: float = 0.5,
     ) -> None:
         self.y_dim = prediction_size
         self.n_actions = n_actions  # pi
@@ -325,6 +347,7 @@ class OCM(nnx.Module):
                 self.y_dim,
                 self.n_actions,
                 seed=seed,
+                sparsity_level=sparsity_level,
             )
         )
 
