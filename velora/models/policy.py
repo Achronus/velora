@@ -43,13 +43,11 @@ class ACM(nnx.Module):
         3. Action-value: q(s, a) - Action-value for value-based bootstrapping.
 
     Parameters:
-        in_features (int): number of inputs (sensory nodes)
+        obs_dim (int): number of observations (sensory nodes)
         n_neurons (int): number of decision nodes (inter + command nodes)
         prediction_size (int): size of the action-conditioned prediction vector
         n_actions (int): number of discrete actions
-        q_dim (int, optional): dimension of action-value prediction head.
-            Default is `1` (scalar). Use higher values for distributional Q-values
-            (e.g., `51` for C51).
+        q_dim (int): dimension of action-value prediction head. Uses distributional Q-values
         seed (int, optional): random number generator seed. Default is `28`
         sparsity_level (float, optional): network connection sparsity
             between neurons. Default is `0.5`.
@@ -57,12 +55,12 @@ class ACM(nnx.Module):
 
     def __init__(
         self,
-        in_features: int,
+        obs_dim: int,
         n_neurons: int,
         prediction_size: int,
         n_actions: int,
+        q_dim: int,
         *,
-        q_dim: int = 1,
         seed: int = 28,
         sparsity_level: float = 0.5,
     ) -> None:
@@ -70,14 +68,14 @@ class ACM(nnx.Module):
         self.n_actions = n_actions  # aux_pi
         self.q_dim = q_dim
 
-        self.in_features = in_features + self.n_actions
+        self.obs_dim = obs_dim + self.n_actions
         self.n_neurons = n_neurons
         self.seed = seed
         self.rngs = nnx.Rngs(params=seed)
 
         self.wiring = nnx.data(
             build_acm_wiring(
-                self.in_features,
+                self.obs_dim,
                 self.n_neurons,
                 self.z_dim,
                 self.n_actions,
@@ -97,7 +95,7 @@ class ACM(nnx.Module):
 
         # Inter layer: sensory -> inter
         self.inter = NCPLiquidCell(
-            self.in_features,
+            self.obs_dim,
             self.wiring.inter.n_hidden,
             self.wiring.inter.mask,
             rngs=self.rngs,
@@ -194,7 +192,7 @@ class ACM(nnx.Module):
         """
         B, F, T = jnp.shape(state)
 
-        # Expand state for all actions: (B, F, T) -> (B*A, F, T)
+        # Expand state for all actions: (B, F, T) -> (BA, F, T)
         state_expanded = jnp.repeat(state, self.n_actions, axis=0)
 
         # Create one-hot actions: (BA, A) -> (BA, A, T)
@@ -220,7 +218,7 @@ class ACM(nnx.Module):
 
         Parameters:
             state_embedding (jax.Array): embedded state from Encoder
-                `(B, F, T)` or `(F, T)`.
+                `(B, F, T)` or `(B, F)`.
 
                 - `batch_size (B)` the number of samples per timestep.
                 - `features (F)` the features at each timestep
@@ -228,12 +226,13 @@ class ACM(nnx.Module):
             h_state (jax.Array, optional): initial hidden state `(B, H)`.
 
                 - `batch_size (B)` the number of samples per timestep.
-                - `n_units (H)` the total number of hidden neurons
-                    (`n_neurons + out_features`).
+                - `n_hidden (H)` the total number of hidden neurons.
 
             timespans (jax.Array, optional): time elapsed since previous
                 timestep. For fixed intervals set to `None`.
                 For varying timesteps shape must be `(T,)`
+
+                - `seq_length (T)` the number of sequences (e.g., trajectories).
         Returns:
             z (jax.Array): action-conditioned prediction `(B, A, F, T)`.
             aux_pi (jax.Array): auxiliary policy prediction `(B, A, F, T)`.
@@ -313,7 +312,7 @@ class OCM(nnx.Module):
         features with discovered semantics.
 
     Parameters:
-        in_features (int): number of inputs (sensory nodes)
+        obs_dim (int): number of observations (sensory nodes)
         n_neurons (int): number of decision nodes (inter + command nodes)
         prediction_size (int): size of the observation-conditioned prediction vector
         n_actions (int): number of discrete actions
@@ -324,7 +323,7 @@ class OCM(nnx.Module):
 
     def __init__(
         self,
-        in_features: int,
+        obs_dim: int,
         n_neurons: int,
         prediction_size: int,
         n_actions: int,
@@ -335,14 +334,14 @@ class OCM(nnx.Module):
         self.y_dim = prediction_size
         self.n_actions = n_actions  # pi
 
-        self.in_features = in_features
+        self.obs_dim = obs_dim
         self.n_neurons = n_neurons
         self.seed = seed
         self.rngs = nnx.Rngs(params=seed)
 
         self.wiring = nnx.data(
             build_ocm_wiring(
-                self.in_features,
+                self.obs_dim,
                 n_neurons,
                 self.y_dim,
                 self.n_actions,
@@ -358,10 +357,11 @@ class OCM(nnx.Module):
             + self.wiring.command.n_hidden
             + self.motor.hidden_count()
         )
+        self.embedding_size = self.wiring.command.n_hidden
 
         # Inter layer: sensory -> inter
         self.inter = NCPLiquidCell(
-            self.in_features,
+            self.obs_dim,
             self.wiring.inter.n_hidden,
             self.wiring.inter.mask,
             rngs=self.rngs,
@@ -439,7 +439,7 @@ class OCM(nnx.Module):
 
     def __call__(
         self,
-        x: chex.Array,
+        obs: chex.Array,
         *,
         h_state: Optional[chex.Array] = None,
         timespans: Optional[chex.Array] = None,
@@ -448,7 +448,7 @@ class OCM(nnx.Module):
         Forward pass through the network.
 
         Parameters:
-            x (jax.Array): input observations `(B, F, T)` or `(F, T)`.
+            obs (jax.Array): input observations `(B, F, T)` or `(B, F)`.
 
                 - `batch_size (B)` the number of samples per timestep.
                 - `features (F)` the features at each timestep
@@ -456,12 +456,13 @@ class OCM(nnx.Module):
             h_state (jax.Array, optional): initial hidden state `(B, H)`.
 
                 - `batch_size (B)` the number of samples per timestep.
-                - `n_units (H)` the total number of hidden neurons
-                    (`n_neurons + out_features`).
+                - `n_hidden (H)` the total number of hidden neurons.
 
             timespans (jax.Array, optional): time elapsed since previous
                 timestep. For fixed intervals set to `None`.
                 For varying timesteps shape must be `(T,)`
+
+                - `seq_length (T)` the number of sequences (e.g., trajectories).
         Returns:
             pi (jax.Array): policy prediction `(B, F, T)`.
             y (jax.Array): observation-conditioned prediction `(B, F, T)`.
@@ -469,10 +470,10 @@ class OCM(nnx.Module):
                 Provided to ACM as input.
             h_state (jax.Array): final hidden state `(B, H)`.
         """
-        if x.ndim == 2:
-            x = jnp.expand_dims(x, -1)  # Add time dim
+        if obs.ndim == 2:
+            obs = jnp.expand_dims(obs, -1)  # Add time dim
 
-        B, F, T = jnp.shape(x)
+        B, F, T = jnp.shape(obs)
 
         if h_state is None:
             h_state = jnp.zeros((B, self.hidden_size))
@@ -502,7 +503,7 @@ class OCM(nnx.Module):
             return new_h, preds
 
         # Transpose for scanning over time: (B, F, T) -> (T, B, F)
-        x_transposed = jnp.transpose(x, (2, 0, 1))
+        x_transposed = jnp.transpose(obs, (2, 0, 1))
 
         # Split hidden states for each layer
         h_split = self._split_h_state(h_state)
