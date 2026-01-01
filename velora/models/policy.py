@@ -48,7 +48,7 @@ class ACM(nnx.Module):
         prediction_size (int): size of the action-conditioned prediction vector
         n_actions (int): number of discrete actions
         q_dim (int): dimension of action-value prediction head. Uses distributional Q-values
-        seed (int, optional): random number generator seed. Default is `28`
+        key (jax.random.PRNGKey): random number generator key
         sparsity_level (float, optional): network connection sparsity
             between neurons. Default is `0.5`.
     """
@@ -61,7 +61,7 @@ class ACM(nnx.Module):
         n_actions: int,
         q_dim: int,
         *,
-        seed: int = 28,
+        key: chex.PRNGKey,
         sparsity_level: float = 0.5,
     ) -> None:
         self.z_dim = prediction_size
@@ -70,8 +70,10 @@ class ACM(nnx.Module):
 
         self.obs_dim = obs_dim + self.n_actions
         self.n_neurons = n_neurons
-        self.seed = seed
-        self.rngs = nnx.Rngs(params=seed)
+        self.key = key
+
+        self.seed = jax.random.key_data(key)[-1].item()
+        self.rngs = nnx.Rngs(params=self.key)
 
         self.wiring = nnx.data(
             build_acm_wiring(
@@ -80,7 +82,7 @@ class ACM(nnx.Module):
                 self.z_dim,
                 self.n_actions,
                 self.q_dim,
-                seed=seed,
+                seed=self.seed,
                 sparsity_level=sparsity_level,
             )
         )
@@ -178,7 +180,7 @@ class ACM(nnx.Module):
         h_inter, h_command, h_z, h_aux, h_q = jnp.split(h, split_indices, axis=1)
         return h_inter, h_command, h_z, h_aux, h_q
 
-    def encode_obs_with_actions(self, state: chex.Array) -> chex.Array:
+    def _encode_obs_with_actions(self, state: chex.Array) -> chex.Array:
         """
         Expands the input observation with one-hot encoded actions (A)
         using an identity matrix for all batches.
@@ -245,7 +247,7 @@ class ACM(nnx.Module):
         B, F, T = jnp.shape(state_embedding)
 
         # Expand with action encodings
-        x = self.encode_obs_with_actions(state_embedding)  # (BA, F+A, T)
+        x = self._encode_obs_with_actions(state_embedding)  # (BA, F+A, T)
 
         if h_state is None:
             h_state = jnp.zeros((B * self.n_actions, self.hidden_size))  # (BA, H)
@@ -316,7 +318,7 @@ class OCM(nnx.Module):
         n_neurons (int): number of decision nodes (inter + command nodes)
         prediction_size (int): size of the observation-conditioned prediction vector
         n_actions (int): number of discrete actions
-        seed (int, optional): random number generator seed. Default is `28`
+        key (jax.random.PRNGKey): random number generator key
         sparsity_level (float, optional): network connection sparsity
             between neurons. Default is `0.5`.
     """
@@ -328,7 +330,7 @@ class OCM(nnx.Module):
         prediction_size: int,
         n_actions: int,
         *,
-        seed: int = 28,
+        key: chex.PRNGKey,
         sparsity_level: float = 0.5,
     ) -> None:
         self.y_dim = prediction_size
@@ -336,8 +338,10 @@ class OCM(nnx.Module):
 
         self.obs_dim = obs_dim
         self.n_neurons = n_neurons
-        self.seed = seed
-        self.rngs = nnx.Rngs(params=seed)
+        self.key = key
+
+        self.seed = jax.random.key_data(key)[-1].item()
+        self.rngs = nnx.Rngs(params=self.key)
 
         self.wiring = nnx.data(
             build_ocm_wiring(
@@ -345,7 +349,7 @@ class OCM(nnx.Module):
                 n_neurons,
                 self.y_dim,
                 self.n_actions,
-                seed=seed,
+                seed=self.seed,
                 sparsity_level=sparsity_level,
             )
         )
