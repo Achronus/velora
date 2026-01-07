@@ -15,7 +15,6 @@
 
 import chex
 import flax.nnx as nnx
-import jax
 import jax.numpy as jnp
 
 
@@ -39,9 +38,8 @@ class ImageEncoder(nnx.Module):
         ```
 
     Parameters:
-        in_channels (int): number of input channels (e.g., 3 for RGB images)
-        n_hidden (int): number of hidden units. Used to compute convolution
-            dimensions
+        in_channels (int): number of input channels (e.g., 4 for frame-stacked grayscale)
+        n_hidden (int): number of hidden units. Used to compute convolution dimensions
         key (jax.random.PRNGKey): random number generator key
     """
 
@@ -82,23 +80,52 @@ class ImageEncoder(nnx.Module):
             rngs=rngs,
         )
 
-    def __call__(self, x: jax.Array) -> chex.Array:
+    def __call__(self, x: chex.Array) -> chex.Array:
         """
         Perform a forward pass through the network.
 
-        Parameters:
-            x (jax.Array): batch of images `(B, H, W, C)`
+        Accepts either 4D or 5D input and returns encoded features
+        in `(B, T, F)` format.
 
-                - `batch_size (B)` the number of images.
-                - `height (H)` the height of each image.
-                - `width (W)` the width of each image.
-                - `channels (C)` the number of channels per image.
+        Parameters
+        ----------
+        x : jax.Array
+            Batch of images in shape `(B, H, W, C)`
+            or `(B, T, H, W, C)`
 
-        Returns:
-            features (jax.Array): a set of feature maps `(B, output_dim)`
+            - `batch_size (B)` the number of images.
+            - `seq_length (T)` - the number of timesteps.
+            - `height (H)` the height of each image.
+            - `width (W)` the width of each image.
+            - `channels (C)` the number of channels per image.
+
+        Returns
+        -------
+        features : jax.Array
+            Encoded features in `(B, T, F)` format
+
+            - `batch_size (B)` the number of samples
+            - `seq_length (T)` the number of timesteps (1 if 4D input)
+            - `features (F)` the output feature dimension
         """
-        x = nnx.relu(self.conv1(x))
+        if x.ndim not in [4, 5]:
+            raise ValueError(
+                f"'x' must be shape '(B, H, W, C)' or '(B, T, H, W, C)'. Got: x={jnp.shape(x)}"
+            )
+
+        if x.ndim == 4:
+            x = jnp.expand_dims(x, axis=1)  # (B, H, W, C) -> (B, 1, H, W, C)
+
+        B, T, H, W, C = jnp.shape(x)
+
+        # Flatten batch and time: (B, T, H, W, C) -> (B*T, H, W, C)
+        x_flat = jnp.reshape(x, shape=(B * T, H, W, C))
+
+        # Encode through CNN
+        x = nnx.relu(self.conv1(x_flat))
         x = nnx.relu(self.conv2(x))
         x = jnp.mean(x, axis=(1, 2))  # Global average pooling -> (B, C * 2)
+        x = nnx.relu(self.output_proj(x))  # (B, output_dim)
 
-        return nnx.relu(self.output_proj(x))  # (B, output_dim)
+        # Reshape back: (B*T, F) -> (B, T, F)
+        return x.reshape(B, T, -1)

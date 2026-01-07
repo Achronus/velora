@@ -28,6 +28,7 @@ from velora.models.lnn.wiring import (
     build_ocm_wiring,
 )
 from velora.utils.nn import active_parameters, total_parameters
+from velora.utils.transforms import to_batch_first, to_time_first
 
 
 class ACM(nnx.Module):
@@ -37,9 +38,9 @@ class ACM(nnx.Module):
     Uses a Liquid Neural Network (LNN) architecture with 3 output heads:
 
         1. Action-conditioned prediction: z(s, a) - Action-conditioned
-        prediction for control-relevant targets.
+            prediction for control-relevant targets.
         2. Auxiliary policy prediction: p(s, a) - Auxiliary policy prediction
-        for representation learning.
+           for representation learning.
         3. Action-value: q(s, a) - Action-value for value-based bootstrapping.
 
     Parameters:
@@ -182,31 +183,57 @@ class ACM(nnx.Module):
 
     def _encode_obs_with_actions(self, state: chex.Array) -> chex.Array:
         """
-        Expands the input observation with one-hot encoded actions (A)
-        using an identity matrix for all batches.
+        Helper method. Expands the input observation with one-hot
+        encoded actions (A) using an identity matrix for all batches.
 
         Parameters:
-            state (jax.Array): state embedding with shape `(B, F, T)`
+            state (jax.Array): state embedding with shape `(B, T, F)`
 
         Returns:
             state_with_actions (jax.Array): obs with batched one-hot encoded
-            actions in the shape `(B*A, F+A, T)`
+            actions in the shape `(B*A, T, F+A)`
         """
-        B, F, T = jnp.shape(state)
+        B, T, F = jnp.shape(state)
 
-        # Expand state for all actions: (B, F, T) -> (BA, F, T)
+        # Expand state for all actions: (B, T, F) -> (BA, T, F)
         state_expanded = jnp.repeat(state, self.n_actions, axis=0)
 
-        # Create one-hot actions: (BA, A) -> (BA, A, T)
+        # Create one-hot actions: (A,) -> (BA, T, A)
         one_hot_actions = jnp.eye(self.n_actions)  # (A, A)
         one_hot_actions = jnp.tile(one_hot_actions, [B, 1])  # (BA, A)
-        one_hot_actions = jnp.expand_dims(one_hot_actions, -1)  # (BA, A, 1)
-        one_hot_actions = jnp.tile(one_hot_actions, [1, 1, T])  # (BA, A, T)
+        one_hot_actions = jnp.expand_dims(one_hot_actions, axis=1)  # (BA, 1, A)
+        one_hot_actions = jnp.tile(one_hot_actions, [1, T, 1])  # (BA, T, A)
 
         return jnp.concatenate(
             [state_expanded, one_hot_actions],
-            axis=1,
-        )  # (BA, F+A, T)
+            axis=-1,
+        )  # (BA, T, F+A)
+
+    def _split_action_dim(self, x: chex.Array) -> chex.Array:
+        """
+        Helper method. Reshapes action-expanded array to
+        separate batch and action dimensions.
+
+        Converts from flattened `(B*A, T, F)` format back to
+        `(B, T, A, F)` format after scan operations.
+
+        Parameters
+        ----------
+        x : chex.Array
+            Input array with shape `(B*A, T, F)`
+
+        Returns
+        -------
+        new_x : chex.Array
+            A reshaped `x` with shape `(B, T, A, F)`
+        """
+        BA, T, F = jnp.shape(x)
+        B = BA // self.n_actions
+
+        # (B*A, T, F) -> (B, A, T, F) -> (B, T, A, F)
+        x = x.reshape(B, self.n_actions, T, F)
+        x = jnp.transpose(x, axes=(0, 2, 1, 3))
+        return x
 
     def __call__(
         self,
@@ -220,11 +247,11 @@ class ACM(nnx.Module):
 
         Parameters:
             state_embedding (jax.Array): embedded state from Encoder
-                `(B, F, T)` or `(B, F)`.
+                `(B, T, F)` or `(B, F)`.
 
                 - `batch_size (B)` the number of samples per timestep.
-                - `features (F)` the features at each timestep
                 - `seq_length (T)` the number of sequences (e.g., trajectories).
+                - `features (F)` the features at each timestep
             h_state (jax.Array, optional): initial hidden state `(B, H)`.
 
                 - `batch_size (B)` the number of samples per timestep.
@@ -236,18 +263,18 @@ class ACM(nnx.Module):
 
                 - `seq_length (T)` the number of sequences (e.g., trajectories).
         Returns:
-            z (jax.Array): action-conditioned prediction `(B, A, F, T)`.
-            aux_pi (jax.Array): auxiliary policy prediction `(B, A, F, T)`.
-            q (jax.Array): action-value prediction `(B, A, F, T)`.
+            z (jax.Array): action-conditioned prediction `(B, T, A, F)`.
+            aux_pi (jax.Array): auxiliary policy prediction `(B, T, A, F)`.
+            q (jax.Array): action-value prediction `(B, T, A, F)`.
             h_state (jax.Array): final hidden state `(B*A, H)`.
         """
         if state_embedding.ndim == 2:
-            state_embedding = jnp.expand_dims(state_embedding, -1)  # Add time dim
+            state_embedding = jnp.expand_dims(state_embedding, axis=1)  # (B, 1, F)
 
-        B, F, T = jnp.shape(state_embedding)
+        B, T, F = jnp.shape(state_embedding)
 
         # Expand with action encodings
-        x = self._encode_obs_with_actions(state_embedding)  # (BA, F+A, T)
+        x = self._encode_obs_with_actions(state_embedding)  # (BA, T, F+A)
 
         if h_state is None:
             h_state = jnp.zeros((B * self.n_actions, self.hidden_size))  # (BA, H)
@@ -277,8 +304,8 @@ class ACM(nnx.Module):
             preds = (z_t, aux_t, q_t)
             return new_h, preds
 
-        # Transpose for scanning over time: (BA, F+A, T) -> (T, BA, F+A)
-        x_transposed = jnp.transpose(x, (2, 0, 1))
+        # Transpose for scanning over time: (BA, T, F+A) -> (T, BA, F+A)
+        x_transposed = to_time_first(x)
 
         # Split hidden states for each layer
         h_split = self._split_h_state(h_state)
@@ -289,15 +316,10 @@ class ACM(nnx.Module):
         h_state = jnp.concatenate(new_h, axis=1)  # (BA, H)
         z, aux_pi, q = preds
 
-        # Transpose back: (T, BA, F) -> (BA, F, T)
-        z = jnp.transpose(z, (1, 2, 0))
-        aux_pi = jnp.transpose(aux_pi, (1, 2, 0))
-        q = jnp.transpose(q, (1, 2, 0))
-
-        # Reshape to separate batch and action dims: (BA, F, T) -> (B, A, F, T)
-        z = z.reshape(B, self.n_actions, -1, T)
-        aux_pi = aux_pi.reshape(B, self.n_actions, -1, T)
-        q = q.reshape(B, self.n_actions, -1, T)
+        # Transpose back: (T, BA, F) -> (BA, T, F) -> (B, T, A, F)
+        z = self._split_action_dim(to_batch_first(z))
+        aux_pi = self._split_action_dim(to_batch_first(aux_pi))
+        q = self._split_action_dim(to_batch_first(q))
 
         return z, aux_pi, q, h_state
 
@@ -311,7 +333,7 @@ class OCM(nnx.Module):
 
         1. Policy: π(s, a) - policy logits for action probabilities.
         2. Observation-conditioned prediction: y(s) - state-level
-        features with discovered semantics.
+           features with discovered semantics.
 
     Parameters:
         obs_dim (int): number of observations (sensory nodes)
@@ -452,11 +474,11 @@ class OCM(nnx.Module):
         Forward pass through the network.
 
         Parameters:
-            obs (jax.Array): input observations `(B, F, T)` or `(B, F)`.
+            obs (jax.Array): input observations `(B, T, F)` or `(B, F)`.
 
                 - `batch_size (B)` the number of samples per timestep.
-                - `features (F)` the features at each timestep
                 - `seq_length (T)` the number of sequences (e.g., trajectories).
+                - `features (F)` the features at each timestep
             h_state (jax.Array, optional): initial hidden state `(B, H)`.
 
                 - `batch_size (B)` the number of samples per timestep.
@@ -468,16 +490,16 @@ class OCM(nnx.Module):
 
                 - `seq_length (T)` the number of sequences (e.g., trajectories).
         Returns:
-            pi (jax.Array): policy prediction `(B, F, T)`.
-            y (jax.Array): observation-conditioned prediction `(B, F, T)`.
-            embedding (jax.Array): command layer output `(B, F, T)`.
+            pi (jax.Array): policy prediction `(B, T, F)`.
+            y (jax.Array): observation-conditioned prediction `(B, T, F)`.
+            embedding (jax.Array): command layer output `(B, T, F)`.
                 Provided to ACM as input.
             h_state (jax.Array): final hidden state `(B, H)`.
         """
         if obs.ndim == 2:
-            obs = jnp.expand_dims(obs, -1)  # Add time dim
+            obs = jnp.expand_dims(obs, axis=1)  # (B, T, F)
 
-        B, F, T = jnp.shape(obs)
+        B, T, F = jnp.shape(obs)
 
         if h_state is None:
             h_state = jnp.zeros((B, self.hidden_size))
@@ -506,8 +528,8 @@ class OCM(nnx.Module):
             preds = (pi_t, y_t, embed_t)
             return new_h, preds
 
-        # Transpose for scanning over time: (B, F, T) -> (T, B, F)
-        x_transposed = jnp.transpose(obs, (2, 0, 1))
+        # Transpose for scanning over time: (B, T, F) -> (T, B, F)
+        x_transposed = to_time_first(obs)
 
         # Split hidden states for each layer
         h_split = self._split_h_state(h_state)
@@ -518,9 +540,9 @@ class OCM(nnx.Module):
         h_state = jnp.concatenate(new_h, axis=1)  # (B, H)
         pi, y, embedding = preds
 
-        # Transpose back: (T, B, F) -> (B, F, T)
-        pi = jnp.transpose(pi, (1, 2, 0))
-        y = jnp.transpose(y, (1, 2, 0))
-        embedding = jnp.transpose(embedding, (1, 2, 0))
+        # Transpose back: (T, B, F) -> (B, T, F)
+        pi = to_batch_first(pi)
+        y = to_batch_first(y)
+        embedding = to_batch_first(embedding)
 
         return pi, y, embedding, h_state

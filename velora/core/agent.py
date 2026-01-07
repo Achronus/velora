@@ -13,9 +13,10 @@
 # limitations under the License.
 # ==============================================================================
 
-from typing import Optional
+from typing import Optional, Tuple
 
 import chex
+import distrax
 import gymnasium as gym
 import jax
 import jax.numpy as jnp
@@ -34,14 +35,30 @@ class VeloraAgent:
     Creates a policy agent used to discover Reinforcement Learning rules.
     Combines DiscoRL techniques with Liquid Neural Networks (LNNs).
 
+    Architecture:
+        1. CNN Encoder - extracts visual features from image observations
+        2. Observation-Conditional Model (OCM) - processes encoded features
+           to produce policy logits (π) and observation-conditioned
+           predictions (y)
+        3. Action-Conditional Model (ACM) - takes OCM embeddings and produces
+           action-conditioned predictions (z), auxiliary policy (aux_π),
+           and Q-values (q) for all actions
+
+    Output Shapes:
+        - π (policy): `(B, A, T)`
+        - y (obs-conditioned prediction): `(B, Y, T)`
+        - z (action-conditioned prediction): `(B, A, Z, T)`
+        - aux_π (auxiliary policy): `(B, A, A, T)`
+        - q (action-values): `(B, A, Q, T)`
+
     References:
         - [Discovering state-of-the-art reinforcement learning algorithms (2025)](https://www.nature.com/articles/s41586-025-09761-x)
         - [Liquid Time-constant Networks (2020)](https://arxiv.org/abs/2006.04439)
 
     Parameters:
-        obs_spec (gym.spaces.Box): the observation space of the
+        obs_spec (gym.spaces.Box): a single observation space of the
             vectorized Gymnasium environment
-        act_spec (gym.spaces.MultiDiscrete): the action space of the
+        act_spec (gym.spaces.Discrete): a single action space of the
             vectorized Gymnasium environment
         settings (AgentSettings): settings for the Velora agent
         seed (int, optional): random number generator seed.
@@ -51,7 +68,7 @@ class VeloraAgent:
     def __init__(
         self,
         obs_spec: gym.spaces.Box,
-        act_spec: gym.spaces.MultiDiscrete,
+        act_spec: gym.spaces.Discrete,
         settings: AgentSettings,
         *,
         seed: int = 42,
@@ -61,10 +78,11 @@ class VeloraAgent:
         self.settings = settings
         self.seed = seed
 
-        self.n_actions = self.act_spec.shape[0]
+        self.n_actions = int(self.act_spec.n)
+        self.key = jax.random.key(seed)
 
-        key = jax.random.key(seed)
-        key_cnn, key_ocm, key_acm = jax.random.split(key, 3)
+        key_cnn, key_ocm, key_acm, key_actions = jax.random.split(self.key, 4)
+        self.key_actions = key_actions
 
         # Categorical bins for Q-values
         self.categorical_bins = settings.categorical_bins()
@@ -102,17 +120,18 @@ class VeloraAgent:
 
     def __call__(
         self,
-        obs: jax.Array,
+        obs: chex.Array,
         *,
         ocm_h_state: Optional[chex.Array] = None,
         acm_h_state: Optional[chex.Array] = None,
         timespans: Optional[chex.Array] = None,
-    ) -> AgentOutput:
+    ) -> Tuple[AgentOutput, AgentHiddenStates]:
         """
         Forward pass through the agent.
 
         Parameters:
-            obs (jax.Array): image input observations `(B, T, H, W, C)`
+            obs (jax.Array): image input observations `(B, H, W, C)`
+            or `(B, T, H, W, C)`
 
                 - `batch_size (B)` the number of samples per timestep.
                 - `seq_length (T)` the number of sequences (e.g., trajectories).
@@ -141,16 +160,11 @@ class VeloraAgent:
 
         Returns:
             preds (AgentOutput): an object of agent predictions.
+            h_state (AgentHiddenStates): an object of the agents hidden states.
         """
-        B, T, H, W, C = jnp.shape(obs)
 
-        # Encode all frames through CNN: (B, T, H, W, C) -> (B, T, F)
-        obs_flat = obs.reshape(B * T, H, W, C)
-        encoded = self.cnn(obs_flat)  # (B*T, F)
-        encoded = encoded.reshape(B, T, -1)  # (B, T, F)
-
-        # Transpose for OCM: (B, T, F) -> (B, F, T)
-        encoded = jnp.transpose(encoded, (0, 2, 1))  # (B, F, T)
+        # Process images
+        encoded = self.cnn(obs)  # (B, T, F)
 
         # OCM forward - process observations and produce embeddings
         pi, y, embedding, ocm_h_state = self.ocm(
@@ -166,15 +180,26 @@ class VeloraAgent:
             timespans=timespans,
         )
 
-        return AgentOutput(
-            pi=pi,
-            y=y,
-            z=z,
-            aux_pi=aux_pi,
-            q=q,
-            embedding=embedding,
-            h_states=AgentHiddenStates(
-                ocm=ocm_h_state,
-                acm=acm_h_state,
-            ),
+        return (
+            AgentOutput(pi=pi, y=y, z=z, aux_pi=aux_pi, q=q),
+            AgentHiddenStates(ocm=ocm_h_state, acm=acm_h_state),
         )
+
+    def act(self, logits: chex.Array) -> chex.Array:
+        """
+        Samples agent actions from the policy logits predicted by the agent.
+
+        Parameters:
+            logits (jax.Array): policy logits
+
+        Returns:
+            actions (jax.Array): samples actions `(B,)`
+        """
+        logits = jnp.squeeze(logits, axis=1)  # (B, 1, A) -> (B, A)
+
+        # Reset RNG key for sampling
+        self.key_actions, key_sample = jax.random.split(self.key_actions, 2)
+
+        # Compute actions
+        actions = distrax.Softmax(logits).sample(seed=key_sample)
+        return actions

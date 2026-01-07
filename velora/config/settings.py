@@ -22,7 +22,7 @@ from velora.core.distributions import CategoricalBins
 @struct.dataclass(frozen=True)
 class AgentSettings:
     """
-    A storage container for `VeloraAgent` settings.
+    Dataclass for `VeloraAgent` settings.
 
     Parameters:
         n_hidden (int): number of decision nodes for policy networks
@@ -30,7 +30,7 @@ class AgentSettings:
         prediction_size (int): size of the observation/action-conditioned
             prediction vectors (y, z)
         q_size (int): size of action-value prediction head. Controls the number
-            of discrete bins for distributional Q-values, also known as `n_atoms`
+            of discrete bins for distributional Q-values (`n_atoms`)
         seq_len (int, optional): number of timesteps per trajectory
             (rollout size). Default is `29`
         lr (float, optional): learning rate for the agent's optimizer.
