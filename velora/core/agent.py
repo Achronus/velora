@@ -61,25 +61,23 @@ class VeloraAgent:
         act_spec (gym.spaces.Discrete): a single action space of the
             vectorized Gymnasium environment
         settings (AgentSettings): settings for the Velora agent
-        seed (int, optional): random number generator seed.
-            Default is `42`
+        key (jax.random.PRNGKey): random number generator key
     """
 
     def __init__(
         self,
         obs_spec: gym.spaces.Box,
         act_spec: gym.spaces.Discrete,
-        settings: AgentSettings,
         *,
-        seed: int = 42,
+        settings: AgentSettings,
+        key: chex.PRNGKey,
     ) -> None:
         self.obs_spec = obs_spec
         self.act_spec = act_spec
         self.settings = settings
-        self.seed = seed
+        self.key = key
 
         self.n_actions = int(self.act_spec.n)
-        self.key = jax.random.key(seed)
 
         key_cnn, key_ocm, key_acm, key_actions = jax.random.split(self.key, 4)
         self.key_actions = key_actions
