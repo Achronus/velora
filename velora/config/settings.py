@@ -31,8 +31,6 @@ class AgentSettings:
             prediction vectors (y, z)
         q_size (int): size of action-value prediction head. Controls the number
             of discrete bins for distributional Q-values (`n_atoms`)
-        seq_len (int, optional): number of timesteps per trajectory
-            (rollout size). Default is `29`
         lr (float, optional): learning rate for the agent's optimizer.
             Default is `0.0005`
         max_grad_norm (float, optional): maximum gradient norm for
@@ -50,7 +48,6 @@ class AgentSettings:
     n_hidden: int
     prediction_size: int
     q_size: int
-    seq_len: int = 29
     lr: float = 5e-4
     max_grad_norm: float = 1.0
     bin_resolution: float = 0.4

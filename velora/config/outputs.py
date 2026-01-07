@@ -63,5 +63,37 @@ class AgentOutput:
     z: chex.Array
     aux_pi: chex.Array
     q: chex.Array
-    embedding: chex.Array
-    h_states: AgentHiddenStates
+
+
+@struct.dataclass
+class BufferSamples:
+    """
+    A batch of trajectories sampled from the buffer.
+
+    Parameters:
+        actions (jax.Array): actions taken `(B, T)`
+
+            - `batch_size (B)` the number of samples per timestep.
+            - `seq_length (T)` the number of timesteps in the trajectory.
+
+        rewards (jax.Array): rewards received `(B, T)`
+
+            - `batch_size (B)` the number of samples per timestep.
+            - `seq_length (T)` the number of timesteps in the trajectory.
+
+        discounts (jax.Array): raw environment discounts (dones) `(B, T)`.
+            Binary values where `1.0` = episode continues, `0.0` = episode ended.
+            Multiply by gamma at training time.
+
+            - `batch_size (B)` the number of samples per timestep.
+            - `seq_length (T)` the number of timesteps in the trajectory.
+
+        preds (AgentOutput): agent network output predictions at each timestep
+        target_preds (AgentOutput): agent target network output predictions at each timestep
+    """
+
+    actions: chex.Array
+    rewards: chex.Array
+    discounts: chex.Array
+    preds: AgentOutput
+    target_preds: AgentOutput
