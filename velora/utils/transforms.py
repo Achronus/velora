@@ -19,14 +19,17 @@ import jax.numpy as jnp
 
 def to_time_first(x: chex.Array) -> chex.Array:
     """
-    Transpose from batch-first to time-first format for
-    scan operations.
+    Transpose from batch-first to time-first format for scan operations.
 
-    Parameters:
-        x (jax.Array): input tensor in batch-first format `(B, T, ...)`
+    Parameters
+    ----------
+    x : jax.Array
+        Input tensor in batch-first format `(B, T, ...)`
 
-    Returns:
-        x (jax.Array): output tensor in time-first format `(T, B, ...)`
+    Returns
+    -------
+    x : jax.Array
+        Output tensor in time-first format `(T, B, ...)`
     """
     # (B, T, ...) -> (T, B, ...)
     return jnp.swapaxes(x, 0, 1)
@@ -34,14 +37,17 @@ def to_time_first(x: chex.Array) -> chex.Array:
 
 def to_batch_first(x: chex.Array) -> chex.Array:
     """
-    Transpose from time-first to batch-first format after
-    scan operations.
+    Transpose from time-first to batch-first format after scan operations.
 
-    Parameters:
-        x (jax.Array): input tensor in time-first format `(T, B, ...)`
+    Parameters
+    ----------
+    x : jax.Array
+        Input tensor in time-first format `(T, B, ...)`
 
-    Returns:
-        x (jax.Array): output tensor in batch-first format `(B, T, ...)`
+    Returns
+    -------
+    x : jax.Array
+        Output tensor in batch-first format `(B, T, ...)`
     """
     # (T, B, ...) -> (B, T, ...)
     return jnp.swapaxes(x, 0, 1)

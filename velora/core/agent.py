@@ -33,6 +33,7 @@ from velora.models.policy import ACM, OCM
 class VeloraAgent:
     """
     Creates a policy agent used to discover Reinforcement Learning rules.
+
     Combines DiscoRL techniques with Liquid Neural Networks (LNNs).
 
     Architecture:
@@ -55,13 +56,16 @@ class VeloraAgent:
         - [Discovering state-of-the-art reinforcement learning algorithms (2025)](https://www.nature.com/articles/s41586-025-09761-x)
         - [Liquid Time-constant Networks (2020)](https://arxiv.org/abs/2006.04439)
 
-    Parameters:
-        obs_spec (gym.spaces.Box): a single observation space of the
-            vectorized Gymnasium environment
-        act_spec (gym.spaces.Discrete): a single action space of the
-            vectorized Gymnasium environment
-        settings (AgentSettings): settings for the Velora agent
-        key (jax.random.PRNGKey): random number generator key
+    Parameters
+    ----------
+    obs_spec : gym.spaces.Box
+        A single observation space of the vectorized Gymnasium environment
+    act_spec : gym.spaces.Discrete
+        A single action space of the vectorized Gymnasium environment
+    settings : AgentSettings
+        Settings for the Velora agent
+    key : jax.random.PRNGKey
+        Random number generator key
     """
 
     def __init__(
@@ -127,38 +131,44 @@ class VeloraAgent:
         """
         Forward pass through the agent.
 
-        Parameters:
-            obs (jax.Array): image input observations `(B, H, W, C)`
-            or `(B, T, H, W, C)`
+        Parameters
+        ----------
+        obs : jax.Array
+            Image input observations `(B, H, W, C)` or `(B, T, H, W, C)`
 
-                - `batch_size (B)` the number of samples per timestep.
-                - `seq_length (T)` the number of sequences (e.g., trajectories).
-                - `height (H)` the height of the image observation.
-                - `width (W)` the width of the image observation.
-                - `channels (C)` the number of channels in the image.
+            - `batch_size (B)` the number of samples per timestep
+            - `seq_length (T)` the number of sequences (e.g., trajectories)
+            - `height (H)` the height of the image observation
+            - `width (W)` the width of the image observation
+            - `channels (C)` the number of channels in the image
 
-            ocm_h_state (jax.Array, optional): hidden state for the OCM
-                `(B, HS)`. If `None`, initializes to zeros. Default is `None`
+        ocm_h_state : jax.Array (optional)
+            Hidden state for the OCM `(B, HS)`. If `None`, initializes to zeros.
+            Default is `None`
 
-                - `batch_size (B)` the number of samples per timestep.
-                - `n_units (HS)` the total number of OCM hidden neurons.
+            - `batch_size (B)` the number of samples per timestep
+            - `n_units (HS)` the total number of OCM hidden neurons
 
-            acm_h_state (jax.Array, optional): hidden state for the ACM
-                `(B*A, HS)`. If `None`, initializes to zeros. Default is `None`
+        acm_h_state : jax.Array (optional)
+            Hidden state for the ACM `(B*A, HS)`. If `None`, initializes to zeros.
+            Default is `None`
 
-                - `batch_size (B)` the number of samples per timestep.
-                - `n_actions (A)` the number of discrete actions.
-                - `n_units (HS)` the total number of ACM hidden neurons.
+            - `batch_size (B)` the number of samples per timestep
+            - `n_actions (A)` the number of discrete actions
+            - `n_units (HS)` the total number of ACM hidden neurons
 
-            timespans (jax.Array, optional): time intervals between
-                observations `(T,)`. If `None`, uses uniform time intervals.
-                Default is `None`
+        timespans : jax.Array (optional)
+            Time intervals between observations `(T,)`. If `None`, uses uniform
+            time intervals. Default is `None`
 
-                - `seq_length (T)` the number of sequences (e.g., trajectories).
+            - `seq_length (T)` the number of sequences (e.g., trajectories)
 
-        Returns:
-            preds (AgentOutput): an object of agent predictions.
-            h_state (AgentHiddenStates): an object of the agents hidden states.
+        Returns
+        -------
+        preds : AgentOutput
+            An object of agent predictions
+        h_state : AgentHiddenStates
+            An object of the agents hidden states
         """
 
         # Process images
@@ -187,11 +197,15 @@ class VeloraAgent:
         """
         Samples agent actions from the policy logits predicted by the agent.
 
-        Parameters:
-            logits (jax.Array): policy logits
+        Parameters
+        ----------
+        logits : jax.Array
+            Policy logits
 
-        Returns:
-            actions (jax.Array): samples actions `(B,)`
+        Returns
+        -------
+        actions : jax.Array
+            Sampled actions `(B,)`
         """
         logits = jnp.squeeze(logits, axis=1)  # (B, 1, A) -> (B, A)
 

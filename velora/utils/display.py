@@ -37,13 +37,20 @@ def training_info(
     """
     Display's starting information to the console for a training run.
 
-    Parameters:
-        agent (Any): the agent being trained
-        n_episodes (int): maximum number of training episodes
-        batch_size (int): sampling batch size
-        window_size (int): moving average window size
-        warmup_steps (int): number of buffer warmup steps
-        callbacks (List[TrainCallback]): applied training callbacks
+    Parameters
+    ----------
+    agent : Any
+        The agent being trained
+    n_episodes : int
+        Maximum number of training episodes
+    batch_size : int
+        Sampling batch size
+    window_size : int
+        Moving average window size
+    warmup_steps : int
+        Number of buffer warmup steps
+    callbacks : List[TrainCallback]
+        Applied training callbacks
     """
     output = NAME_STR.strip()
     params_str = f"{agent.active_params:,}/{agent.total_params:,}"

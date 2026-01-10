@@ -27,21 +27,26 @@ def scale_by_adam_no_denom(
     """
     Adam grad rescaling; but denominator does not receive meta-gradients.
 
-    References:
-        [Oh et al., 2025 (GitHub)](https://github.com/google-deepmind/disco_rl/)
-        [Kingma et al, 2014](https://arxiv.org/abs/1412.6980)
+    References -
+        - [Oh et al., 2025 (GitHub)](https://github.com/google-deepmind/disco_rl/)
+        - [Kingma et al, 2014](https://arxiv.org/abs/1412.6980)
 
-    Parameters:
-        b1 (float): decay rate for the exponentially weighted
-            average of grads. Default is `0.9`
-        b2 (float): decay rate for the exponentially weighted
-            average of squared grads. Default is `0.999`
-        eps (float): term added to the denominator to improve
-            numerical stability. Default is `1e-8`
+    Parameters
+    ----------
+    b1 : float (optional)
+        Decay rate for the exponentially weighted average of grads.
+        Default is `0.9`
+    b2 : float (optional)
+        Decay rate for the exponentially weighted average of squared grads.
+        Default is `0.999`
+    eps : float (optional)
+        Term added to the denominator to improve numerical stability.
+        Default is `1e-8`
 
-    Returns:
-        transform (optax.GradientTransformation): returns a new object
-        with an `init_fn` and `update_fn`
+    Returns
+    -------
+    transform : optax.GradientTransformation
+        Returns a new object with an `init_fn` and `update_fn`
     """
 
     def init_fn(params):

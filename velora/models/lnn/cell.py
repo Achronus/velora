@@ -39,15 +39,21 @@ class NCPLiquidCell(nnx.Module):
         + \\left[ 1 - \\sigma(-[\\;f(x, I, θ_f)\\;]\\;t) \\right] \\; h(x, I, θ_h)
     $$
 
-    Parameters:
-        in_features (int): number of input nodes.
-        n_hidden (int): number of hidden nodes.
-        mask (jax.Array): a matrix of sparse connections
-            usually containing a combination of `[-1, 1, 0]` values.
-        rngs (flax.nnx.Rngs, optional): random number generator key.
-            Must have a `params=[value]` attribute
-        init_type (flax.nnx.nn.initializers, optional): initializer function for the
-            weight matrix. Default is `lecun_uniform()`
+    Parameters
+    ----------
+    in_features : int
+        Number of input nodes
+    n_hidden : int
+        Number of hidden nodes
+    mask : jax.Array
+        A matrix of sparse connections usually containing a combination
+        of `[-1, 1, 0]` values
+    rngs : flax.nnx.Rngs (optional)
+        Random number generator key.
+        Must have a `params=[value]` attribute
+    init_type : flax.nnx.nn.initializers (optional)
+        Initializer function for the weight matrix.
+        Default is `lecun_uniform()`
     """
 
     def __init__(
@@ -80,14 +86,18 @@ class NCPLiquidCell(nnx.Module):
 
     def _make_layer(self) -> SparseLinear:
         """
-        Helper method. Creates a new `SparseLinear` layer with the following values:
+        Helper method that creates a new `SparseLinear` layer.
 
-        - `in_features` - `self.n_hidden + self.in_features`.
-        - `out_features` - `self.n_hidden`.
-        - `mask` - `self.sparsity_mask`.
+        The layer is configured with the following values:
 
-        Returns:
-            layer (SparseLinear): a `SparseLinear` layer.
+        - `in_features` - `self.n_hidden + self.in_features`
+        - `out_features` - `self.n_hidden`
+        - `mask` - `self.sparsity_mask`
+
+        Returns
+        -------
+        layer : SparseLinear
+            A `SparseLinear` layer
         """
         return SparseLinear(
             self.head_size,
@@ -99,22 +109,28 @@ class NCPLiquidCell(nnx.Module):
 
     def _prep_mask(self, mask: chex.Array) -> chex.Array:
         """
-        Utility method. Preprocesses mask to match layer size (`head_size`),
-        adding the hidden-to-hidden recurrent connections for continuous-time
+        Utility method that preprocesses mask to match layer size.
+
+        Adds hidden-to-hidden recurrent connections for continuous-time
         dynamics.
 
-        !!! note "Performs two operations"
+        Note -
+            Performs two operations:
 
             1. Adds a padded matrix of 1s to end of mask in shape
-                `(n_hidden, n_hidden)` for dense recurrent connections
+               `(n_hidden, n_hidden)` for dense recurrent connections
             2. Gets the absolute values of the mask to maintain weight stability,
-                converting `-1` to `1`
+               converting `-1` to `1`
 
-        Parameters:
-            mask (jax.Array): weight sparsity mask.
+        Parameters
+        ----------
+        mask : jax.Array
+            Weight sparsity mask
 
-        Returns:
-            mask (jax.Array): an updated mask.
+        Returns
+        -------
+        mask : jax.Array
+            An updated mask
         """
         extra_nodes = jnp.ones((self.n_hidden, self.n_hidden))
         mask = jnp.concat([mask, extra_nodes])
@@ -128,16 +144,23 @@ class NCPLiquidCell(nnx.Module):
         ts: chex.Array,
     ) -> chex.Array:
         """
-        Helper method. Computes the new hidden state.
+        Helper method that computes the new hidden state.
 
-        Parameters:
-            x (jax.Array): input values.
-            g_out (jax.Array): g_head output.
-            h_out (jax.Array): h_head output.
-            ts (jax.Array): time elapsed since previous timestep.
+        Parameters
+        ----------
+        x : jax.Array
+            Input values
+        g_out : jax.Array
+            g_head output
+        h_out : jax.Array
+            h_head output
+        ts : jax.Array
+            Time elapsed since previous timestep
 
-        Returns:
-            hidden (jax.Array): a new hidden state
+        Returns
+        -------
+        hidden : jax.Array
+            A new hidden state
         """
         g_head = self.tanh(g_out)  # g(x, I, θ_g)
         h_head = self.tanh(h_out)  # h(x, I, θ_h)
@@ -159,15 +182,22 @@ class NCPLiquidCell(nnx.Module):
         Uses `timespans` to control the temporal gating mechanism for
         continuous-time dynamics between hidden states.
 
-        Parameters:
-            x (jax.Array): input values.
-            hidden (jax.Array): current hidden state.
-            timespans (jax.Array): time elapsed since previous timestep.
-                Shape should be `(T,)`
+        Parameters
+        ----------
+        x : jax.Array
+            Input values
+        hidden : jax.Array
+            Current hidden state
+        timespans : jax.Array
+            Time elapsed since previous timestep.
+            Shape should be `(T,)`
 
-        Returns:
-            y_pred (jax.Array): the cell prediction.
-            h_state (jax.Array): the hidden state.
+        Returns
+        -------
+        y_pred : jax.Array
+            The cell prediction
+        h_state : jax.Array
+            The hidden state
         """
         x = jnp.concat([x, hidden], axis=1)
 

@@ -29,11 +29,12 @@ from velora.utils.nn import active_parameters, total_parameters
 
 class LNN(nnx.Module):
     """
-    A CfC Liquid Neural Circuit Policy (NCP) Network with three layers:
+    A CfC Liquid Neural Circuit Policy (NCP) Network with three layers.
 
-    1. Inter (input) - a `NCPLiquidCell` layer
-    2. Command (hidden) - a `NCPLiquidCell` layer
-    3. Motor (output) - a `NCPLiquidCell` layer
+    Layers -
+        1. Inter (input) - a `NCPLiquidCell` layer
+        2. Command (hidden) - a `NCPLiquidCell` layer
+        3. Motor (output) - a `NCPLiquidCell` layer
 
     ??? note "Decision nodes"
 
@@ -44,26 +45,33 @@ class LNN(nnx.Module):
         inter_neurons = n_neurons - command_neurons
         ```
 
-    Combines a Liquid Time-Constant (LTC) cell with Ordinary Neural Circuits (ONCs). Paper references:
+    Combines a Liquid Time-Constant (LTC) cell with Ordinary Neural Circuits (ONCs).
 
-    - [Closed-form Continuous-time Neural Models](https://arxiv.org/abs/2106.13898)
-    - [Reinforcement Learning with Ordinary Neural Circuits](https://proceedings.mlr.press/v119/hasani20a.html)
+    References -
+        - [Closed-form Continuous-time Neural Models](https://arxiv.org/abs/2106.13898)
+        - [Reinforcement Learning with Ordinary Neural Circuits](https://proceedings.mlr.press/v119/hasani20a.html)
 
-    Parameters:
-        in_features (int): number of inputs (sensory nodes)
-        n_neurons (int): number of decision nodes (inter and command nodes)
-        out_features (int): number of out features (motor nodes)
-        seed (int, optional): random number generator seed. Default is `28`
-        sparsity_level (float, optional): controls the connection sparsity
-            between neurons. Default is `0.5`.
+    Parameters
+    ----------
+    in_features : int
+        Number of inputs (sensory nodes)
+    n_neurons : int
+        Number of decision nodes (inter and command nodes)
+    out_features : int
+        Number of out features (motor nodes)
+    seed : int (optional)
+        Random number generator seed. Default is `28`
+    sparsity_level : float (optional)
+        Controls the connection sparsity between neurons.
+        Default is `0.5`.
+        Must be a value between `[0.1, 0.9]`:
 
-            Must be a value between `[0.1, 0.9]` -
+        - Where `0.1` neurons are very dense
+        - Where `0.9` neurons are very sparse
 
-            - Where `0.1` neurons are very dense.
-            - Where `0.9` neurons are very sparse.
-
-        init_type (flax.nnx.nn.initializers, optional): initializer function for the
-            weight matrix. Default is `lecun_uniform()`
+    init_type : flax.nnx.nn.initializers (optional)
+        Initializer function for the weight matrix.
+        Default is `lecun_uniform()`
     """
 
     def __init__(
@@ -129,8 +137,10 @@ class LNN(nnx.Module):
         """
         Gets the network's total parameter count.
 
-        Returns:
-            count (int): the total parameter count.
+        Returns
+        -------
+        count : int
+            The total parameter count
         """
         return self._total_params
 
@@ -139,8 +149,10 @@ class LNN(nnx.Module):
         """
         Gets the network's active parameter count.
 
-        Returns:
-            count (int): the active parameter count.
+        Returns
+        -------
+        count : int
+            The active parameter count
         """
         return self._active_params
 
@@ -148,14 +160,21 @@ class LNN(nnx.Module):
         self, h: chex.Array
     ) -> Tuple[chex.Array, chex.Array, chex.Array]:
         """
-        Helper method. Splits the NCPs hidden state into layer-specific states.
+        Helper method that splits the NCPs hidden state into layer-specific states.
 
-        Parameters:
-            h (jax.Array): the network hidden state
+        Parameters
+        ----------
+        h : jax.Array
+            The network hidden state
 
-        Returns:
-            h_split (Tuple[chex.Array, chex.Array, chex.Array]): hidden state split
-            into layers `(inter, command, motor)`
+        Returns
+        -------
+        inter_h : chex.Array
+            Inter layer hidden state
+        command_h : chex.Array
+            Command layer hidden state
+        motor_h : chex.Array
+            Motor layer hidden state
         """
         split_indices = jnp.cumsum(
             jnp.array([self.wiring.inter.n_hidden, self.wiring.command.n_hidden])
@@ -173,26 +192,33 @@ class LNN(nnx.Module):
         """
         Performs a forward pass through the network.
 
-        Parameters:
-            x (jax.Array): an input array of shape: `(F, T)` or `(B, F, T)`.
+        Parameters
+        ----------
+        x : jax.Array
+            An input array of shape: `(F, T)` or `(B, F, T)`
 
-                - `batch_size (B)` the number of samples per timestep.
-                - `features (F)` the features at each timestep
-                - `seq_length (T)` the number of sequences (e.g., trajectories,
-                channels).
-            h_state (jax.Array, optional): initial hidden state of the RNN with
-                shape: `(B, H)`.
+            - `batch_size (B)` the number of samples per timestep
+            - `features (F)` the features at each timestep
+            - `seq_length (T)` the number of sequences (e.g., trajectories, channels)
 
-                - `batch_size (B)` the number of samples per timestep.
-                - `n_units (H)` the total number of hidden neurons
-                    (`n_neurons + out_features`).
+        h_state : jax.Array (optional)
+            Initial hidden state of the RNN with shape: `(B, H)`
 
-            timespans (jax.Array, optional): time elapsed since previous timestep.
-                For fixed intervals set to `None`. For varying timesteps shape
-                should be `(T,)`
-        Returns:
-            y_pred (jax.Array): the network prediction. Shape `(B, F, T)`.
-            h_state (jax.Array): the final hidden state. Shape `(B, H)`.
+            - `batch_size (B)` the number of samples per timestep
+            - `n_units (H)` the total number of hidden neurons
+              (`n_neurons + out_features`)
+
+        timespans : jax.Array (optional)
+            Time elapsed since previous timestep.
+            For fixed intervals set to `None`. For varying timesteps shape
+            should be `(T,)`
+
+        Returns
+        -------
+        y_pred : jax.Array
+            The network prediction. Shape `(B, F, T)`
+        h_state : jax.Array
+            The final hidden state. Shape `(B, H)`
         """
         if x.ndim not in (2, 3):
             raise ValueError(f"Expected 2D or 3D input, got shape {jnp.shape(x)}")

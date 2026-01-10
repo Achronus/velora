@@ -32,20 +32,25 @@ class MixedBuffer:
     Lazily initializes agent output arrays on first `add()` call, inferring
     shapes directly from the provided `AgentOutput`.
 
-    Parameters:
-        key (jax.random.PRNGKey): random number generator key
-        seq_len (int, optional): number of timesteps per trajectory
-            (rollout size; `T`). Default is `29`
-        capacity (int, optional): maximum number of trajectories to store (`N`).
-            Default is `1024`
-        split_ratio (float, optional): fraction of samples from replay
-            vs rollouts. Default is `0.9` (90% replay, 10% rollout)
+    Parameters
+    ----------
+    key : jax.random.PRNGKey
+        Random number generator key
+    seq_len : int (optional)
+        Number of timesteps per trajectory (rollout size; `T`).
+        Default is `29`
+    capacity : int (optional)
+        Maximum number of trajectories to store (`N`).
+        Default is `1024`
+    split_ratio : float (optional)
+        Fraction of samples from replay vs rollouts.
+        Default is `0.9` (90% replay, 10% rollout)
     """
 
     def __init__(
         self,
-        *,
         key: chex.PRNGKey,
+        *,
         seq_len: int = 29,
         capacity: int = 1024,
         split_ratio: float = 0.9,
@@ -82,15 +87,28 @@ class MixedBuffer:
         """
         Checks if buffer arrays are initialized.
 
-        Returns:
-            status (bool): True if initialized. Otherwise, False.
+        Returns
+        -------
+        status : bool
+            True if initialized. Otherwise, False
         """
         return jnp.shape(self.pi) != (1,)
 
     def _set_array(self, dims: Tuple[int, ...]) -> jax.Array:
         """
-        Helper method. Initializes a buffer array given a set of dimensions
-        with shape: `(N, T, *dims)`.
+        Helper method that initializes a buffer array given a set of dimensions.
+
+        Creates an array with shape: `(N, T, *dims)`.
+
+        Parameters
+        ----------
+        dims : Tuple[int, ...]
+            Trailing dimensions for the array
+
+        Returns
+        -------
+        array : jax.Array
+            A zero-initialized array
         """
         N = self.capacity
         T = self.seq_len
@@ -99,11 +117,14 @@ class MixedBuffer:
 
     def _lazy_init(self, preds: AgentOutput) -> None:
         """
-        Helper method. Initializes agent output arrays by inferring shapes
-        from first sample.
+        Helper method that initializes agent output arrays.
 
-        Parameters:
-            preds (AgentOutput): first agent predictions from the policy network
+        Infers shapes from first sample.
+
+        Parameters
+        ----------
+        preds : AgentOutput
+            First agent predictions from the policy network
         """
 
         def _trailing_dims(x: chex.Array) -> Tuple[int, ...]:
@@ -145,26 +166,31 @@ class MixedBuffer:
         On the first call, initializes agent output arrays by inferring shapes
         from `preds`.
 
-        Parameters:
-            actions (jax.Array): actions `(B, T)`
+        Parameters
+        ----------
+        actions : jax.Array
+            Actions taken in the environment `(B, T)`
 
-                - `batch_size (B)` the number of samples per timestep.
-                - `seq_length (T)` the number of timesteps in the trajectory.
+            - `batch_size (B)` the number of samples per timestep
+            - `seq_length (T)` the number of timesteps in the trajectory
 
-            rewards (jax.Array): rewards `(B, T)`
+        rewards : jax.Array
+            Rewards generated from the environment `(B, T)`
 
-                - `batch_size (B)` the number of samples per timestep.
-                - `seq_length (T)` the number of timesteps in the trajectory.
+            - `batch_size (B)` the number of samples per timestep
+            - `seq_length (T)` the number of timesteps in the trajectory
 
-            discounts (jax.Array): environment discounts `(B, T)`
+        discounts : jax.Array
+            Environment discounts `(B, T)`
 
-                - `batch_size (B)` the number of samples per timestep.
-                - `seq_length (T)` the number of timesteps in the trajectory.
+            - `batch_size (B)` the number of samples per timestep
+            - `seq_length (T)` the number of timesteps in the trajectory
+            - Binary values: `1.0` = episode continues, `0.0` = episode ended
 
-                Binary values: `1.0` = episode continues, `0.0` = episode ended
-
-            preds (AgentOutput): agent network outputs for the trajectory
-            target_preds (AgentOutput): agent target network outputs for the trajectory
+        preds : AgentOutput
+            Agent network outputs for the trajectory
+        target_preds : AgentOutput
+            Agent target network outputs for the trajectory
         """
         if not self.is_initialized:
             self._lazy_init(preds)
@@ -196,13 +222,17 @@ class MixedBuffer:
 
     def sample(self, batch_size: int) -> BufferSamples:
         """
-        Sample a mixed bath of reply and rollout trajectories.
+        Sample a mixed batch of replay and rollout trajectories.
 
-        Parameters:
-            batch_size (int): total number of trajectories to sample
+        Parameters
+        ----------
+        batch_size : int
+            Total number of trajectories to sample
 
-        Returns:
-            samples (BufferSamples): sampled trajectories
+        Returns
+        -------
+        samples : BufferSamples
+            Sampled trajectories
         """
         if not self.is_initialized:
             raise RuntimeError(
@@ -254,18 +284,23 @@ class MixedBuffer:
         """
         Check if buffer has enough trajectories to sample.
 
-        Parameters:
-            min_size (int): minimum required trajectories
+        Parameters
+        ----------
+        min_size : int
+            Minimum required trajectories
 
-        Returns:
-            status (bool): True if buffer has at least `min_size` trajectories
+        Returns
+        -------
+        status : bool
+            True if buffer has at least `min_size` trajectories
         """
         return self.is_initialized and self.size >= min_size
 
     def clear(self) -> None:
         """
-        Clear the buffer by resetting the pointer and size
-        (keeps allocated memory).
+        Clear the buffer by resetting the pointer and size.
+
+        Note: This keeps allocated memory.
         """
         self.ptr = 0
         self.size = 0

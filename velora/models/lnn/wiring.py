@@ -25,12 +25,17 @@ from flax import struct
 class NCPMaskWithCounts:
     """
     A storage container for a single Neural Circuit Policy (NCP) layer.
-    Includes it's sparsity mask, neuron counts and synapse connection count.
 
-    Parameters:
-        mask (jax.Array): sparse weight mask for NCP layer
-        n_hidden (int): number of NCP neuron nodes
-        n_connections (int): number of synapse connections (weights)
+    Includes its sparsity mask, neuron counts and synapse connection count.
+
+    Parameters
+    ----------
+    mask : jax.Array
+        Sparse weight mask for NCP layer
+    n_hidden : int
+        Number of NCP neuron nodes
+    n_connections : int
+        Number of synapse connections (weights)
     """
 
     mask: chex.Array
@@ -43,10 +48,14 @@ class NCPWiring:
     """
     A storage container for a Neural Circuit Policy (NCP) wiring.
 
-    Parameters:
-        inter (NCPMaskWithCounts): inter layer details
-        command (NCPMaskWithCounts): command layer details
-        motor (NCPMaskWithCounts): motor layer details
+    Parameters
+    ----------
+    inter : NCPMaskWithCounts
+        Inter layer details
+    command : NCPMaskWithCounts
+        Command layer details
+    motor : NCPMaskWithCounts
+        Motor layer details
     """
 
     inter: NCPMaskWithCounts
@@ -71,10 +80,14 @@ class ACMHeadConfig(HeadConfig):
     """
     Head configuration for an Action-Conditional Model (ACM) network.
 
-    Parameters:
-        z (NCPMaskWithCounts): action-conditioned prediction head details
-        aux_pi (NCPMaskWithCounts): auxiliary policy prediction head details
-        q (NCPMaskWithCounts): action-value prediction head details
+    Parameters
+    ----------
+    z : NCPMaskWithCounts
+        Action-conditioned prediction head details
+    aux_pi : NCPMaskWithCounts
+        Auxiliary policy prediction head details
+    q : NCPMaskWithCounts
+        Action-value prediction head details
     """
 
     z: NCPMaskWithCounts
@@ -90,9 +103,12 @@ class OCMHeadConfig(HeadConfig):
     """
     Head configuration for an Observation-Conditional Model (OCM) network.
 
-    Parameters:
-        y (NCPMaskWithCounts): observation-conditioned prediction head details
-        pi (NCPMaskWithCounts): policy head details
+    Parameters
+    ----------
+    y : NCPMaskWithCounts
+        Observation-conditioned prediction head details
+    pi : NCPMaskWithCounts
+        Policy head details
     """
 
     y: NCPMaskWithCounts
@@ -107,10 +123,14 @@ class NCPWiringMultiHead:
     """
     A storage container for a Neural Circuit Policy (NCP) wiring with multiple output heads.
 
-    Parameters:
-        inter (NCPMaskWithCounts): inter layer details
-        command (NCPMaskWithCounts): command layer details
-        motor (HeadConfig): motor layer details
+    Parameters
+    ----------
+    inter : NCPMaskWithCounts
+        Inter layer details
+    command : NCPMaskWithCounts
+        Command layer details
+    motor : HeadConfig
+        Motor layer details
     """
 
     inter: NCPMaskWithCounts
@@ -127,28 +147,38 @@ def build_ncp_wiring(
     sparsity_level: float = 0.5,
 ) -> NCPWiring:
     """
-    Creates sparse wiring masks with neuron counts for
-    a Neural Circuit Policy (NCP) Network.
+    Creates sparse wiring masks with neuron counts for a Neural Circuit Policy (NCP) Network.
 
-    !!! note
-
+    Note -
         NCPs have three layers:
 
         1. Inter (input)
         2. Command (hidden)
         3. Motor (output)
 
-    Parameters:
-        in_features (int): number of inputs (sensory nodes)
-        n_neurons (int): number of decision nodes (inter + command nodes)
-        out_features (int): number of outputs (motor nodes)
-        seed (int, optional): random number generator seed
-        sparsity_level (float, optional): controls the connection sparsity between neurons.
+    Parameters
+    ----------
+    in_features : int
+        Number of inputs (sensory nodes)
+    n_neurons : int
+        Number of decision nodes (inter + command nodes)
+    out_features : int
+        Number of outputs (motor nodes)
+    seed : int (optional)
+        Random number generator seed. Default is `28`
+    sparsity_level : float (optional)
+        Controls the connection sparsity between neurons.
+        Must be a value between `[0.1, 0.9]`:
 
-            Must be a value between `[0.1, 0.9]` -
+        - When `0.1` neurons are very dense
+        - When `0.9` neurons are very sparse
 
-            - When `0.1` neurons are very dense.
-            - When `0.9` neurons are very sparse.
+        Default is `0.5`
+
+    Returns
+    -------
+    wiring : NCPWiring
+        Wiring with neuron counts and sparse masks
     """
     if sparsity_level < 0.1 or sparsity_level > 0.9:
         raise ValueError(f"'{sparsity_level=}' must be between '[0.1, 0.9]'.")
@@ -188,25 +218,34 @@ def build_acm_wiring(
     """
     Creates NCP wiring for an Action-Conditional Model (ACM).
 
-    Parameters:
-        in_features (int): number of inputs (sensory nodes)
-        n_neurons (int): number of decision nodes (inter + command nodes)
-        head_sizes (ACMHeadConfig): an object containing head details and their
-            counts (motor nodes)
-        z_dim (int): dimension of action-conditioned prediction head
-        num_actions (int): number of discrete actions
-        q_dim (int, optional): dimension of action-value prediction head.
-            Default is `1` (scalar)
-        seed (int, optional): random number generator seed
-        sparsity_level (float, optional): controls the connection sparsity between neurons.
+    Parameters
+    ----------
+    in_features : int
+        Number of inputs (sensory nodes)
+    n_neurons : int
+        Number of decision nodes (inter + command nodes)
+    z_dim : int
+        Dimension of action-conditioned prediction head
+    num_actions : int
+        Number of discrete actions
+    q_dim : int (optional)
+        Dimension of action-value prediction head.
+        Default is `1` (scalar)
+    seed : int (optional)
+        Random number generator seed. Default is `28`
+    sparsity_level : float (optional)
+        Controls the connection sparsity between neurons.
+        Must be a value between `[0.1, 0.9]`:
 
-            Must be a value between `[0.1, 0.9]` -
+        - Where `0.1` neurons are very dense
+        - Where `0.9` neurons are very sparse
 
-            - Where `0.1` neurons are very dense.
-            - Where `0.9` neurons are very sparse.
+        Default is `0.5`
 
-    Returns:
-        wiring (NCPWiringMultiHead): wiring with `ACMHeadConfig` motor
+    Returns
+    -------
+    wiring : NCPWiringMultiHead
+        Wiring with `ACMHeadConfig` motor
     """
     if sparsity_level < 0.1 or sparsity_level > 0.9:
         raise ValueError(f"'{sparsity_level=}' must be between '[0.1, 0.9]'.")
@@ -248,23 +287,31 @@ def build_ocm_wiring(
     """
     Creates NCP wiring for an Observation-Conditional Model (OCM).
 
-    Parameters:
-        in_features (int): number of inputs (sensory nodes)
-        n_neurons (int): number of decision nodes (inter + command nodes)
-        head_sizes (ACMHeadConfig): an object containing head details and their
-            counts (motor nodes)
-        y_dim (int): dimension of observation-conditioned prediction head
-        num_actions (int): number of discrete actions
-        seed (int, optional): random number generator seed
-        sparsity_level (float, optional): controls the connection sparsity between neurons.
+    Parameters
+    ----------
+    in_features : int
+        Number of inputs (sensory nodes)
+    n_neurons : int
+        Number of decision nodes (inter + command nodes)
+    y_dim : int
+        Dimension of observation-conditioned prediction head
+    num_actions : int
+        Number of discrete actions
+    seed : int (optional)
+        Random number generator seed. Default is `28`
+    sparsity_level : float (optional)
+        Controls the connection sparsity between neurons.
+        Must be a value between `[0.1, 0.9]`:
 
-            Must be a value between `[0.1, 0.9]` -
+        - Where `0.1` neurons are very dense
+        - Where `0.9` neurons are very sparse
 
-            - Where `0.1` neurons are very dense.
-            - Where `0.9` neurons are very sparse.
+        Default is `0.5`
 
-    Returns:
-        wiring (NCPWiringMultiHead): wiring with `OCMHeadConfig` motor
+    Returns
+    -------
+    wiring : NCPWiringMultiHead
+        Wiring with `OCMHeadConfig` motor
     """
     if sparsity_level < 0.1 or sparsity_level > 0.9:
         raise ValueError(f"'{sparsity_level=}' must be between '[0.1, 0.9]'.")
@@ -295,16 +342,21 @@ def build_ocm_wiring(
 
 def synapse_count(count: int, density_level: float, *, scale: int = 1) -> int:
     """
-    Utility method. Computes the synapse count for a single NCP layer.
+    Utility method that computes the synapse count for a single NCP layer.
 
-    Parameters:
-        count (int): the number of neurons
-        density_level (float): the density of the layer connections
-            (`1.0 - sparsity_level`)
-        scale (int, optional): a scale factor
+    Parameters
+    ----------
+    count : int
+        The number of neurons
+    density_level : float
+        The density of the layer connections (`1.0 - sparsity_level`)
+    scale : int (optional)
+        A scale factor. Default is `1`
 
-    Returns:
-        count (int): synapse count.
+    Returns
+    -------
+    count : int
+        Synapse count
     """
     return max(int(count * density_level * scale), 1)
 
@@ -313,18 +365,25 @@ def make_mask(shape: Tuple[int, int], count: int, seed: int) -> chex.Array:
     """
     Randomly assigns connections to nodes by populating sparsity mask.
 
-    !!! note "Performs two operations"
+    Note -
+        Performs two operations:
 
-        1. Applies minimum connections (count) to all nodes.
-        2. Ensures all nodes have at least 1 connection.
+        1. Applies minimum connections (count) to all nodes
+        2. Ensures all nodes have at least 1 connection
 
-    Parameters:
-        shape (Tuple[int, int]): mask shape `(n_inputs, n_outputs)`
-        count (int): number of connections per node
-        seed (int): random number generator seed
+    Parameters
+    ----------
+    shape : Tuple[int, int]
+        Mask shape `(n_inputs, n_outputs)`
+    count : int
+        Number of connections per node
+    seed : int
+        Random number generator seed
 
-    Returns:
-        mask (jax.Array): populated sparsity mask
+    Returns
+    -------
+    mask : jax.Array
+        Populated sparsity mask
     """
     rng = np.random.default_rng(seed)
 
@@ -361,16 +420,21 @@ def build_mask_with_counts(
     seed: int,
 ) -> NCPMaskWithCounts:
     """
-    Helper method. Build a single `NCPMaskWithCounts` object.
+    Helper method that builds a single `NCPMaskWithCounts` object.
 
-    Parameters:
-        shape (Tuple[int, int]): mask shape `(n_inputs, n_outputs)`
-        n_connections (int): number of connections per node
-        seed (int): random number generator seed
+    Parameters
+    ----------
+    shape : Tuple[int, int]
+        Mask shape `(n_inputs, n_outputs)`
+    n_connections : int
+        Number of connections per node
+    seed : int
+        Random number generator seed
 
-    Returns:
-        ncp_mask_with_counts (NCPMaskWithCounts): a container with the mask,
-            neuron count and synapse connection count
+    Returns
+    -------
+    ncp_mask_with_counts : NCPMaskWithCounts
+        A container with the mask, neuron count and synapse connection count
     """
     mask = make_mask(shape, n_connections, seed)
     n_hidden = shape[1]

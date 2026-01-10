@@ -25,9 +25,12 @@ class EnvResult:
     """
     Container for environment search results.
 
-    Parameters:
-        name (str): the name of the environment
-        type (str): the environment type, either `discrete` or `continuous`
+    Parameters
+    ----------
+    name : str
+        The name of the environment
+    type : str
+        The environment type, either `discrete` or `continuous`
     """
 
     name: str
@@ -44,12 +47,15 @@ class SearchHelper:
         """
         Determines if an environment has a discrete or continuous action space.
 
-        Parameters:
-            env_name (str): name of the environment
+        Parameters
+        ----------
+        env_name : str
+            Name of the environment
 
-        Returns:
-            env_type (str | None): one of three values -
-
+        Returns
+        -------
+        env_type : str | None
+            One of three values -
             - `discrete` for Discrete action space.
             - `continuous` for Box action space.
             - `None`, otherwise.
@@ -74,8 +80,10 @@ class SearchHelper:
         """
         Builds a list of the latest [Gymnasium](https://gymnasium.farama.org/) environment names.
 
-        Returns:
-            names (List[str]): a list of names for all latest env versions.
+        Returns
+        -------
+        names : List[str]
+            A list of names for all latest env versions
         """
         env_dict: Dict[str, int] = {}
 
@@ -131,12 +139,16 @@ class EnvSearch:
         """
         Find a [Gymnasium](https://gymnasium.farama.org/) environment that contains `query`.
 
-        Parameters:
-            query (str): partial or complete name of an environment
-                (e.g., `Lunar` or `Pendulum`)
+        Parameters
+        ----------
+        query : str
+            Partial or complete name of an environment
+            (e.g., `Lunar` or `Pendulum`)
 
-        Returns:
-            result (List[EnvResult]): a list of environment results matching the query.
+        Returns
+        -------
+        result : List[EnvResult]
+            A list of environment results matching the query
         """
         cls._build_name_cache()
 
@@ -149,8 +161,10 @@ class EnvSearch:
         """
         Get all available discrete [Gymnasium](https://gymnasium.farama.org/) environments.
 
-        Returns:
-            names (List[EnvResult]): a list of available discrete environments.
+        Returns
+        -------
+        names : List[EnvResult]
+            A list of available discrete environments
         """
         cls._build_name_cache()
 
@@ -163,8 +177,10 @@ class EnvSearch:
         """
         Get all available continuous [Gymnasium](https://gymnasium.farama.org/) environments.
 
-        Returns:
-            names (List[EnvResult]): a list of available continuous environments.
+        Returns
+        -------
+        names : List[EnvResult]
+            A list of available continuous environments
         """
         cls._build_name_cache()
 

@@ -38,20 +38,28 @@ class ACM(nnx.Module):
     Uses a Liquid Neural Network (LNN) architecture with 3 output heads:
 
         1. Action-conditioned prediction: z(s, a) - Action-conditioned
-            prediction for control-relevant targets.
+            prediction for control-relevant targets
         2. Auxiliary policy prediction: p(s, a) - Auxiliary policy prediction
-           for representation learning.
-        3. Action-value: q(s, a) - Action-value for value-based bootstrapping.
+           for representation learning
+        3. Action-value: q(s, a) - Action-value for value-based bootstrapping
 
-    Parameters:
-        obs_dim (int): number of observations (sensory nodes)
-        n_neurons (int): number of decision nodes (inter + command nodes)
-        prediction_size (int): size of the action-conditioned prediction vector
-        n_actions (int): number of discrete actions
-        q_dim (int): dimension of action-value prediction head. Uses distributional Q-values
-        key (jax.random.PRNGKey): random number generator key
-        sparsity_level (float, optional): network connection sparsity
-            between neurons. Default is `0.5`.
+    Parameters
+    ----------
+    obs_dim : int
+        Number of observations (sensory nodes)
+    n_neurons : int
+        Number of decision nodes (inter + command nodes)
+    prediction_size : int
+        Size of the action-conditioned prediction vector
+    n_actions : int
+        Number of discrete actions
+    q_dim : int
+        Dimension of action-value prediction head. Uses distributional Q-values
+    key : chex.PRNGKey
+        Random number generator key
+    sparsity_level : float (optional)
+        Network connection sparsity between neurons.
+        Default is `0.5`
     """
 
     def __init__(
@@ -140,8 +148,10 @@ class ACM(nnx.Module):
         """
         Gets the network's total parameter count.
 
-        Returns:
-            count (int): the total parameter count.
+        Returns
+        -------
+        count : int
+            The total parameter count.
         """
         return self._total_params
 
@@ -150,8 +160,10 @@ class ACM(nnx.Module):
         """
         Gets the network's active parameter count.
 
-        Returns:
-            count (int): the active parameter count.
+        Returns
+        -------
+        count : int
+            The active parameter count.
         """
         return self._active_params
 
@@ -161,12 +173,15 @@ class ACM(nnx.Module):
         """
         Helper method. Splits the NCPs hidden state into layer-specific states.
 
-        Parameters:
-            h (jax.Array): the network hidden state
+        Parameters
+        ----------
+        h : chex.Array
+            The network hidden state
 
-        Returns:
-            h_split (Tuple[chex.Array, ...]): hidden state split
-            into layers `(inter, command, z, aux, q)`
+        Returns
+        -------
+        h_split : Tuple[chex.Array, ...]
+            Hidden state split into layers `(inter, command, z, aux, q)`
         """
         split_indices = jnp.cumsum(
             jnp.array(
@@ -186,12 +201,15 @@ class ACM(nnx.Module):
         Helper method. Expands the input observation with one-hot
         encoded actions (A) using an identity matrix for all batches.
 
-        Parameters:
-            state (jax.Array): state embedding with shape `(B, T, F)`
+        Parameters
+        ----------
+        state : chex.Array
+            State embedding with shape `(B, T, F)`
 
-        Returns:
-            state_with_actions (jax.Array): obs with batched one-hot encoded
-            actions in the shape `(B*A, T, F+A)`
+        Returns
+        -------
+        state_with_actions : chex.Array
+            Obs with batched one-hot encoded actions in the shape `(B*A, T, F+A)`
         """
         B, T, F = jnp.shape(state)
 
@@ -245,28 +263,35 @@ class ACM(nnx.Module):
         """
         Performs a forward pass through the network.
 
-        Parameters:
-            state_embedding (jax.Array): embedded state from Encoder
-                `(B, T, F)` or `(B, F)`.
+        Parameters
+        ----------
+        state_embedding : chex.Array
+            Embedded state from Encoder with shape `(B, T, F)` or `(B, F)`
 
-                - `batch_size (B)` the number of samples per timestep.
-                - `seq_length (T)` the number of sequences (e.g., trajectories).
-                - `features (F)` the features at each timestep
-            h_state (jax.Array, optional): initial hidden state `(B, H)`.
+            - `batch_size (B)`: the number of samples per timestep
+            - `seq_length (T)`: the number of sequences (e.g., trajectories)
+            - `features (F)`: the features at each timestep
+        h_state : chex.Array (optional)
+            Initial hidden state with shape `(B, H)`
 
-                - `batch_size (B)` the number of samples per timestep.
-                - `n_hidden (H)` the total number of hidden neurons.
+            - `batch_size (B)`: the number of samples per timestep
+            - `n_hidden (H)`: the total number of hidden neurons
+        timespans : chex.Array (optional)
+            Time elapsed since previous timestep. For fixed intervals set to `None`.
+            For varying timesteps shape must be `(T,)`
 
-            timespans (jax.Array, optional): time elapsed since previous
-                timestep. For fixed intervals set to `None`.
-                For varying timesteps shape must be `(T,)`
+            - `seq_length (T)`: the number of sequences (e.g., trajectories)
 
-                - `seq_length (T)` the number of sequences (e.g., trajectories).
-        Returns:
-            z (jax.Array): action-conditioned prediction `(B, T, A, F)`.
-            aux_pi (jax.Array): auxiliary policy prediction `(B, T, A, F)`.
-            q (jax.Array): action-value prediction `(B, T, A, F)`.
-            h_state (jax.Array): final hidden state `(B*A, H)`.
+        Returns
+        -------
+        z : chex.Array
+            Action-conditioned prediction with shape `(B, T, A, F)`
+        aux_pi : chex.Array
+            Auxiliary policy prediction with shape `(B, T, A, F)`
+        q : chex.Array
+            Action-value prediction with shape `(B, T, A, F)`
+        h_state : chex.Array
+            Final hidden state with shape `(B*A, H)`
         """
         if state_embedding.ndim == 2:
             state_embedding = jnp.expand_dims(state_embedding, axis=1)  # (B, 1, F)
@@ -335,14 +360,21 @@ class OCM(nnx.Module):
         2. Observation-conditioned prediction: y(s) - state-level
            features with discovered semantics.
 
-    Parameters:
-        obs_dim (int): number of observations (sensory nodes)
-        n_neurons (int): number of decision nodes (inter + command nodes)
-        prediction_size (int): size of the observation-conditioned prediction vector
-        n_actions (int): number of discrete actions
-        key (jax.random.PRNGKey): random number generator key
-        sparsity_level (float, optional): network connection sparsity
-            between neurons. Default is `0.5`.
+    Parameters
+    ----------
+    obs_dim : int
+        Number of observations (sensory nodes)
+    n_neurons : int
+        Number of decision nodes (inter + command nodes)
+    prediction_size : int
+        Size of the observation-conditioned prediction vector
+    n_actions : int
+        Number of discrete actions
+    key : chex.PRNGKey
+        Random number generator key
+    sparsity_level : float (optional)
+        Network connection sparsity between neurons.
+        Default is `0.5`
     """
 
     def __init__(
@@ -423,8 +455,10 @@ class OCM(nnx.Module):
         """
         Gets the network's total parameter count.
 
-        Returns:
-            count (int): the total parameter count.
+        Returns
+        -------
+        count : int
+            The total parameter count.
         """
         return self._total_params
 
@@ -433,8 +467,10 @@ class OCM(nnx.Module):
         """
         Gets the network's active parameter count.
 
-        Returns:
-            count (int): the active parameter count.
+        Returns
+        -------
+        count : int
+            The active parameter count.
         """
         return self._active_params
 
@@ -444,12 +480,21 @@ class OCM(nnx.Module):
         """
         Helper method. Splits the NCPs hidden state into layer-specific states.
 
-        Parameters:
-            h (jax.Array): the network hidden state
+        Parameters
+        ----------
+        h : chex.Array
+            The network hidden state
 
-        Returns:
-            h_split (Tuple[chex.Array, ...]): hidden state split
-            into layers `(inter, command, pi, y, )`
+        Returns
+        -------
+        inter_h : chex.Array
+            Inter layer hidden state
+        command_h : chex.Array
+            Command layer hidden state
+        pi_h : chex.Array
+            Pi head hidden state
+        y_h : Chex.Array
+            Y head hidden state
         """
         split_indices = jnp.cumsum(
             jnp.array(
@@ -473,28 +518,35 @@ class OCM(nnx.Module):
         """
         Forward pass through the network.
 
-        Parameters:
-            obs (jax.Array): input observations `(B, T, F)` or `(B, F)`.
+        Parameters
+        ----------
+        obs : chex.Array
+            Input observations with shape `(B, T, F)` or `(B, F)`
 
-                - `batch_size (B)` the number of samples per timestep.
-                - `seq_length (T)` the number of sequences (e.g., trajectories).
-                - `features (F)` the features at each timestep
-            h_state (jax.Array, optional): initial hidden state `(B, H)`.
+            - `batch_size (B)`: the number of samples per timestep
+            - `seq_length (T)`: the number of sequences (e.g., trajectories)
+            - `features (F)`: the features at each timestep
+        h_state : chex.Array (optional)
+            Initial hidden state with shape `(B, H)`
 
-                - `batch_size (B)` the number of samples per timestep.
-                - `n_hidden (H)` the total number of hidden neurons.
+            - `batch_size (B)`: the number of samples per timestep
+            - `n_hidden (H)`: the total number of hidden neurons
+        timespans : chex.Array (optional)
+            Time elapsed since previous timestep. For fixed intervals set to `None`.
+            For varying timesteps shape must be `(T,)`
 
-            timespans (jax.Array, optional): time elapsed since previous
-                timestep. For fixed intervals set to `None`.
-                For varying timesteps shape must be `(T,)`
+            - `seq_length (T)`: the number of sequences (e.g., trajectories)
 
-                - `seq_length (T)` the number of sequences (e.g., trajectories).
-        Returns:
-            pi (jax.Array): policy prediction `(B, T, F)`.
-            y (jax.Array): observation-conditioned prediction `(B, T, F)`.
-            embedding (jax.Array): command layer output `(B, T, F)`.
-                Provided to ACM as input.
-            h_state (jax.Array): final hidden state `(B, H)`.
+        Returns
+        -------
+        pi : chex.Array
+            Policy prediction with shape `(B, T, F)`
+        y : chex.Array
+            Observation-conditioned prediction with shape `(B, T, F)`
+        embedding : chex.Array
+            Command layer output with shape `(B, T, F)`. Provided to ACM as input
+        h_state : chex.Array
+            Final hidden state with shape `(B, H)`
         """
         if obs.ndim == 2:
             obs = jnp.expand_dims(obs, axis=1)  # (B, T, F)

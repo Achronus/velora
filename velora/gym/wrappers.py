@@ -22,11 +22,14 @@ import numpy as np
 
 class JaxConversion(gym.vector.VectorWrapper):
     """
-    Gymnasium Vector Environment wrapper that converts outputs Jax arrays.
+    Gymnasium Vector Environment wrapper that converts outputs to Jax arrays.
+
     Assumes vectorized environment uses the default standard (NumPy).
 
-    Parameters:
-        env (gymnasium.vector.VectorEnv): vectorized environment to convert
+    Parameters
+    ----------
+    env : gymnasium.vector.VectorEnv
+        Vectorized environment to convert
     """
 
     def __init__(self, env: gym.vector.VectorEnv) -> None:
@@ -51,13 +54,19 @@ class JaxConversion(gym.vector.VectorWrapper):
         Reset all parallel environments and return a batch of initial
         observations and info.
 
-        Parameters:
-            seed (int, optional): the environment reset seed
-            options (Dict[str, Any], optional): options to return
+        Parameters
+        ----------
+        seed : int (optional)
+            The environment reset seed
+        options : Dict[str, Any] (optional)
+            Options to return
 
-        Returns:
-            obs (chex.Array): a batch of starting observations
-            info (Dict[str, Any]): environment metadata
+        Returns
+        -------
+        obs : chex.Array
+            A batch of starting observations
+        info : Dict[str, Any]
+            Environment metadata
         """
         obs, info = self.env.reset(seed=seed, options=options)  # type: ignore
         return self._to_jax(obs), info
@@ -73,19 +82,19 @@ class JaxConversion(gym.vector.VectorWrapper):
 
         Parameters
         ----------
-            action : jax.Array
-                Batch of actions with the `action_space` shape
+        action : jax.Array
+            Batch of actions with the `action_space` shape
 
         Returns
         -------
-            next_obs : jax.Array
-                Batch of next observations
-            reward : jax.Array
-                Batch of rewards obtained
-            done : jax.Array
-                Batch of episodes terminations/truncations
-            info : Dict[str, Any]
-                Environment metadata
+        next_obs : jax.Array
+            Batch of next observations
+        reward : jax.Array
+            Batch of rewards obtained
+        done : jax.Array
+            Batch of episodes terminations/truncations
+        info : Dict[str, Any]
+            Environment metadata
         """
         obs, reward, terminated, truncated, info = self.env.step(self._to_numpy(action))
 
@@ -103,7 +112,7 @@ class FrameStackReshape(gym.ObservationWrapper):
     This wrapper moves the frame stack to the channel dimension, producing
     `(B, H, W, FS)` which is the standard format for image observations.
 
-    Note:
+    Note -
         Requires grayscale input with shape `(B, FS, H, W, 1)`.
         The trailing channel dimension is squeezed out and replaced by
         the frame stack dimension.

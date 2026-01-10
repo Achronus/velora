@@ -28,10 +28,14 @@ class CategoricalBins:
     using 2-hot encoding for differentiable, soft bin assignments via the
     `rlax` library.
 
-    Parameters:
-        support (jax.Array): array of bin center values `(num_bins,)`
-        min_value (float): minimum representable value
-        max_value (float): maximum representable value
+    Parameters
+    ----------
+    support : jax.Array
+        Array of bin center values `(num_bins,)`
+    min_value : float
+        Minimum representable value
+    max_value : float
+        Maximum representable value
     """
 
     support: chex.Array
@@ -52,11 +56,15 @@ class CategoricalBins:
         """
         Convert scalar values to categorical distribution using 2-hot encoding.
 
-        Parameters:
-            scalar (jax.Array): scalar values to convert
+        Parameters
+        ----------
+        scalar : jax.Array
+            Scalar values to convert
 
-        Returns:
-            probs (jax.Array): categorical distribution over bins
+        Returns
+        -------
+        probs : jax.Array
+            Categorical distribution over bins
         """
         return rlax.transform_to_2hot(
             scalar,
@@ -69,11 +77,15 @@ class CategoricalBins:
         """
         Convert categorical distribution to scalar (expected value).
 
-        Parameters:
-            probs (jax.Array): probability distribution over bins
+        Parameters
+        ----------
+        probs : jax.Array
+            Probability distribution over bins
 
-        Returns:
-            scalar (jax.Array): expected scalar values
+        Returns
+        -------
+        scalar : jax.Array
+            Expected scalar values
         """
         return rlax.transform_from_2hot(
             probs,
@@ -86,10 +98,14 @@ class CategoricalBins:
         """
         Convert logits to scalar via softmax then expected value.
 
-        Parameters:
-            logits (jax.Array): unnormalized log probabilities
+        Parameters
+        ----------
+        logits : jax.Array
+            Unnormalized log probabilities
 
-        Returns:
-            scalar (jax.Array): expected scalar values
+        Returns
+        -------
+        scalar : jax.Array
+            Expected scalar values
         """
         return self.to_scalar(nnx.softmax(logits, axis=-1))

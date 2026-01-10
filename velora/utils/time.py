@@ -23,10 +23,14 @@ class ElapsedTime:
     """
     A storage container for time tracking.
 
-    Parameters:
-        hrs (float) hours taken
-        mins (float) minutes taken
-        secs (float) seconds taken
+    Parameters
+    ----------
+    hrs : float
+        Hours taken
+    mins : float
+        Minutes taken
+    secs : float
+        Seconds taken
     """
 
     hrs: float
@@ -38,11 +42,15 @@ class ElapsedTime:
         """
         Calculates the elapsed time from `now` and a `start_time`.
 
-        Parameters:
-            start_time (float): the start time of an event
+        Parameters
+        ----------
+        start_time : float
+            The start time of an event
 
-        Returns:
-            self (Self): a newly populated storage container.
+        Returns
+        -------
+        self : Self
+            A newly populated storage container
         """
         elapsed = time.time() - start_time
         hrs, remainder = divmod(elapsed, 3600)

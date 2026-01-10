@@ -37,10 +37,14 @@ class ImageEncoder(nnx.Module):
         output_dim = max(64, (n_hidden // 20) * 64)
         ```
 
-    Parameters:
-        in_channels (int): number of input channels (e.g., 4 for frame-stacked grayscale)
-        n_hidden (int): number of hidden units. Used to compute convolution dimensions
-        key (jax.random.PRNGKey): random number generator key
+    Parameters
+    ----------
+    in_channels : int
+        Number of input channels (e.g., 4 for frame-stacked grayscale)
+    n_hidden : int
+        Number of hidden units. Used to compute convolution dimensions
+    key : jax.random.PRNGKey
+        Random number generator key
     """
 
     def __init__(self, in_channels: int, n_hidden: int, key: chex.PRNGKey) -> None:
@@ -93,11 +97,11 @@ class ImageEncoder(nnx.Module):
             Batch of images in shape `(B, H, W, C)`
             or `(B, T, H, W, C)`
 
-            - `batch_size (B)` the number of images.
-            - `seq_length (T)` - the number of timesteps.
-            - `height (H)` the height of each image.
-            - `width (W)` the width of each image.
-            - `channels (C)` the number of channels per image.
+            - `batch_size (B)` the number of images
+            - `seq_length (T)` the number of timesteps
+            - `height (H)` the height of each image
+            - `width (W)` the width of each image
+            - `channels (C)` the number of channels per image
 
         Returns
         -------

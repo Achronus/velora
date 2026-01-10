@@ -22,17 +22,20 @@ class AgentHiddenStates:
     """
     A storage container for agent hidden states.
 
-    Parameters:
-        ocm (jax.Array): Observation-Conditional Model (OCM) hidden states `(B, H)`
+    Parameters
+    ----------
+    ocm : jax.Array
+        Observation-Conditional Model (OCM) hidden states `(B, H)`
 
-            - `batch_size (B)` the number of samples per timestep.
-            - `n_units (H)` the total number of OCM hidden neurons.
+        - `batch_size (B)` the number of samples per timestep
+        - `n_units (H)` the total number of OCM hidden neurons
 
-        acm (jax.Array): Action-Conditional Model (ACM) hidden states `(B * A, H)`
+    acm : jax.Array
+        Action-Conditional Model (ACM) hidden states `(B * A, H)`
 
-            - `batch_size (B)` the number of samples per timestep.
-            - `n_actions (A)` the number of discrete actions.
-            - `n_units (H)` the total number of ACM hidden neurons.
+        - `batch_size (B)` the number of samples per timestep
+        - `n_actions (A)` the number of discrete actions
+        - `n_units (H)` the total number of ACM hidden neurons
     """
 
     ocm: chex.Array

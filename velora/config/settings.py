@@ -24,25 +24,27 @@ class AgentSettings:
     """
     Dataclass for `VeloraAgent` settings.
 
-    Parameters:
-        n_hidden (int): number of decision nodes for policy networks
-            (inter + command nodes)
-        prediction_size (int): size of the observation/action-conditioned
-            prediction vectors (y, z)
-        q_size (int): size of action-value prediction head. Controls the number
-            of discrete bins for distributional Q-values (`n_atoms`)
-        lr (float, optional): learning rate for the agent's optimizer.
-            Default is `0.0005`
-        max_grad_norm (float, optional): maximum gradient norm for
-            gradient clipping. Default is `1.0`
-        bin_resolution (float, optional): target bin resolution (width) for
-            distributional Q-values. Dynamically sets the range of Q-values
-            that can be represented for `[min, max]` based on `q_size`.
-            Smaller resolutions provide finer granularity for value predictions
-            but reduce the representable range. Default is `0.4`
-        sparsity_level (float, optional): network connection sparsity
-            between neurons used for the Liquid Neural Networks (LNNs).
-            Default is `0.5`.
+    Parameters
+    ----------
+    n_hidden : int
+        Number of decision nodes for policy networks (inter + command nodes)
+    prediction_size : int
+        Size of the observation/action-conditioned prediction vectors (y, z)
+    q_size : int
+        Size of action-value prediction head. Controls the number of discrete bins
+        for distributional Q-values (`n_atoms`)
+    lr : float (optional)
+        Learning rate for the agent's optimizer. Default is `0.0005`
+    max_grad_norm : float (optional)
+        Maximum gradient norm for gradient clipping. Default is `1.0`
+    bin_resolution : float (optional)
+        Target bin resolution (width) for distributional Q-values. Dynamically
+        sets the range of Q-values that can be represented for `[min, max]` based
+        on `q_size`. Smaller resolutions provide finer granularity for value
+        predictions but reduce the representable range. Default is `0.4`
+    sparsity_level : float (optional)
+        Network connection sparsity between neurons used for the Liquid Neural
+        Networks (LNNs). Default is `0.5`
     """
 
     n_hidden: int
@@ -57,8 +59,10 @@ class AgentSettings:
         """
         Computes the categorical bin values for distributional Q-values.
 
-        Returns:
-            bins (CategoricalBins): an object containing the categorical bin values
+        Returns
+        -------
+        bins : CategoricalBins
+            An object containing the categorical bin values
         """
         max_bin_value = (self.bin_resolution * (self.q_size - 1)) / 2.0
         support = jnp.linspace(-max_bin_value, max_bin_value, num=self.q_size)

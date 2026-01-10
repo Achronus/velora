@@ -49,7 +49,7 @@ def make_atari_env(
     num_envs : int
         The number of vectorized environments to make
     vec_mode : Literal["sync", "async", "vector_entry_point"] (optional)
-        The type of vector environment to make. Default is `"sync"`
+        The type of vector environment to make. Default is `sync`
     render_mode : str (optional)
         The type of render mode for the environment.
         Default is `rgb_array`

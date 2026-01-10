@@ -22,40 +22,44 @@ class AgentOutput:
     """
     Storage container for the `VeloraAgent` output.
 
-    Parameters:
-        pi (jax.Array): policy logits `(B, T, A)`
+    Parameters
+    ----------
+    pi : jax.Array
+        Policy logits with shape `(B, T, A)`:
 
-            - `batch_size (B)` the number of samples per timestep.
-            - `seq_length (T)` the number of sequences (e.g., trajectories).
-            - `n_actions (A)` the number of discrete actions in the action space.
+        - batch_size (`B`) - the number of samples per timestep.
+        - seq_length (`T`) - the number of sequences (e.g., trajectories).
+        - n_actions (`A`) - the number of discrete actions in the action space.
 
-        y (jax.Array): observation-conditioned prediction vector `(B, T, Y)`
+    y : jax.Array
+        Observation-conditioned prediction vector with shape `(B, T, Y)`:
 
-            - `batch_size (B)` the number of samples per timestep.
-            - `seq_length (T)` the number of sequences (e.g., trajectories).
-            - `y_dim (Y)` the size of the observation-conditioned prediction
-                vector.
+        - batch_size (`B`) - the number of samples per timestep.
+        - seq_length (`T`) - the number of sequences (e.g., trajectories).
+        - y_dim (`Y`) - the size of the observation-conditioned prediction vector.
 
-        z (jax.Array): action-conditioned prediction vector `(B, T, A, Z)`
+    z : jax.Array
+        Action-conditioned prediction vector with shape `(B, T, A, Z)`:
 
-            - `batch_size (B)` the number of samples per timestep.
-            - `seq_length (T)` the number of sequences (e.g., trajectories).
-            - `n_actions (A)` the number of discrete actions in the action space.
-            - `z_dim (Z)` the size of the action-conditioned prediction vector.
+        - batch_size (`B`) - the number of samples per timestep.
+        - seq_length (`T`) - the number of sequences (e.g., trajectories).
+        - n_actions (`A`) - the number of discrete actions in the action space.
+        - z_dim (`Z`) - the size of the action-conditioned prediction vector.
 
-        aux_pi (jax.Array): auxiliary policy logits `(B, T, A, A)`
+    aux_pi : jax.Array
+        Auxiliary policy logits with shape `(B, T, A, A)`:
 
-                - `batch_size (B)` the number of samples per timestep.
-                - `seq_length (T)` the number of sequences (e.g., trajectories).
-                - `n_actions (A)` the number of discrete actions in the action
-                    space.
+        - batch_size (`B`) - the number of samples per timestep.
+        - seq_length (`T`) - the number of sequences (e.g., trajectories).
+        - n_actions (`A`) - the number of discrete actions in the action space.
 
-        q (jax.Array): action-value predictions `(B, T, A, Q)`
+    q : jax.Array
+        Action-value predictions with shape `(B, T, A, Q)`:
 
-            - `batch_size (B)` the number of samples per timestep.
-            - `seq_length (T)` the number of sequences (e.g., trajectories).
-            - `n_actions (A)` the number of discrete actions in the action space.
-            - `q_dim (Q)` the size of the action-value prediction head.
+        - batch_size (`B`) - the number of samples per timestep.
+        - seq_length (`T`) - the number of sequences (e.g., trajectories).
+        - n_actions (`A`) - the number of discrete actions in the action space.
+        - q_dim (`Q`) - the size of the action-value prediction head.
     """
 
     pi: chex.Array
@@ -70,26 +74,33 @@ class BufferSamples:
     """
     A batch of trajectories sampled from the buffer.
 
-    Parameters:
-        actions (jax.Array): actions taken `(B, T)`
+    Parameters
+    ----------
+    actions : jax.Array
+        Actions taken with shape `(B, T)`:
 
-            - `batch_size (B)` the number of samples per timestep.
-            - `seq_length (T)` the number of timesteps in the trajectory.
+        - batch_size (`B`) - the number of samples per timestep.
+        - seq_length (`T`) - the number of timesteps in the trajectory.
 
-        rewards (jax.Array): rewards received `(B, T)`
+    rewards : jax.Array
+        Rewards received with shape `(B, T)`:
 
-            - `batch_size (B)` the number of samples per timestep.
-            - `seq_length (T)` the number of timesteps in the trajectory.
+        - batch_size (`B`) - the number of samples per timestep.
+        - seq_length (`T`) - the number of timesteps in the trajectory.
 
-        discounts (jax.Array): raw environment discounts (dones) `(B, T)`.
-            Binary values where `1.0` = episode continues, `0.0` = episode ended.
-            Multiply by gamma at training time.
+    discounts : jax.Array
+        Raw environment discounts (dones) with shape `(B, T)`. Binary values
+        where `1.0` = episode continues, `0.0` = episode ended. Multiply by
+        gamma at training time:
 
-            - `batch_size (B)` the number of samples per timestep.
-            - `seq_length (T)` the number of timesteps in the trajectory.
+        - batch_size (`B`) - the number of samples per timestep.
+        - seq_length (`T`) - the number of timesteps in the trajectory.
 
-        preds (AgentOutput): agent network output predictions at each timestep
-        target_preds (AgentOutput): agent target network output predictions at each timestep
+    preds : AgentOutput
+        Agent network output predictions at each timestep
+
+    target_preds : AgentOutput
+        Agent target network output predictions at each timestep
     """
 
     actions: chex.Array

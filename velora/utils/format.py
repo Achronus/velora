@@ -13,19 +13,20 @@
 # limitations under the License.
 # ==============================================================================
 
-import chex
-import jax.numpy as jnp
-
 
 def number_to_short(value: int) -> str:
     """
     Converts a number into a human-readable format like `1M` or `1.25K`.
 
-    Parameters:
-        value (int): The number to convert
+    Parameters
+    ----------
+    value : int
+        The number to convert
 
-    Returns:
-        str: The shortened version as a string
+    Returns
+    -------
+    num_text : str
+        The shortened version as a string
     """
     is_negative = value < 0
     abs_value = abs(value)

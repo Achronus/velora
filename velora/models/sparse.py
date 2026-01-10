@@ -21,24 +21,32 @@ from velora.constants import DEFAULT_BIAS_INIT, DEFAULT_HIDDEN_INIT
 
 
 class SparseLinear(nnx.Module):
-    """A linear layer with sparsely weighted connections.
+    """
+    A linear layer with sparsely weighted connections.
 
     Equation:
     $$
     y = x * (w * m) + b
     $$
 
-    Parameters:
-        in_features (int): number of input features
-        out_features (int): number of output features
-        mask (jax.Array): sparsity mask (m) tensor of shape
-            `(out_features, in_features)`
-        rngs (flax.nnx.Rngs, optional): random number generator key.
-            Must have a `params=[value]` attribute
-        hidden_init (flax.nnx.nn.initializers, optional): initializer function for the weight
-            matrix. Default is `lecun_uniform()`
-        bias_init (flax.nnx.nn.initializers, optional): initializer function for the
-            bias. Default is `zeros_init()`
+    Parameters
+    ----------
+    in_features : int
+        Number of input features
+    out_features : int
+        Number of output features
+    mask : jax.Array
+        Sparsity mask (m) tensor of shape
+        `(out_features, in_features)`
+    rngs : flax.nnx.Rngs (optional)
+        Random number generator key.
+        Must have a `params=[value]` attribute
+    hidden_init : flax.nnx.nn.initializers (optional)
+        Initializer function for the weight matrix.
+        Default is `lecun_uniform()`
+    bias_init : flax.nnx.nn.initializers (optional)
+        Initializer function for the bias.
+        Default is `zeros_init()`
     """
 
     def __init__(
@@ -68,10 +76,14 @@ class SparseLinear(nnx.Module):
         """
         Applies a linear transformation to the inputs along the last dimension.
 
-        Parameters:
-            x (jax.Array): the array to transform with shape `(..., in_features)`
+        Parameters
+        ----------
+        x : jax.Array
+            The array to transform with shape `(..., in_features)`
 
-        Returns:
-            y_pred (jax.Array): the layer prediction with sparsity applied. Has shape `(..., out_features)`
+        Returns
+        -------
+        y_pred : jax.Array
+            The layer prediction with sparsity applied. Has shape `(..., out_features)`
         """
         return x @ (self.weights * self.mask) + self.bias
