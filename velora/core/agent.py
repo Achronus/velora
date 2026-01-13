@@ -17,6 +17,7 @@ from typing import Optional, Tuple
 
 import chex
 import distrax
+import flax.nnx as nnx
 import gymnasium as gym
 import jax
 import jax.numpy as jnp
@@ -28,11 +29,12 @@ from velora.config.state import AgentHiddenStates
 from velora.core.optim import scale_by_adam_no_denom
 from velora.models.cnn import ImageEncoder
 from velora.models.policy import ACM, OCM
+from velora.utils.transforms import squeeze_time
 
 
-class VeloraAgent:
+class PolicyAgent:
     """
-    Creates a policy agent used to discover Reinforcement Learning rules.
+    Creates a policy agent used to discover Reinforcement Learning (RL) rules.
 
     Combines DiscoRL techniques with Liquid Neural Networks (LNNs).
 
@@ -62,8 +64,8 @@ class VeloraAgent:
         A single observation space of the vectorized Gymnasium environment
     act_spec : gym.spaces.Discrete
         A single action space of the vectorized Gymnasium environment
-    settings : AgentSettings
-        Settings for the Velora agent
+    config : AgentSettings
+        Configuration for the policy agent
     key : jax.random.PRNGKey
         Random number generator key
     """
@@ -73,12 +75,12 @@ class VeloraAgent:
         obs_spec: gym.spaces.Box,
         act_spec: gym.spaces.Discrete,
         *,
-        settings: AgentSettings,
+        config: AgentSettings,
         key: chex.PRNGKey,
     ) -> None:
         self.obs_spec = obs_spec
         self.act_spec = act_spec
-        self.settings = settings
+        self.config = config
         self.key = key
 
         self.n_actions = int(self.act_spec.n)
@@ -87,37 +89,37 @@ class VeloraAgent:
         self.key_actions = key_actions
 
         # Categorical bins for Q-values
-        self.categorical_bins = settings.categorical_bins()
+        self.categorical_bins = config.categorical_bins()
 
         self.cnn = ImageEncoder(
             obs_spec.shape[-1],
-            settings.n_hidden,
+            config.n_hidden,
             key=key_cnn,
         )
 
         self.ocm = OCM(
             self.cnn.output_dim,
-            settings.n_hidden,
-            settings.prediction_size,
+            config.n_hidden,
+            config.prediction_size,
             self.n_actions,
             key=key_ocm,
-            sparsity_level=settings.sparsity_level,
+            sparsity_level=config.sparsity_level,
         )
 
         self.acm = ACM(
             self.ocm.embedding_size,
-            settings.n_hidden,
-            settings.prediction_size,
+            config.n_hidden,
+            config.prediction_size,
             self.n_actions,
             self.categorical_bins.num_bins,
             key=key_acm,
-            sparsity_level=settings.sparsity_level,
+            sparsity_level=config.sparsity_level,
         )
 
         self.optimizer = optax.chain(
             scale_by_adam_no_denom(),
-            optax.clip(settings.max_grad_norm),
-            optax.scale(-settings.lr),
+            optax.clip(config.max_grad_norm),
+            optax.scale(-config.lr),
         )
 
     def __call__(
@@ -188,6 +190,13 @@ class VeloraAgent:
             timespans=timespans,
         )
 
+        # Squeeze time dimension if T=1
+        pi = squeeze_time(pi)
+        y = squeeze_time(y)
+        z = squeeze_time(z)
+        aux_pi = squeeze_time(aux_pi)
+        q = squeeze_time(q)
+
         return (
             AgentOutput(pi=pi, y=y, z=z, aux_pi=aux_pi, q=q),
             AgentHiddenStates(ocm=ocm_h_state, acm=acm_h_state),
@@ -200,14 +209,16 @@ class VeloraAgent:
         Parameters
         ----------
         logits : jax.Array
-            Policy logits
+            Policy logits with shape `(B, A)` or `(B, T, A)`
 
         Returns
         -------
         actions : jax.Array
             Sampled actions `(B,)`
         """
-        logits = jnp.squeeze(logits, axis=1)  # (B, 1, A) -> (B, A)
+        # Handle both squeezed (B, A) and non-squeezed (B, T, A) inputs
+        if logits.ndim == 3:
+            logits = jnp.squeeze(logits, axis=1)  # (B, 1, A) -> (B, A)
 
         # Reset RNG key for sampling
         self.key_actions, key_sample = jax.random.split(self.key_actions, 2)

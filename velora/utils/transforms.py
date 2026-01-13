@@ -51,3 +51,25 @@ def to_batch_first(x: chex.Array) -> chex.Array:
     """
     # (T, B, ...) -> (B, T, ...)
     return jnp.swapaxes(x, 0, 1)
+
+
+def squeeze_time(x: chex.Array) -> chex.Array:
+    """
+    Squeeze the time dimension (axis 1) if `T=1`.
+
+    Useful for removing redundant sequence dimensions when
+    processing single timestep observations.
+
+    Parameters
+    ----------
+    x : jax.Array
+        Input tensor with shape `(B, T, ...)` where T may be 1
+
+    Returns
+    -------
+    x : jax.Array
+        Output tensor with shape `(B, ...)` if T=1, otherwise unchanged
+    """
+    if x.ndim >= 2 and jnp.shape(x)[1] == 1:
+        return jnp.squeeze(x, axis=1)
+    return x

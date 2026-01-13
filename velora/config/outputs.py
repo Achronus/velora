@@ -22,24 +22,27 @@ class AgentOutput:
     """
     Storage container for the `VeloraAgent` output.
 
+    Note -
+        `T` dim is removed if `T=1`.
+
     Parameters
     ----------
     pi : jax.Array
-        Policy logits with shape `(B, T, A)`:
+        Policy logits with shape `(B, T, A)` or `(B, A)`:
 
         - batch_size (`B`) - the number of samples per timestep.
         - seq_length (`T`) - the number of sequences (e.g., trajectories).
         - n_actions (`A`) - the number of discrete actions in the action space.
 
     y : jax.Array
-        Observation-conditioned prediction vector with shape `(B, T, Y)`:
+        Observation-conditioned prediction vector with shape `(B, T, Y)` or `(B, Y)`:
 
         - batch_size (`B`) - the number of samples per timestep.
         - seq_length (`T`) - the number of sequences (e.g., trajectories).
         - y_dim (`Y`) - the size of the observation-conditioned prediction vector.
 
     z : jax.Array
-        Action-conditioned prediction vector with shape `(B, T, A, Z)`:
+        Action-conditioned prediction vector with shape `(B, T, A, Z)` or `(B, A, Z)`:
 
         - batch_size (`B`) - the number of samples per timestep.
         - seq_length (`T`) - the number of sequences (e.g., trajectories).
@@ -47,14 +50,14 @@ class AgentOutput:
         - z_dim (`Z`) - the size of the action-conditioned prediction vector.
 
     aux_pi : jax.Array
-        Auxiliary policy logits with shape `(B, T, A, A)`:
+        Auxiliary policy logits with shape `(B, T, A, A)` or `(B, A, A)`:
 
         - batch_size (`B`) - the number of samples per timestep.
         - seq_length (`T`) - the number of sequences (e.g., trajectories).
         - n_actions (`A`) - the number of discrete actions in the action space.
 
     q : jax.Array
-        Action-value predictions with shape `(B, T, A, Q)`:
+        Action-value predictions with shape `(B, T, A, Q)` or `(B, A, Q)`:
 
         - batch_size (`B`) - the number of samples per timestep.
         - seq_length (`T`) - the number of sequences (e.g., trajectories).

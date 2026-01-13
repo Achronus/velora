@@ -20,7 +20,7 @@ from flax import struct
 @struct.dataclass
 class AgentHiddenStates:
     """
-    A storage container for agent hidden states.
+    Dataclass for agent hidden states.
 
     Parameters
     ----------
