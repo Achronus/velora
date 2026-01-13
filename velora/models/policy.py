@@ -22,8 +22,8 @@ import jax.numpy as jnp
 
 from velora.models.lnn.cell import NCPLiquidCell
 from velora.models.lnn.wiring import (
-    ACMHeadConfig,
-    OCMHeadConfig,
+    ACMHeadSpec,
+    OCMHeadSpec,
     build_acm_wiring,
     build_ocm_wiring,
 )
@@ -96,13 +96,10 @@ class ACM(nnx.Module):
             )
         )
 
-        self.motor: ACMHeadConfig = nnx.data(self.wiring.motor)  # type: ignore
+        self.motor: ACMHeadSpec = nnx.data(self.wiring.motor)  # type: ignore
 
-        self.hidden_size = (
-            self.wiring.inter.n_hidden
-            + self.wiring.command.n_hidden
-            + self.wiring.motor.hidden_count()
-        )
+        self.hidden_size = self.wiring.hidden_size
+        self.hidden_split_indices = nnx.data(self.wiring.h_split_indices())
 
         # Inter layer: sensory -> inter
         self.inter = NCPLiquidCell(
@@ -183,17 +180,10 @@ class ACM(nnx.Module):
         h_split : Tuple[chex.Array, ...]
             Hidden state split into layers `(inter, command, z, aux, q)`
         """
-        split_indices = jnp.cumsum(
-            jnp.array(
-                [
-                    self.wiring.inter.n_hidden,
-                    self.wiring.command.n_hidden,
-                    self.motor.z.n_hidden,
-                    self.motor.aux_pi.n_hidden,
-                ]
-            )
+
+        h_inter, h_command, h_z, h_aux, h_q = jnp.split(
+            h, self.hidden_split_indices, axis=1
         )
-        h_inter, h_command, h_z, h_aux, h_q = jnp.split(h, split_indices, axis=1)
         return h_inter, h_command, h_z, h_aux, h_q
 
     def _encode_obs_with_actions(self, state: chex.Array) -> chex.Array:
@@ -408,13 +398,10 @@ class OCM(nnx.Module):
             )
         )
 
-        self.motor: OCMHeadConfig = nnx.data(self.wiring.motor)  # type: ignore
+        self.motor: OCMHeadSpec = nnx.data(self.wiring.motor)  # type: ignore
 
-        self.hidden_size = (
-            self.wiring.inter.n_hidden
-            + self.wiring.command.n_hidden
-            + self.motor.hidden_count()
-        )
+        self.hidden_size = self.wiring.hidden_size
+        self.hidden_split_indices = nnx.data(self.wiring.h_split_indices())
         self.embedding_size = self.wiring.command.n_hidden
 
         # Inter layer: sensory -> inter
@@ -496,16 +483,7 @@ class OCM(nnx.Module):
         y_h : Chex.Array
             Y head hidden state
         """
-        split_indices = jnp.cumsum(
-            jnp.array(
-                [
-                    self.wiring.inter.n_hidden,
-                    self.wiring.command.n_hidden,
-                    self.motor.pi.n_hidden,
-                ]
-            )
-        )
-        h_inter, h_command, h_pi, h_y = jnp.split(h, split_indices, axis=1)
+        h_inter, h_command, h_pi, h_y = jnp.split(h, self.hidden_split_indices, axis=1)
         return h_inter, h_command, h_pi, h_y
 
     def __call__(

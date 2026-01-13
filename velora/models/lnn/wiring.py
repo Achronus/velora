@@ -13,148 +13,121 @@
 # limitations under the License.
 # ==============================================================================
 
-from typing import Tuple
+from typing import Self, Tuple
 
 import chex
 import jax.numpy as jnp
 import numpy as np
-from flax import struct
+
+from velora.config.spec import (
+    ACMHeadSpec,
+    HeadSpec,
+    LayerSpec,
+    NCPWiringSpec,
+    OCMHeadSpec,
+    SingleHeadSpec,
+)
 
 
-@struct.dataclass(frozen=True)
-class NCPMaskWithCounts:
+def _synapse_count(count: int, density_level: float, *, scale: int = 1) -> int:
     """
-    A storage container for a single Neural Circuit Policy (NCP) layer.
-
-    Includes its sparsity mask, neuron counts and synapse connection count.
+    Utility method that computes the synapse count for a single NCP layer.
 
     Parameters
     ----------
-    mask : jax.Array
-        Sparse weight mask for NCP layer
-    n_hidden : int
-        Number of NCP neuron nodes
-    n_connections : int
-        Number of synapse connections (weights)
+    count : int
+        The number of neurons
+    density_level : float
+        The density of the layer connections (`1.0 - sparsity_level`)
+    scale : int (optional)
+        A scale factor. Default is `1`
+
+    Returns
+    -------
+    count : int
+        Synapse count
     """
-
-    mask: chex.Array
-    n_hidden: int
-    n_connections: int
+    return max(int(count * density_level * scale), 1)
 
 
-@struct.dataclass
-class NCPWiring:
+def _make_mask(
+    shape: Tuple[int, int], count: int, rng: np.random.Generator
+) -> chex.Array:
     """
-    A storage container for a Neural Circuit Policy (NCP) wiring.
-
-    Parameters
-    ----------
-    inter : NCPMaskWithCounts
-        Inter layer details
-    command : NCPMaskWithCounts
-        Command layer details
-    motor : NCPMaskWithCounts
-        Motor layer details
-    """
-
-    inter: NCPMaskWithCounts
-    command: NCPMaskWithCounts
-    motor: NCPMaskWithCounts
-
-
-@struct.dataclass(frozen=True)
-class HeadConfig:
-    """
-    A base configuration for NCP network output heads that must be
-    inherited from when used in the `build_multi_head_ncp_wiring()` method.
-    """
-
-    def hidden_count(self) -> int:
-        """Returns the total hidden node count."""
-        raise NotImplementedError()
-
-
-@struct.dataclass(frozen=True)
-class ACMHeadConfig(HeadConfig):
-    """
-    Head configuration for an Action-Conditional Model (ACM) network.
-
-    Parameters
-    ----------
-    z : NCPMaskWithCounts
-        Action-conditioned prediction head details
-    aux_pi : NCPMaskWithCounts
-        Auxiliary policy prediction head details
-    q : NCPMaskWithCounts
-        Action-value prediction head details
-    """
-
-    z: NCPMaskWithCounts
-    aux_pi: NCPMaskWithCounts
-    q: NCPMaskWithCounts
-
-    def hidden_count(self) -> int:
-        return self.z.n_hidden + self.aux_pi.n_hidden + self.q.n_hidden
-
-
-@struct.dataclass(frozen=True)
-class OCMHeadConfig(HeadConfig):
-    """
-    Head configuration for an Observation-Conditional Model (OCM) network.
-
-    Parameters
-    ----------
-    y : NCPMaskWithCounts
-        Observation-conditioned prediction head details
-    pi : NCPMaskWithCounts
-        Policy head details
-    """
-
-    y: NCPMaskWithCounts
-    pi: NCPMaskWithCounts
-
-    def hidden_count(self) -> int:
-        return self.y.n_hidden + self.pi.n_hidden
-
-
-@struct.dataclass
-class NCPWiringMultiHead:
-    """
-    A storage container for a Neural Circuit Policy (NCP) wiring with multiple output heads.
-
-    Parameters
-    ----------
-    inter : NCPMaskWithCounts
-        Inter layer details
-    command : NCPMaskWithCounts
-        Command layer details
-    motor : HeadConfig
-        Motor layer details
-    """
-
-    inter: NCPMaskWithCounts
-    command: NCPMaskWithCounts
-    motor: HeadConfig
-
-
-def build_ncp_wiring(
-    in_features: int,
-    n_neurons: int,
-    out_features: int,
-    *,
-    seed: int = 28,
-    sparsity_level: float = 0.5,
-) -> NCPWiring:
-    """
-    Creates sparse wiring masks with neuron counts for a Neural Circuit Policy (NCP) Network.
+    Randomly assigns connections to nodes by populating sparsity mask.
 
     Note -
-        NCPs have three layers:
+        Performs two operations:
 
-        1. Inter (input)
-        2. Command (hidden)
-        3. Motor (output)
+        1. Applies minimum connections (count) to all nodes
+        2. Ensures all nodes have at least 1 connection
+
+    Parameters
+    ----------
+    shape : Tuple[int, int]
+        Mask shape `(n_inputs, n_outputs)`
+    count : int
+        Number of connections per node
+    rng : np.random.Generator
+        NumPy random number generator
+
+    Returns
+    -------
+    mask : jax.Array
+        Populated sparsity mask
+    """
+    n_nodes, n_cols = shape
+    mask = np.zeros(shape, dtype=np.int32)
+
+    # Add required connection count
+    col_indices = rng.choice(n_cols, (n_nodes, count))
+    polarities = rng.choice([-1, 1], jnp.shape(col_indices))
+    row_indices = np.expand_dims(np.arange(n_nodes), 1)
+
+    mask[row_indices, col_indices] = polarities
+
+    # Add missing node connections (if applicable)
+    # -> Every node in 'num_cols' must have at least 1 connection
+    # -> Column with all 0s = non-connected node
+    unconnected = np.where((mask == 0).all(axis=0))[0]
+    if unconnected.size > 0:
+        # For each missing connection, randomly select a node and add connection
+        # -> row = node
+        row_indices = rng.integers(0, n_nodes, (unconnected.size,))
+        random_polarities = rng.choice([-1, 1], (unconnected.size,))
+        mask[row_indices, unconnected] = random_polarities
+
+    return jnp.asarray(mask)
+
+
+def _build_layer(
+    shape: Tuple[int, int],
+    n_connections: int,
+    rng: np.random.Generator,
+) -> LayerSpec:
+    """
+    Build a single layer specification.
+
+    Parameters
+    ----------
+    shape : Tuple[int, int]
+        Mask shape `(n_inputs, n_outputs)`
+    n_connections : int
+        Number of connections per node
+    rng : np.random.Generator
+        NumPy random number generator
+
+    Returns
+    -------
+    spec : LayerSpec
+        An NCP layer specification
+    """
+    return LayerSpec(mask=_make_mask(shape, n_connections, rng), n_hidden=shape[1])
+
+
+class NCPWiringBuilder:
+    """
+    Builder for NCP wiring specifications.
 
     Parameters
     ----------
@@ -162,47 +135,139 @@ def build_ncp_wiring(
         Number of inputs (sensory nodes)
     n_neurons : int
         Number of decision nodes (inter + command nodes)
-    out_features : int
-        Number of outputs (motor nodes)
     seed : int (optional)
         Random number generator seed. Default is `28`
-    sparsity_level : float (optional)
+    sparsity : float (optional)
         Controls the connection sparsity between neurons.
         Must be a value between `[0.1, 0.9]`:
 
-        - When `0.1` neurons are very dense
-        - When `0.9` neurons are very sparse
+        - Where `0.1` neurons are very dense
+        - Where `0.9` neurons are very sparse
 
         Default is `0.5`
-
-    Returns
-    -------
-    wiring : NCPWiring
-        Wiring with neuron counts and sparse masks
     """
-    if sparsity_level < 0.1 or sparsity_level > 0.9:
-        raise ValueError(f"'{sparsity_level=}' must be between '[0.1, 0.9]'.")
 
-    density_level = 1.0 - sparsity_level
-    n_inter_and_command = n_neurons - out_features
+    def __init__(
+        self,
+        in_features: int,
+        n_neurons: int,
+        *,
+        seed: int = 28,
+        sparsity: float = 0.5,
+    ) -> None:
+        if not 0.1 <= sparsity <= 0.9:
+            raise ValueError(f"'{sparsity=}' must be between '[0.1, 0.9]'.")
 
-    n_command = max(int(0.4 * n_inter_and_command), 1)
-    n_inter = n_inter_and_command - n_command
+        self.in_features = in_features
+        self.n_neurons = n_neurons
+        self.seed = seed
+        self.density = 1.0 - sparsity
 
-    inter_count = synapse_count(n_inter, density_level)
-    command_count = synapse_count(n_command, density_level)
-    motor_count = synapse_count(n_command, density_level, scale=2)
+        self.n_command = max(int(0.4 * self.n_neurons), 1)
+        self.n_inter = self.n_neurons - self.n_command
 
-    # sensory -> inter
-    inter = build_mask_with_counts((in_features, n_inter), inter_count, seed)
+        self._head_spec: HeadSpec | None = None
+        self._rng = np.random.default_rng(seed)
 
-    # inter -> command
-    command = build_mask_with_counts((n_inter, n_command), command_count, seed)
+    def _motor_connection_count(self) -> int:
+        """
+        A utility method to compute the motor head connection count.
 
-    # command -> motor
-    motor = build_mask_with_counts((n_command, out_features), motor_count, seed)
+        Returns
+        -------
+        count : int
+            Motor head connection count
+        """
+        return _synapse_count(self.n_command, self.density, scale=2)
 
-    return NCPWiring(inter=inter, command=command, motor=motor)
+    def with_acm_heads(self, *, z_dim: int, aux_pi_dim: int, q_dim: int) -> Self:
+        """
+        Configure wiring with ACM output heads.
+
+        Parameters
+        ----------
+        z_dim : int
+            Dimension of action-conditioned prediction head
+        aux_pi_dim : int
+            Dimension of auxiliary policy head
+        q_dim : int
+            Dimension of action-value head
+
+        Returns
+        -------
+        self : Self
+            Updated object with `_head_spec`
+        """
+        motor_conn = self._motor_connection_count()
+        self._head_spec = ACMHeadSpec(
+            z=_build_layer((self.n_command, z_dim), motor_conn, self._rng),
+            aux_pi=_build_layer((self.n_command, aux_pi_dim), motor_conn, self._rng),
+            q=_build_layer((self.n_command, q_dim), motor_conn, self._rng),
+        )
+        return self
+
+    def with_ocm_heads(self, *, y_dim: int, pi_dim: int) -> Self:
+        """
+        Configure wiring with OCM output heads.
+
+        Parameters
+        ----------
+        y_dim : int
+            Dimension of observation-conditioned prediction head
+        pi_dim : int
+            Dimension of policy head
+        """
+        motor_conn = self._motor_connection_count()
+        self._head_spec = OCMHeadSpec(
+            y=_build_layer((self.n_command, y_dim), motor_conn, self._rng),
+            pi=_build_layer((self.n_command, pi_dim), motor_conn, self._rng),
+        )
+        return self
+
+    def with_single_head(self, *, out_dim: int) -> Self:
+        """
+        Configure wiring with a single output head.
+
+        Parameters
+        ----------
+        out_dim : int
+            Dimension of output head
+        """
+        motor_conn = self._motor_connection_count()
+        self._head_spec = SingleHeadSpec(
+            out=_build_layer((self.n_command, out_dim), motor_conn, self._rng),
+        )
+        return self
+
+    def build(self) -> NCPWiringSpec:
+        """
+        Builds the NCP wiring specification.
+
+        Returns
+        -------
+        wiring : NCPWiringSpec
+            NCP wiring specification
+
+        Raises
+        ------
+        heads_missing : ValueError
+            Missing output heads. Resolved by calling a `with_..._heads()` method first.
+        """
+        if self._head_spec is None:
+            raise ValueError(
+                "No heads defined. Call a `with_..._heads()` method first."
+            )
+
+        # Connection counts
+        inter_count = _synapse_count(self.n_inter, self.density)
+        command_count = _synapse_count(self.n_command, self.density)
+
+        # sensory -> inter
+        inter = _build_layer((self.in_features, self.n_inter), inter_count, self._rng)
+        # inter -> command
+        command = _build_layer((self.n_inter, self.n_command), command_count, self._rng)
+
+        return NCPWiringSpec(inter=inter, command=command, motor=self._head_spec)
 
 
 def build_acm_wiring(
@@ -214,7 +279,7 @@ def build_acm_wiring(
     *,
     seed: int = 28,
     sparsity_level: float = 0.5,
-) -> NCPWiringMultiHead:
+) -> NCPWiringSpec:
     """
     Creates NCP wiring for an Action-Conditional Model (ACM).
 
@@ -244,35 +309,14 @@ def build_acm_wiring(
 
     Returns
     -------
-    wiring : NCPWiringMultiHead
-        Wiring with `ACMHeadConfig` motor
+    wiring : NCPWiringSpec
+        NCP wiring
     """
-    if sparsity_level < 0.1 or sparsity_level > 0.9:
-        raise ValueError(f"'{sparsity_level=}' must be between '[0.1, 0.9]'.")
-
-    density_level = 1.0 - sparsity_level
-
-    n_command = max(int(0.4 * n_neurons), 1)
-    n_inter = n_neurons - n_command
-
-    inter_count = synapse_count(n_inter, density_level)
-    command_count = synapse_count(n_command, density_level)
-    motor_count = synapse_count(n_command, density_level, scale=2)
-
-    # sensory -> inter
-    inter = build_mask_with_counts((in_features, n_inter), inter_count, seed)
-
-    # inter -> command
-    command = build_mask_with_counts((n_inter, n_command), command_count, seed)
-
-    # command -> motor
-    motor = ACMHeadConfig(
-        z=build_mask_with_counts((n_command, z_dim), motor_count, seed),
-        aux_pi=build_mask_with_counts((n_command, num_actions), motor_count, seed),
-        q=build_mask_with_counts((n_command, q_dim), motor_count, seed),
+    return (
+        NCPWiringBuilder(in_features, n_neurons, seed=seed, sparsity=sparsity_level)
+        .with_acm_heads(z_dim=z_dim, aux_pi_dim=num_actions, q_dim=q_dim)
+        .build()
     )
-
-    return NCPWiringMultiHead(inter=inter, command=command, motor=motor)
 
 
 def build_ocm_wiring(
@@ -283,7 +327,7 @@ def build_ocm_wiring(
     *,
     seed: int = 28,
     sparsity_level: float = 0.5,
-) -> NCPWiringMultiHead:
+) -> NCPWiringSpec:
     """
     Creates NCP wiring for an Observation-Conditional Model (OCM).
 
@@ -310,137 +354,60 @@ def build_ocm_wiring(
 
     Returns
     -------
-    wiring : NCPWiringMultiHead
-        Wiring with `OCMHeadConfig` motor
+    wiring : NCPWiringSpec
+        NCP wiring
     """
-    if sparsity_level < 0.1 or sparsity_level > 0.9:
-        raise ValueError(f"'{sparsity_level=}' must be between '[0.1, 0.9]'.")
-
-    density_level = 1.0 - sparsity_level
-
-    n_command = max(int(0.4 * n_neurons), 1)
-    n_inter = n_neurons - n_command
-
-    inter_count = synapse_count(n_inter, density_level)
-    command_count = synapse_count(n_command, density_level)
-    motor_count = synapse_count(n_command, density_level, scale=2)
-
-    # sensory -> inter
-    inter = build_mask_with_counts((in_features, n_inter), inter_count, seed)
-
-    # inter -> command
-    command = build_mask_with_counts((n_inter, n_command), command_count, seed)
-
-    # command -> motor
-    motor = OCMHeadConfig(
-        y=build_mask_with_counts((n_command, y_dim), motor_count, seed),
-        pi=build_mask_with_counts((n_command, num_actions), motor_count, seed),
+    return (
+        NCPWiringBuilder(in_features, n_neurons, seed=seed, sparsity=sparsity_level)
+        .with_ocm_heads(y_dim=y_dim, pi_dim=num_actions)
+        .build()
     )
 
-    return NCPWiringMultiHead(inter=inter, command=command, motor=motor)
 
-
-def synapse_count(count: int, density_level: float, *, scale: int = 1) -> int:
+def build_ncp_wiring(
+    in_features: int,
+    n_neurons: int,
+    out_features: int,
+    *,
+    seed: int = 28,
+    sparsity_level: float = 0.5,
+) -> NCPWiringSpec:
     """
-    Utility method that computes the synapse count for a single NCP layer.
-
-    Parameters
-    ----------
-    count : int
-        The number of neurons
-    density_level : float
-        The density of the layer connections (`1.0 - sparsity_level`)
-    scale : int (optional)
-        A scale factor. Default is `1`
-
-    Returns
-    -------
-    count : int
-        Synapse count
-    """
-    return max(int(count * density_level * scale), 1)
-
-
-def make_mask(shape: Tuple[int, int], count: int, seed: int) -> chex.Array:
-    """
-    Randomly assigns connections to nodes by populating sparsity mask.
+    Creates NCP wiring with a single output head.
 
     Note -
-        Performs two operations:
+        NCPs have three layers:
 
-        1. Applies minimum connections (count) to all nodes
-        2. Ensures all nodes have at least 1 connection
-
-    Parameters
-    ----------
-    shape : Tuple[int, int]
-        Mask shape `(n_inputs, n_outputs)`
-    count : int
-        Number of connections per node
-    seed : int
-        Random number generator seed
-
-    Returns
-    -------
-    mask : jax.Array
-        Populated sparsity mask
-    """
-    rng = np.random.default_rng(seed)
-
-    n_nodes, n_cols = shape
-    mask = np.zeros(shape, dtype=np.int32)
-
-    # Add required connection count
-    col_indices = rng.choice(n_cols, (n_nodes, count))
-    polarities = rng.choice([-1, 1], jnp.shape(col_indices))
-    row_indices = np.expand_dims(np.arange(n_nodes), 1)
-
-    mask[row_indices, col_indices] = polarities
-
-    # Add missing node connections (if applicable)
-    # -> Every node in 'num_cols' must have at least 1 connection
-    # -> Column with all 0s = non-connected node
-    is_col_all_zero = (mask == 0).all(axis=0)
-    col_zero_indices = np.nonzero(is_col_all_zero)[0]
-    zero_count = col_zero_indices.size
-
-    if zero_count > 0:
-        # For each missing connection, randomly select a node and add connection
-        # -> row = node
-        row_indices = rng.integers(0, n_nodes, (zero_count,))
-        random_polarities = rng.choice([-1, 1], (zero_count,))
-        mask[row_indices, col_zero_indices] = random_polarities
-
-    return jnp.asarray(mask)
-
-
-def build_mask_with_counts(
-    shape: Tuple[int, int],
-    n_connections: int,
-    seed: int,
-) -> NCPMaskWithCounts:
-    """
-    Helper method that builds a single `NCPMaskWithCounts` object.
+        1. Inter (input)
+        2. Command (hidden)
+        3. Motor (output)
 
     Parameters
     ----------
-    shape : Tuple[int, int]
-        Mask shape `(n_inputs, n_outputs)`
-    n_connections : int
-        Number of connections per node
-    seed : int
-        Random number generator seed
+    in_features : int
+        Number of inputs (sensory nodes)
+    n_neurons : int
+        Number of decision nodes (inter + command nodes)
+    out_features : int
+        Number of outputs (motor nodes)
+    seed : int (optional)
+        Random number generator seed. Default is `28`
+    sparsity_level : float (optional)
+        Controls the connection sparsity between neurons.
+        Must be a value between `[0.1, 0.9]`:
+
+        - When `0.1` neurons are very dense
+        - When `0.9` neurons are very sparse
+
+        Default is `0.5`
 
     Returns
     -------
-    ncp_mask_with_counts : NCPMaskWithCounts
-        A container with the mask, neuron count and synapse connection count
+    wiring : NCPWiringSpec
+        NCP wiring
     """
-    mask = make_mask(shape, n_connections, seed)
-    n_hidden = shape[1]
-
-    return NCPMaskWithCounts(
-        mask=mask,
-        n_hidden=n_hidden,
-        n_connections=n_connections,
+    return (
+        NCPWiringBuilder(in_features, n_neurons, seed=seed, sparsity=sparsity_level)
+        .with_single_head(out_dim=out_features)
+        .build()
     )
