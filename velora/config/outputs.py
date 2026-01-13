@@ -13,6 +13,8 @@
 # limitations under the License.
 # ==============================================================================
 
+from typing import Any, Dict
+
 import chex
 from flax import struct
 
@@ -111,3 +113,22 @@ class BufferSamples:
     discounts: chex.Array
     preds: AgentOutput
     target_preds: AgentOutput
+
+    def to_dict(self) -> Dict[str, Any]:
+        """
+        Converts the object to a dictionary.
+
+        Useful for unpacking a trajectory of samples into `buffer.add()`.
+
+        Returns
+        -------
+        dict : Dict[str, Any]
+            Object in dictionary format
+        """
+        return {
+            "actions": self.actions,
+            "rewards": self.rewards,
+            "discounts": self.discounts,
+            "preds": self.preds,
+            "target_preds": self.target_preds,
+        }

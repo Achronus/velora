@@ -21,6 +21,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from velora.config.outputs import AgentOutput, BufferSamples
+from velora.config.settings import MixedBufferSettings
 
 
 class MixedBuffer:
@@ -36,34 +37,25 @@ class MixedBuffer:
     ----------
     key : jax.random.PRNGKey
         Random number generator key
-    seq_len : int (optional)
-        Number of timesteps per trajectory (rollout size; `T`).
-        Default is `29`
-    capacity : int (optional)
-        Maximum number of trajectories to store (`N`).
-        Default is `1024`
-    split_ratio : float (optional)
-        Fraction of samples from replay vs rollouts.
-        Default is `0.9` (90% replay, 10% rollout)
+    config : MixedBufferSettings (optional)
+        Configuration for the buffer. Default is `MixedBufferSettings()`
     """
 
     def __init__(
         self,
         key: chex.PRNGKey,
         *,
-        seq_len: int = 29,
-        capacity: int = 1024,
-        split_ratio: float = 0.9,
+        config: MixedBufferSettings = MixedBufferSettings(),
     ) -> None:
         self.key = key
-        self.seq_len = seq_len
-        self.capacity = capacity
-        self.split_ratio = split_ratio
+        self.seq_len = config.seq_len
+        self.capacity = config.capacity
+        self.split_ratio = config.split_ratio
 
         # Core data
-        self.actions = jnp.zeros((capacity, seq_len), dtype=jnp.int32)
-        self.rewards = jnp.zeros((capacity, seq_len))
-        self.discounts = jnp.zeros((capacity, seq_len))
+        self.actions = jnp.zeros((self.capacity, self.seq_len), dtype=jnp.int32)
+        self.rewards = jnp.zeros((self.capacity, self.seq_len))
+        self.discounts = jnp.zeros((self.capacity, self.seq_len))
 
         # Agent outputs (placeholders)
         self.pi = jnp.zeros(1)
