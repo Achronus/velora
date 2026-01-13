@@ -18,10 +18,10 @@ from functools import partial
 from typing import Literal
 
 import gymnasium as gym
-from gymnasium.vector import VectorEnv
 from gymnasium.wrappers import AtariPreprocessing, FrameStackObservation
+from gymnasium.wrappers.vector import RecordEpisodeStatistics
 
-from velora.gym.wrappers import FrameStackReshape
+from velora.gym.wrappers import FrameStackReshape, JaxConversion
 
 VectorMode = Literal["sync", "async", "vector_entry_point"]
 
@@ -32,7 +32,7 @@ def make_atari_env(
     vec_mode: VectorMode = "sync",
     render_mode: str = "rgb_array",
     **kwargs,
-) -> VectorEnv:
+) -> JaxConversion:
     """
     Creates a vectorized Atari environment using common
     pre-processing techniques.
@@ -41,6 +41,8 @@ def make_atari_env(
     - `gymnasium.wrappers.AtariPreprocessing`
     - `gymnasium.wrappers.FrameStackObservation`
     - `velora.gym.wrappers.FrameStackReshape`
+    - `gymnasium.wrappers.vector.RecordEpisodeStatistics`
+    - `velora.gym.wrappers.JaxConversion`
 
     Parameters
     ----------
@@ -58,7 +60,7 @@ def make_atari_env(
 
     Returns
     -------
-    envs : VectorEnv
+    envs : JaxConversion
         A set of wrapped vectorized environments
     """
     preprocess = partial(
@@ -71,7 +73,7 @@ def make_atari_env(
     )
     framestack = partial(FrameStackObservation, stack_size=4)  # (84, 84, 4))
 
-    return gym.make_vec(
+    envs = gym.make_vec(
         name,
         num_envs=num_envs,
         vectorization_mode=vec_mode,
@@ -80,3 +82,4 @@ def make_atari_env(
         frameskip=1,  # Handled by AtariPreprocessing
         **kwargs,
     )
+    return JaxConversion(RecordEpisodeStatistics(envs))

@@ -92,12 +92,13 @@ class JaxConversion(gym.vector.VectorWrapper):
         reward : jax.Array
             Batch of rewards obtained
         done : jax.Array
-            Batch of episodes terminations/truncations
+            Batch of episode dones (terminations/truncations). Values:
+                - `1.0` = episode continues
+                - `0.0` = episode ended
         info : Dict[str, Any]
             Environment metadata
         """
         obs, reward, terminated, truncated, info = self.env.step(self._to_numpy(action))
-
         done = jnp.where(terminated | truncated, 0.0, 1.0).astype(jnp.float32)
 
         return self._to_jax(obs), self._to_jax(reward), done, info
