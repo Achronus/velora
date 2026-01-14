@@ -13,20 +13,14 @@
 # limitations under the License.
 # ==============================================================================
 
-from typing import Self, Tuple
+from dataclasses import fields
+from typing import Self, Tuple, Type
 
 import chex
 import jax.numpy as jnp
 import numpy as np
 
-from velora.config.spec import (
-    ACMHeadSpec,
-    HeadSpec,
-    LayerSpec,
-    NCPWiringSpec,
-    OCMHeadSpec,
-    SingleHeadSpec,
-)
+from velora.config.spec import HeadSpec, LayerSpec, NCPWiringSpec, SingleHeadSpec
 
 
 def _synapse_count(count: int, density_level: float, *, scale: int = 1) -> int:
@@ -180,63 +174,55 @@ class NCPWiringBuilder:
         """
         return _synapse_count(self.n_command, self.density, scale=2)
 
-    def with_acm_heads(self, *, z_dim: int, aux_pi_dim: int, q_dim: int) -> Self:
+    def add_output_heads(self, spec_cls: Type[HeadSpec], **attrs: int) -> Self:
         """
-        Configure wiring with ACM output heads.
+        Configure wiring with output heads based on specification.
 
         Parameters
         ----------
-        z_dim : int
-            Dimension of action-conditioned prediction head
-        aux_pi_dim : int
-            Dimension of auxiliary policy head
-        q_dim : int
-            Dimension of action-value head
+        spec_cls : Type[HeadSpec]
+            The HeadSpec class to use.
+            Valid options: `[ACMHeadSpec, OCMHeadSpec, DiscoHeadSpec, SingleHeadSpec]`
+        **attrs : int
+            Kwargs matching the spec class's field names.
+            E.g., for `ACMHeadSpec`: `z=64, aux_pi=4, q=1`
 
         Returns
         -------
         self : Self
             Updated object with `_head_spec`
+
+        Raises
+        ------
+        invalid_spec : TypeError
+            If `spec_cls` is not a subclass of `HeadSpec`
+        invalid_fields : ValueError
+            If provided field names don't match the spec's expected fields
         """
+        if not (isinstance(spec_cls, type) and issubclass(spec_cls, HeadSpec)):
+            raise TypeError(
+                f"`spec_cls` must be a `HeadSpec` subclass. Got `{type(spec_cls).__name__}`"
+            )
+
+        expected_fields = {f.name for f in fields(spec_cls)}
+        provided_fields = set(attrs.keys())
+
+        missing = expected_fields - provided_fields
+        extra = provided_fields - expected_fields
+
+        if missing or extra:
+            raise ValueError(
+                f"Unknown fields for `{spec_cls.__name__}`: `{sorted(missing)}`. "
+                f"Expected: `{sorted(expected_fields)}`"
+            )
+
+        # Build layers
         motor_conn = self._motor_connection_count()
-        self._head_spec = ACMHeadSpec(
-            z=_build_layer((self.n_command, z_dim), motor_conn, self._rng),
-            aux_pi=_build_layer((self.n_command, aux_pi_dim), motor_conn, self._rng),
-            q=_build_layer((self.n_command, q_dim), motor_conn, self._rng),
-        )
-        return self
-
-    def with_ocm_heads(self, *, y_dim: int, pi_dim: int) -> Self:
-        """
-        Configure wiring with OCM output heads.
-
-        Parameters
-        ----------
-        y_dim : int
-            Dimension of observation-conditioned prediction head
-        pi_dim : int
-            Dimension of policy head
-        """
-        motor_conn = self._motor_connection_count()
-        self._head_spec = OCMHeadSpec(
-            y=_build_layer((self.n_command, y_dim), motor_conn, self._rng),
-            pi=_build_layer((self.n_command, pi_dim), motor_conn, self._rng),
-        )
-        return self
-
-    def with_single_head(self, *, out_dim: int) -> Self:
-        """
-        Configure wiring with a single output head.
-
-        Parameters
-        ----------
-        out_dim : int
-            Dimension of output head
-        """
-        motor_conn = self._motor_connection_count()
-        self._head_spec = SingleHeadSpec(
-            out=_build_layer((self.n_command, out_dim), motor_conn, self._rng),
-        )
+        layers = {
+            name: _build_layer((self.n_command, dim), motor_conn, self._rng)
+            for name, dim in attrs.items()
+        }
+        self._head_spec = spec_cls(**layers)
         return self
 
     def build(self) -> NCPWiringSpec:
@@ -251,11 +237,11 @@ class NCPWiringBuilder:
         Raises
         ------
         heads_missing : ValueError
-            Missing output heads. Resolved by calling a `with_..._heads()` method first.
+            Missing output heads. Resolved by calling a `add_output_heads()` method first.
         """
         if self._head_spec is None:
             raise ValueError(
-                "No heads defined. Call a `with_..._heads()` method first."
+                "No heads defined. Call a `add_output_heads()` method first."
             )
 
         # Connection counts
@@ -268,100 +254,6 @@ class NCPWiringBuilder:
         command = _build_layer((self.n_inter, self.n_command), command_count, self._rng)
 
         return NCPWiringSpec(inter=inter, command=command, motor=self._head_spec)
-
-
-def build_acm_wiring(
-    in_features: int,
-    n_neurons: int,
-    z_dim: int,
-    num_actions: int,
-    q_dim: int = 1,
-    *,
-    seed: int = 28,
-    sparsity_level: float = 0.5,
-) -> NCPWiringSpec:
-    """
-    Creates NCP wiring for an Action-Conditional Model (ACM).
-
-    Parameters
-    ----------
-    in_features : int
-        Number of inputs (sensory nodes)
-    n_neurons : int
-        Number of decision nodes (inter + command nodes)
-    z_dim : int
-        Dimension of action-conditioned prediction head
-    num_actions : int
-        Number of discrete actions
-    q_dim : int (optional)
-        Dimension of action-value prediction head.
-        Default is `1` (scalar)
-    seed : int (optional)
-        Random number generator seed. Default is `28`
-    sparsity_level : float (optional)
-        Controls the connection sparsity between neurons.
-        Must be a value between `[0.1, 0.9]`:
-
-        - Where `0.1` neurons are very dense
-        - Where `0.9` neurons are very sparse
-
-        Default is `0.5`
-
-    Returns
-    -------
-    wiring : NCPWiringSpec
-        NCP wiring
-    """
-    return (
-        NCPWiringBuilder(in_features, n_neurons, seed=seed, sparsity=sparsity_level)
-        .with_acm_heads(z_dim=z_dim, aux_pi_dim=num_actions, q_dim=q_dim)
-        .build()
-    )
-
-
-def build_ocm_wiring(
-    in_features: int,
-    n_neurons: int,
-    y_dim: int,
-    num_actions: int,
-    *,
-    seed: int = 28,
-    sparsity_level: float = 0.5,
-) -> NCPWiringSpec:
-    """
-    Creates NCP wiring for an Observation-Conditional Model (OCM).
-
-    Parameters
-    ----------
-    in_features : int
-        Number of inputs (sensory nodes)
-    n_neurons : int
-        Number of decision nodes (inter + command nodes)
-    y_dim : int
-        Dimension of observation-conditioned prediction head
-    num_actions : int
-        Number of discrete actions
-    seed : int (optional)
-        Random number generator seed. Default is `28`
-    sparsity_level : float (optional)
-        Controls the connection sparsity between neurons.
-        Must be a value between `[0.1, 0.9]`:
-
-        - Where `0.1` neurons are very dense
-        - Where `0.9` neurons are very sparse
-
-        Default is `0.5`
-
-    Returns
-    -------
-    wiring : NCPWiringSpec
-        NCP wiring
-    """
-    return (
-        NCPWiringBuilder(in_features, n_neurons, seed=seed, sparsity=sparsity_level)
-        .with_ocm_heads(y_dim=y_dim, pi_dim=num_actions)
-        .build()
-    )
 
 
 def build_ncp_wiring(
@@ -408,6 +300,6 @@ def build_ncp_wiring(
     """
     return (
         NCPWiringBuilder(in_features, n_neurons, seed=seed, sparsity=sparsity_level)
-        .with_single_head(out_dim=out_features)
+        .add_output_heads(SingleHeadSpec, out=out_features)
         .build()
     )

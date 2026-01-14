@@ -20,13 +20,9 @@ import flax.nnx as nnx
 import jax
 import jax.numpy as jnp
 
+from velora.config.spec import ACMHeadSpec, OCMHeadSpec
 from velora.models.lnn.cell import NCPLiquidCell
-from velora.models.lnn.wiring import (
-    ACMHeadSpec,
-    OCMHeadSpec,
-    build_acm_wiring,
-    build_ocm_wiring,
-)
+from velora.models.lnn.wiring import NCPWiringBuilder
 from velora.utils.nn import active_parameters, total_parameters
 from velora.utils.transforms import to_batch_first, to_time_first
 
@@ -85,15 +81,19 @@ class ACM(nnx.Module):
         self.rngs = nnx.Rngs(params=self.key)
 
         self.wiring = nnx.data(
-            build_acm_wiring(
+            NCPWiringBuilder(
                 self.obs_dim,
                 self.n_neurons,
-                self.z_dim,
-                self.n_actions,
-                self.q_dim,
                 seed=self.seed,
-                sparsity_level=sparsity_level,
+                sparsity=sparsity_level,
             )
+            .add_output_heads(
+                ACMHeadSpec,
+                z=self.z_dim,
+                aux_pi=self.n_actions,
+                q=self.q_dim,
+            )
+            .build()
         )
 
         self.motor: ACMHeadSpec = nnx.data(self.wiring.motor)  # type: ignore
@@ -388,14 +388,18 @@ class OCM(nnx.Module):
         self.rngs = nnx.Rngs(params=self.key)
 
         self.wiring = nnx.data(
-            build_ocm_wiring(
+            NCPWiringBuilder(
                 self.obs_dim,
-                n_neurons,
-                self.y_dim,
-                self.n_actions,
+                self.n_neurons,
                 seed=self.seed,
-                sparsity_level=sparsity_level,
+                sparsity=sparsity_level,
             )
+            .add_output_heads(
+                OCMHeadSpec,
+                y=self.y_dim,
+                pi=self.n_actions,
+            )
+            .build()
         )
 
         self.motor: OCMHeadSpec = nnx.data(self.wiring.motor)  # type: ignore
