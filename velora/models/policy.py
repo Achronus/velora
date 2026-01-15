@@ -256,7 +256,7 @@ class ACM(BaseNCP):
 
         Returns
         -------
-        ocm_preds : OCMPredictions
+        acm_preds : ACMPredictions
             Network predictions for the command layer (`embedding`) and each head `(z, aux_pi, q)`
         h_state : chex.Array
             Final hidden state with shape `(B*A, H)`

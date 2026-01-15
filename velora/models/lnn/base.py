@@ -209,10 +209,8 @@ class BaseNCP(nnx.Module):
         ----------
         x : jax.Array
             Preprocessed input.
-
         h_state : jax.Array
             Preprocessed hidden state.
-
         timespans : jax.Array
             Preprocessed timespans.
 
