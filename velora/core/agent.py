@@ -17,11 +17,11 @@ from typing import Optional, Tuple
 
 import chex
 import distrax
-import flax.nnx as nnx
 import gymnasium as gym
 import jax
 import jax.numpy as jnp
 import optax
+from flax import nnx
 
 from velora.config.outputs import AgentOutput
 from velora.config.settings import AgentSettings
@@ -103,7 +103,7 @@ class PolicyAgent:
             config.prediction_size,
             self.n_actions,
             key=key_ocm,
-            sparsity_level=config.sparsity_level,
+            sparsity=config.sparsity,
         )
 
         self.acm = ACM(
@@ -113,7 +113,7 @@ class PolicyAgent:
             self.n_actions,
             self.categorical_bins.num_bins,
             key=key_acm,
-            sparsity_level=config.sparsity_level,
+            sparsity=config.sparsity,
         )
 
         self.optimizer = optax.chain(

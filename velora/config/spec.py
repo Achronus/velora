@@ -59,7 +59,7 @@ class HeadSpec:
 @struct.dataclass(frozen=True)
 class ACMHeadSpec(HeadSpec):
     """
-    Output head specification for Action-Conditional Model (ACM).
+    Output head specification for the Action-Conditional Model (ACM).
 
     Parameters
     ----------
@@ -85,7 +85,7 @@ class ACMHeadSpec(HeadSpec):
 @struct.dataclass(frozen=True)
 class OCMHeadSpec(HeadSpec):
     """
-    Output head specification for Observation-Conditional Model (OCM).
+    Output head specification for the Observation-Conditional Model (OCM).
 
     Parameters
     ----------

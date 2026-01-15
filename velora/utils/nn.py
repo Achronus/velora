@@ -13,9 +13,9 @@
 # limitations under the License.
 # ==============================================================================
 
-import flax.nnx as nnx
 import jax
 import numpy as np
+from flax import nnx
 
 
 def total_parameters(model: nnx.Module) -> int:

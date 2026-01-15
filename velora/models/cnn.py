@@ -14,8 +14,8 @@
 # ==============================================================================
 
 import chex
-import flax.nnx as nnx
 import jax.numpy as jnp
+from flax import nnx
 
 
 class ImageEncoder(nnx.Module):

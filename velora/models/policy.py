@@ -16,18 +16,16 @@
 from typing import Optional, Tuple
 
 import chex
-import flax.nnx as nnx
 import jax
 import jax.numpy as jnp
 
-from velora.config.spec import ACMHeadSpec, OCMHeadSpec
-from velora.models.lnn.cell import NCPLiquidCell
+from velora.config.outputs import ACMPredictions, OCMPredictions
+from velora.config.spec import ACMHeadSpec, NCPWiringSpec, OCMHeadSpec
+from velora.models.lnn.base import BaseNCP
 from velora.models.lnn.wiring import NCPWiringBuilder
-from velora.utils.nn import active_parameters, total_parameters
-from velora.utils.transforms import to_batch_first, to_time_first
 
 
-class ACM(nnx.Module):
+class ACM(BaseNCP):
     """
     An Action-Conditional Model (ACM) used to enable action-aware learning.
 
@@ -53,10 +51,17 @@ class ACM(nnx.Module):
         Dimension of action-value prediction head. Uses distributional Q-values
     key : chex.PRNGKey
         Random number generator key
-    sparsity_level : float (optional)
-        Network connection sparsity between neurons.
-        Default is `0.5`
+    sparsity : float (optional)
+        Controls the connection sparsity between neurons.
+        Default is `0.5`.
+
+        Must be a value between `[0.1, 0.9]`:
+
+            - Where `0.1` neurons are very dense
+            - Where `0.9` neurons are very sparse
     """
+
+    motor: ACMHeadSpec  # type: ignore
 
     def __init__(
         self,
@@ -67,25 +72,26 @@ class ACM(nnx.Module):
         q_dim: int,
         *,
         key: chex.PRNGKey,
-        sparsity_level: float = 0.5,
+        sparsity: float = 0.5,
     ) -> None:
         self.z_dim = prediction_size
         self.n_actions = n_actions  # aux_pi
         self.q_dim = q_dim
 
-        self.obs_dim = obs_dim + self.n_actions
-        self.n_neurons = n_neurons
-        self.key = key
+        super().__init__(
+            obs_dim + self.n_actions,
+            n_neurons,
+            key=key,
+            sparsity=sparsity,
+        )
 
-        self.seed = jax.random.key_data(key)[-1].item()
-        self.rngs = nnx.Rngs(params=self.key)
-
-        self.wiring = nnx.data(
+    def _build_wiring(self) -> NCPWiringSpec:
+        return (
             NCPWiringBuilder(
-                self.obs_dim,
+                self.in_features,
                 self.n_neurons,
                 seed=self.seed,
-                sparsity=sparsity_level,
+                sparsity=self.sparsity,
             )
             .add_output_heads(
                 ACMHeadSpec,
@@ -95,96 +101,6 @@ class ACM(nnx.Module):
             )
             .build()
         )
-
-        self.motor: ACMHeadSpec = nnx.data(self.wiring.motor)  # type: ignore
-
-        self.hidden_size = self.wiring.hidden_size
-        self.hidden_split_indices = nnx.data(self.wiring.h_split_indices())
-
-        # Inter layer: sensory -> inter
-        self.inter = NCPLiquidCell(
-            self.obs_dim,
-            self.wiring.inter.n_hidden,
-            self.wiring.inter.mask,
-            rngs=self.rngs,
-        )
-
-        # Command layer: inter -> command
-        self.command = NCPLiquidCell(
-            self.wiring.inter.n_hidden,
-            self.wiring.command.n_hidden,
-            self.wiring.command.mask,
-            rngs=self.rngs,
-        )
-
-        # Motor layers: command -> motors (outputs)
-        self.z_head = NCPLiquidCell(
-            self.wiring.command.n_hidden,
-            self.motor.z.n_hidden,
-            self.motor.z.mask,
-            rngs=self.rngs,
-        )
-        self.aux_pi_head = NCPLiquidCell(
-            self.wiring.command.n_hidden,
-            self.motor.aux_pi.n_hidden,
-            self.motor.aux_pi.mask,
-            rngs=self.rngs,
-        )
-        self.q_head = NCPLiquidCell(
-            self.wiring.command.n_hidden,
-            self.motor.q.n_hidden,
-            self.motor.q.mask,
-            rngs=self.rngs,
-        )
-
-        self._total_params = total_parameters(self)
-        self._active_params = active_parameters(self)
-
-    @property
-    def total_params(self) -> int:
-        """
-        Gets the network's total parameter count.
-
-        Returns
-        -------
-        count : int
-            The total parameter count.
-        """
-        return self._total_params
-
-    @property
-    def active_params(self) -> int:
-        """
-        Gets the network's active parameter count.
-
-        Returns
-        -------
-        count : int
-            The active parameter count.
-        """
-        return self._active_params
-
-    def _split_h_state(
-        self, h: chex.Array
-    ) -> Tuple[chex.Array, chex.Array, chex.Array, chex.Array, chex.Array]:
-        """
-        Helper method. Splits the NCPs hidden state into layer-specific states.
-
-        Parameters
-        ----------
-        h : chex.Array
-            The network hidden state
-
-        Returns
-        -------
-        h_split : Tuple[chex.Array, ...]
-            Hidden state split into layers `(inter, command, z, aux, q)`
-        """
-
-        h_inter, h_command, h_z, h_aux, h_q = jnp.split(
-            h, self.hidden_split_indices, axis=1
-        )
-        return h_inter, h_command, h_z, h_aux, h_q
 
     def _encode_obs_with_actions(self, state: chex.Array) -> chex.Array:
         """
@@ -243,13 +159,79 @@ class ACM(nnx.Module):
         x = jnp.transpose(x, axes=(0, 2, 1, 3))
         return x
 
+    def _preprocess(
+        self,
+        x: chex.Array,
+        h_state: Optional[chex.Array] = None,
+        timespans: Optional[chex.Array] = None,
+    ) -> Tuple[chex.Array, chex.Array, chex.Array]:
+        """
+        Preprocesses `__call__` method inputs.
+
+        Includes -
+        - `x` dimension expansion from `(B, F)` -> `(B, T, F)` (if needed)
+        - `x` is then one-hot action encoded to `(B*A, T, F+A)`
+        - `h_state` initialized to `(B*A, H)` when set to `None`
+        - `timespans` initialized to `(T,)` of `1s` when set to `None`
+
+        Parameters
+        ----------
+        x : jax.Array
+            An input array of shape: `(B, F)` or `(B, T, F)`
+
+            - `batch_size (B)` the number of samples per timestep
+            - `seq_length (T)` the number of sequences (e.g., trajectories, channels)
+            - `features (F)` the features at each timestep
+
+        h_state : jax.Array (optional)
+            Initial hidden state of the RNN with shape: `(B, H)`
+
+            - `batch_size (B)` the number of samples per timestep
+            - `n_hidden (H)` the total number of hidden neurons
+
+        timespans : jax.Array (optional)
+            Time elapsed since previous timestep.
+            For fixed intervals set to `None`. For varying timesteps shape
+            should be `(T,)`
+        """
+        x, _, timespans = super()._preprocess(x, h_state, timespans)
+
+        B, T, F = jnp.shape(x)
+        x = self._encode_obs_with_actions(x)
+
+        if h_state is None:
+            h_state = jnp.zeros((B * self.n_actions, self.hidden_size))
+
+        return x, h_state, timespans
+
+    def _postprocess(self, preds: Tuple[chex.Array, ...]) -> Tuple[chex.Array, ...]:
+        """
+        Postprocess network predictions by applying -
+            1. Batch-first transformations to all predictions
+            2. Reshapes batch-first transforms from `(B*A, T, F)` to `(B, T, A, F)`
+
+        Should be used in the `__call__` method after `_scan`.
+
+        Parameters
+        ----------
+        preds : Tuple[chex.Array, ...]
+            Raw predictions from scan `(T, B, F)`
+
+        Returns
+        -------
+        outputs : Tuple[chex.Array, ...]
+            Transformed predictions `(B, T, F)`
+        """
+        batch_first = super()._postprocess(preds)
+        return jax.tree.map(self._split_action_dim, batch_first)
+
     def __call__(
         self,
         state_embedding: chex.Array,
         *,
         h_state: Optional[chex.Array] = None,
         timespans: Optional[chex.Array] = None,
-    ) -> Tuple[chex.Array, chex.Array, chex.Array, chex.Array]:
+    ) -> Tuple[ACMPredictions, chex.Array]:
         """
         Performs a forward pass through the network.
 
@@ -274,72 +256,20 @@ class ACM(nnx.Module):
 
         Returns
         -------
-        z : chex.Array
-            Action-conditioned prediction with shape `(B, T, A, F)`
-        aux_pi : chex.Array
-            Auxiliary policy prediction with shape `(B, T, A, F)`
-        q : chex.Array
-            Action-value prediction with shape `(B, T, A, F)`
+        ocm_preds : OCMPredictions
+            Network predictions for the command layer (`embedding`) and each head `(z, aux_pi, q)`
         h_state : chex.Array
             Final hidden state with shape `(B*A, H)`
         """
-        if state_embedding.ndim == 2:
-            state_embedding = jnp.expand_dims(state_embedding, axis=1)  # (B, 1, F)
+        x, h_state, timespans = self._preprocess(state_embedding, h_state, timespans)
+        h_state, preds = self._scan(x, h_state, timespans)
 
-        B, T, F = jnp.shape(state_embedding)
-
-        # Expand with action encodings
-        x = self._encode_obs_with_actions(state_embedding)  # (BA, T, F+A)
-
-        if h_state is None:
-            h_state = jnp.zeros((B * self.n_actions, self.hidden_size))  # (BA, H)
-
-        timespans = jnp.ones(T) if timespans is None else timespans
-
-        def _step(
-            h: Tuple[chex.Array, chex.Array, chex.Array, chex.Array, chex.Array],
-            inputs: Tuple[chex.Array, chex.Array],
-        ) -> Tuple[
-            Tuple[chex.Array, chex.Array, chex.Array, chex.Array, chex.Array],
-            Tuple[chex.Array, chex.Array, chex.Array],
-        ]:
-            """Single step function."""
-            h_inter, h_command, h_z, h_aux, h_q = h
-            x_t, ts_t = inputs  # x_t -> (BA, F+A), ts_t -> scalar
-
-            # Forward through each liquid layer
-            x_t, new_h_inter = self.inter(x_t, h_inter, ts_t)
-            x_t, new_h_command = self.command(x_t, h_command, ts_t)
-
-            z_t, new_h_z = self.z_head(x_t, h_z, ts_t)  # z_t -> (B, F)
-            aux_t, new_h_aux = self.aux_pi_head(x_t, h_aux, ts_t)  # aux_t -> (B, F)
-            q_t, new_h_q = self.q_head(x_t, h_q, ts_t)  # q_t -> (B, F)
-
-            new_h = (new_h_inter, new_h_command, new_h_z, new_h_aux, new_h_q)
-            preds = (z_t, aux_t, q_t)
-            return new_h, preds
-
-        # Transpose for scanning over time: (BA, T, F+A) -> (T, BA, F+A)
-        x_transposed = to_time_first(x)
-
-        # Split hidden states for each layer
-        h_split = self._split_h_state(h_state)
-        scan_inputs = (x_transposed, timespans)
-
-        new_h, preds = jax.lax.scan(_step, h_split, scan_inputs, length=T)
-
-        h_state = jnp.concatenate(new_h, axis=1)  # (BA, H)
-        z, aux_pi, q = preds
-
-        # Transpose back: (T, BA, F) -> (BA, T, F) -> (B, T, A, F)
-        z = self._split_action_dim(to_batch_first(z))
-        aux_pi = self._split_action_dim(to_batch_first(aux_pi))
-        q = self._split_action_dim(to_batch_first(q))
-
-        return z, aux_pi, q, h_state
+        # 4 outputs -> (embedding, z, aux_pi, q)
+        embedding, z, aux_pi, q = self._postprocess(preds)
+        return ACMPredictions(embedding=embedding, z=z, aux_pi=aux_pi, q=q), h_state
 
 
-class OCM(nnx.Module):
+class OCM(BaseNCP):
     """
     An Observation-Conditional Model (OCM) used to encode observations and
     capture state-level information that is usable by the meta-network.
@@ -362,10 +292,17 @@ class OCM(nnx.Module):
         Number of discrete actions
     key : chex.PRNGKey
         Random number generator key
-    sparsity_level : float (optional)
-        Network connection sparsity between neurons.
-        Default is `0.5`
+    sparsity : float (optional)
+        Controls the connection sparsity between neurons.
+        Default is `0.5`.
+
+        Must be a value between `[0.1, 0.9]`:
+
+            - Where `0.1` neurons are very dense
+            - Where `0.9` neurons are very sparse
     """
+
+    motor: OCMHeadSpec  # type: ignore
 
     def __init__(
         self,
@@ -375,120 +312,35 @@ class OCM(nnx.Module):
         n_actions: int,
         *,
         key: chex.PRNGKey,
-        sparsity_level: float = 0.5,
+        sparsity: float = 0.5,
     ) -> None:
         self.y_dim = prediction_size
         self.n_actions = n_actions  # pi
 
-        self.obs_dim = obs_dim
-        self.n_neurons = n_neurons
-        self.key = key
+        super().__init__(
+            obs_dim,
+            n_neurons,
+            key=key,
+            sparsity=sparsity,
+        )
 
-        self.seed = jax.random.key_data(key)[-1].item()
-        self.rngs = nnx.Rngs(params=self.key)
+        self.embedding_size = self.wiring.command.n_hidden
 
-        self.wiring = nnx.data(
+    def _build_wiring(self) -> NCPWiringSpec:
+        return (
             NCPWiringBuilder(
-                self.obs_dim,
+                self.in_features,
                 self.n_neurons,
                 seed=self.seed,
-                sparsity=sparsity_level,
+                sparsity=self.sparsity,
             )
             .add_output_heads(
                 OCMHeadSpec,
-                y=self.y_dim,
                 pi=self.n_actions,
+                y=self.y_dim,
             )
             .build()
         )
-
-        self.motor: OCMHeadSpec = nnx.data(self.wiring.motor)  # type: ignore
-
-        self.hidden_size = self.wiring.hidden_size
-        self.hidden_split_indices = nnx.data(self.wiring.h_split_indices())
-        self.embedding_size = self.wiring.command.n_hidden
-
-        # Inter layer: sensory -> inter
-        self.inter = NCPLiquidCell(
-            self.obs_dim,
-            self.wiring.inter.n_hidden,
-            self.wiring.inter.mask,
-            rngs=self.rngs,
-        )
-
-        # Command layer: inter -> command
-        self.command = NCPLiquidCell(
-            self.wiring.inter.n_hidden,
-            self.wiring.command.n_hidden,
-            self.wiring.command.mask,
-            rngs=self.rngs,
-        )
-
-        # Motor layers: command -> motors (outputs)
-        self.pi_head = NCPLiquidCell(
-            self.wiring.command.n_hidden,
-            self.motor.pi.n_hidden,
-            self.motor.pi.mask,
-            rngs=self.rngs,
-        )
-        self.y_head = NCPLiquidCell(
-            self.wiring.command.n_hidden,
-            self.motor.y.n_hidden,
-            self.motor.y.mask,
-            rngs=self.rngs,
-        )
-
-        self._total_params = total_parameters(self)
-        self._active_params = active_parameters(self)
-
-    @property
-    def total_params(self) -> int:
-        """
-        Gets the network's total parameter count.
-
-        Returns
-        -------
-        count : int
-            The total parameter count.
-        """
-        return self._total_params
-
-    @property
-    def active_params(self) -> int:
-        """
-        Gets the network's active parameter count.
-
-        Returns
-        -------
-        count : int
-            The active parameter count.
-        """
-        return self._active_params
-
-    def _split_h_state(
-        self, h: chex.Array
-    ) -> Tuple[chex.Array, chex.Array, chex.Array, chex.Array]:
-        """
-        Helper method. Splits the NCPs hidden state into layer-specific states.
-
-        Parameters
-        ----------
-        h : chex.Array
-            The network hidden state
-
-        Returns
-        -------
-        inter_h : chex.Array
-            Inter layer hidden state
-        command_h : chex.Array
-            Command layer hidden state
-        pi_h : chex.Array
-            Pi head hidden state
-        y_h : Chex.Array
-            Y head hidden state
-        """
-        h_inter, h_command, h_pi, h_y = jnp.split(h, self.hidden_split_indices, axis=1)
-        return h_inter, h_command, h_pi, h_y
 
     def __call__(
         self,
@@ -496,7 +348,7 @@ class OCM(nnx.Module):
         *,
         h_state: Optional[chex.Array] = None,
         timespans: Optional[chex.Array] = None,
-    ) -> Tuple[chex.Array, chex.Array, chex.Array, chex.Array]:
+    ) -> Tuple[OCMPredictions, chex.Array]:
         """
         Forward pass through the network.
 
@@ -521,62 +373,14 @@ class OCM(nnx.Module):
 
         Returns
         -------
-        pi : chex.Array
-            Policy prediction with shape `(B, T, F)`
-        y : chex.Array
-            Observation-conditioned prediction with shape `(B, T, F)`
-        embedding : chex.Array
-            Command layer output with shape `(B, T, F)`. Provided to ACM as input
+        ocm_preds : OCMPredictions
+            Network predictions for the command layer (`embedding`) and each head `(pi, y)`
         h_state : chex.Array
             Final hidden state with shape `(B, H)`
         """
-        if obs.ndim == 2:
-            obs = jnp.expand_dims(obs, axis=1)  # (B, T, F)
+        x, h_state, timespans = self._preprocess(obs, h_state, timespans)
+        h_state, preds = self._scan(x, h_state, timespans)
 
-        B, T, F = jnp.shape(obs)
-
-        if h_state is None:
-            h_state = jnp.zeros((B, self.hidden_size))
-
-        timespans = jnp.ones(T) if timespans is None else timespans
-
-        def _step(
-            h: Tuple[chex.Array, chex.Array, chex.Array, chex.Array],
-            inputs: Tuple[chex.Array, chex.Array],
-        ) -> Tuple[
-            Tuple[chex.Array, chex.Array, chex.Array, chex.Array],
-            Tuple[chex.Array, chex.Array, chex.Array],
-        ]:
-            """Single step function."""
-            h_inter, h_command, h_pi, h_y = h
-            x_t, ts_t = inputs  # x_t -> (B, F), ts_t -> scalar
-
-            # Forward through each liquid layer
-            x_t, new_h_inter = self.inter(x_t, h_inter, ts_t)
-            embed_t, new_h_command = self.command(x_t, h_command, ts_t)
-
-            pi_t, new_h_pi = self.pi_head(embed_t, h_pi, ts_t)  # pi_t -> (B, F)
-            y_t, new_h_y = self.y_head(embed_t, h_y, ts_t)  # y_t -> (B, F)
-
-            new_h = (new_h_inter, new_h_command, new_h_pi, new_h_y)
-            preds = (pi_t, y_t, embed_t)
-            return new_h, preds
-
-        # Transpose for scanning over time: (B, T, F) -> (T, B, F)
-        x_transposed = to_time_first(obs)
-
-        # Split hidden states for each layer
-        h_split = self._split_h_state(h_state)
-        scan_inputs = (x_transposed, timespans)
-
-        new_h, preds = jax.lax.scan(_step, h_split, scan_inputs, length=T)
-
-        h_state = jnp.concatenate(new_h, axis=1)  # (B, H)
-        pi, y, embedding = preds
-
-        # Transpose back: (T, B, F) -> (B, T, F)
-        pi = to_batch_first(pi)
-        y = to_batch_first(y)
-        embedding = to_batch_first(embedding)
-
-        return pi, y, embedding, h_state
+        # 3 outputs -> (embedding, pi, y)
+        embedding, pi, y = self._postprocess(preds)
+        return OCMPredictions(embedding=embedding, pi=pi, y=y), h_state

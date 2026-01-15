@@ -44,9 +44,14 @@ class AgentSettings:
         sets the range of Q-values that can be represented for `[min, max]` based
         on `q_size`. Smaller resolutions provide finer granularity for value
         predictions but reduce the representable range. Default is `0.4`
-    sparsity_level : float (optional)
+    sparsity : float (optional)
         Network connection sparsity between neurons used for the Liquid Neural
-        Networks (LNNs). Default is `0.5`
+        Networks (LNNs). Default is `0.5`.
+
+        Must be a value between `[0.1, 0.9]`:
+
+            - Where `0.1` neurons are very dense
+            - Where `0.9` neurons are very sparse
     """
 
     n_hidden: int
@@ -55,7 +60,7 @@ class AgentSettings:
     lr: float = 3e-4
     max_grad_norm: float = 1.0
     bin_resolution: float = 0.4
-    sparsity_level: float = 0.5
+    sparsity: float = 0.5
 
     def categorical_bins(self) -> CategoricalBins:
         """

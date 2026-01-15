@@ -16,18 +16,15 @@
 from typing import Optional, Tuple
 
 import chex
-import jax
-import jax.numpy as jnp
-from flax import nnx
 from flax.typing import Initializer
 
+from velora.config.spec import NCPWiringSpec, SingleHeadSpec
 from velora.constants import DEFAULT_HIDDEN_INIT
-from velora.models.lnn.cell import NCPLiquidCell
-from velora.models.lnn.wiring import build_ncp_wiring
-from velora.utils.nn import active_parameters, total_parameters
+from velora.models.lnn.base import BaseNCP
+from velora.models.lnn.wiring import NCPWiringBuilder
 
 
-class LNN(nnx.Module):
+class LNN(BaseNCP):
     """
     A CfC Liquid Neural Circuit Policy (NCP) Network with three layers.
 
@@ -59,20 +56,21 @@ class LNN(nnx.Module):
         Number of decision nodes (inter and command nodes)
     out_features : int
         Number of out features (motor nodes)
-    seed : int (optional)
-        Random number generator seed. Default is `28`
-    sparsity_level : float (optional)
+    key : chex.PRNGKey
+        Random number generator key
+    sparsity : float (optional)
         Controls the connection sparsity between neurons.
         Default is `0.5`.
         Must be a value between `[0.1, 0.9]`:
 
         - Where `0.1` neurons are very dense
         - Where `0.9` neurons are very sparse
-
     init_type : flax.nnx.nn.initializers (optional)
         Initializer function for the weight matrix.
         Default is `lecun_uniform()`
     """
+
+    motor: SingleHeadSpec  # type: ignore
 
     def __init__(
         self,
@@ -80,107 +78,34 @@ class LNN(nnx.Module):
         n_neurons: int,
         out_features: int,
         *,
-        seed: int = 28,
-        sparsity_level: float = 0.5,
+        key: chex.PRNGKey,
+        sparsity: float = 0.5,
         init_type: Initializer = DEFAULT_HIDDEN_INIT,
     ) -> None:
-        self.in_features = in_features
-        self.n_neurons = n_neurons
         self.out_features = out_features
-        self.seed = seed
-        self.rngs = nnx.Rngs(params=seed)
 
-        self.n_units = n_neurons + out_features  # inter + command + motor
-        self.hidden_size = self.n_neurons
-
-        self.wiring = nnx.data(
-            build_ncp_wiring(
-                in_features,
-                n_neurons,
-                out_features,
-                seed=seed,
-                sparsity_level=sparsity_level,
-            )
-        )
-
-        self.inter = NCPLiquidCell(
+        super().__init__(
             in_features,
-            self.wiring.inter.n_hidden,
-            self.wiring.inter.mask,
-            rngs=self.rngs,
+            n_neurons,
+            key=key,
+            sparsity=sparsity,
             init_type=init_type,
         )
 
-        self.command = NCPLiquidCell(
-            self.wiring.inter.n_hidden,
-            self.wiring.command.n_hidden,
-            self.wiring.command.mask,
-            rngs=self.rngs,
-            init_type=init_type,
+    def _build_wiring(self) -> NCPWiringSpec:
+        return (
+            NCPWiringBuilder(
+                self.in_features,
+                self.n_neurons,
+                seed=self.seed,
+                sparsity=self.sparsity,
+            )
+            .add_output_heads(
+                SingleHeadSpec,
+                out=self.out_features,
+            )
+            .build()
         )
-
-        self.motor = NCPLiquidCell(
-            self.wiring.command.n_hidden,
-            self.wiring.motor.n_hidden,
-            self.wiring.motor.mask,
-            rngs=self.rngs,
-            init_type=init_type,
-        )
-
-        self.act = jax.nn.mish
-
-        self._total_params = total_parameters(self)
-        self._active_params = active_parameters(self)
-
-    @property
-    def total_params(self) -> int:
-        """
-        Gets the network's total parameter count.
-
-        Returns
-        -------
-        count : int
-            The total parameter count
-        """
-        return self._total_params
-
-    @property
-    def active_params(self) -> int:
-        """
-        Gets the network's active parameter count.
-
-        Returns
-        -------
-        count : int
-            The active parameter count
-        """
-        return self._active_params
-
-    def _split_h_state(
-        self, h: chex.Array
-    ) -> Tuple[chex.Array, chex.Array, chex.Array]:
-        """
-        Helper method that splits the NCPs hidden state into layer-specific states.
-
-        Parameters
-        ----------
-        h : jax.Array
-            The network hidden state
-
-        Returns
-        -------
-        inter_h : chex.Array
-            Inter layer hidden state
-        command_h : chex.Array
-            Command layer hidden state
-        motor_h : chex.Array
-            Motor layer hidden state
-        """
-        split_indices = jnp.cumsum(
-            jnp.array([self.wiring.inter.n_hidden, self.wiring.command.n_hidden])
-        )
-        h_inter, h_command, h_motor = jnp.split(h, split_indices, axis=1)
-        return h_inter, h_command, h_motor
 
     def __call__(
         self,
@@ -195,18 +120,17 @@ class LNN(nnx.Module):
         Parameters
         ----------
         x : jax.Array
-            An input array of shape: `(F, T)` or `(B, F, T)`
+            An input array of shape: `(B, F)` or `(B, T, F)`
 
             - `batch_size (B)` the number of samples per timestep
-            - `features (F)` the features at each timestep
             - `seq_length (T)` the number of sequences (e.g., trajectories, channels)
+            - `features (F)` the features at each timestep
 
         h_state : jax.Array (optional)
             Initial hidden state of the RNN with shape: `(B, H)`
 
             - `batch_size (B)` the number of samples per timestep
-            - `n_units (H)` the total number of hidden neurons
-              (`n_neurons + out_features`)
+            - `n_hidden (H)` the total number of hidden neurons
 
         timespans : jax.Array (optional)
             Time elapsed since previous timestep.
@@ -215,51 +139,14 @@ class LNN(nnx.Module):
 
         Returns
         -------
-        y_pred : jax.Array
-            The network prediction. Shape `(B, F, T)`
+        out_preds : jax.Array
+            The network prediction. Shape `(B, T, F)`
         h_state : jax.Array
             The final hidden state. Shape `(B, H)`
         """
-        if x.ndim not in (2, 3):
-            raise ValueError(f"Expected 2D or 3D input, got shape {jnp.shape(x)}")
+        x, h_state, timespans = self._preprocess(x, h_state, timespans)
+        h_state, preds = self._scan(x, h_state, timespans)
 
-        if x.ndim == 2:
-            x = jnp.expand_dims(x, 0)
-
-        B, F, T = jnp.shape(x)
-
-        if h_state is None:
-            h_state = jnp.zeros((B, self.hidden_size))
-
-        timespans = jnp.ones(T) if timespans is None else timespans
-
-        def _step(
-            h: Tuple[chex.Array, chex.Array, chex.Array],
-            inputs: Tuple[chex.Array, chex.Array],
-        ) -> Tuple[Tuple[chex.Array, chex.Array, chex.Array], chex.Array]:
-            """Single step function."""
-            h_inter, h_command, h_motor = h
-            x_t, ts_t = inputs  # x_t -> (B, F), ts_t -> scalar
-
-            # Forward through each liquid layer
-            x_t, new_h_inter = self.inter(x_t, h_inter, ts_t)
-            x_t, new_h_command = self.command(x_t, h_command, ts_t)
-            y_t, new_h_motor = self.motor(x_t, h_motor, ts_t)  # y_t -> (B, F)
-
-            new_h = (new_h_inter, new_h_command, new_h_motor)
-            return new_h, y_t
-
-        # x -> (T, B, F) for scanning over time dimension
-        x_transposed = jnp.transpose(x, (2, 0, 1))
-
-        # Split hidden states per layer
-        h_split = self._split_h_state(h_state)
-        scan_inputs = (x_transposed, timespans)
-
-        new_h, y_pred = jax.lax.scan(_step, h_split, scan_inputs, length=T)
-
-        h_state = jnp.concatenate(new_h, axis=1)
-        y_pred = jnp.transpose(y_pred, (1, 2, 0))
-
-        # y_pred, h_state -> (B, F, T), (B, H)
-        return y_pred, h_state
+        # 2 outputs -> (embeddings, out_preds)
+        _, out_preds = self._postprocess(preds)
+        return out_preds, h_state

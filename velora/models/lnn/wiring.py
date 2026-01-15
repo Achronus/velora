@@ -20,7 +20,7 @@ import chex
 import jax.numpy as jnp
 import numpy as np
 
-from velora.config.spec import HeadSpec, LayerSpec, NCPWiringSpec, SingleHeadSpec
+from velora.config.spec import HeadSpec, LayerSpec, NCPWiringSpec
 
 
 def _synapse_count(count: int, density_level: float, *, scale: int = 1) -> int:
@@ -122,6 +122,8 @@ def _build_layer(
 class NCPWiringBuilder:
     """
     Builder for NCP wiring specifications.
+
+    Should be chained with `add_output_heads()` and `build()`.
 
     Parameters
     ----------
@@ -254,52 +256,3 @@ class NCPWiringBuilder:
         command = _build_layer((self.n_inter, self.n_command), command_count, self._rng)
 
         return NCPWiringSpec(inter=inter, command=command, motor=self._head_spec)
-
-
-def build_ncp_wiring(
-    in_features: int,
-    n_neurons: int,
-    out_features: int,
-    *,
-    seed: int = 28,
-    sparsity_level: float = 0.5,
-) -> NCPWiringSpec:
-    """
-    Creates NCP wiring with a single output head.
-
-    Note -
-        NCPs have three layers:
-
-        1. Inter (input)
-        2. Command (hidden)
-        3. Motor (output)
-
-    Parameters
-    ----------
-    in_features : int
-        Number of inputs (sensory nodes)
-    n_neurons : int
-        Number of decision nodes (inter + command nodes)
-    out_features : int
-        Number of outputs (motor nodes)
-    seed : int (optional)
-        Random number generator seed. Default is `28`
-    sparsity_level : float (optional)
-        Controls the connection sparsity between neurons.
-        Must be a value between `[0.1, 0.9]`:
-
-        - When `0.1` neurons are very dense
-        - When `0.9` neurons are very sparse
-
-        Default is `0.5`
-
-    Returns
-    -------
-    wiring : NCPWiringSpec
-        NCP wiring
-    """
-    return (
-        NCPWiringBuilder(in_features, n_neurons, seed=seed, sparsity=sparsity_level)
-        .add_output_heads(SingleHeadSpec, out=out_features)
-        .build()
-    )
