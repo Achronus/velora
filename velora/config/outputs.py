@@ -13,19 +13,134 @@
 # limitations under the License.
 # ==============================================================================
 
-from typing import Any, Dict
+from dataclasses import fields
+from typing import Any, Dict, Self, Tuple
 
 import chex
+import jax
 from flax import struct
+
+from velora.utils.transforms import squeeze_time
+
+
+@struct.dataclass
+class OCMPredictions:
+    """
+    Dataclass for `OCM` network predictions.
+
+    Parameters
+    ----------
+    embedding : chex.Array
+        Command layer output with shape `(B, T, F)`
+
+        - batch_size (`B`) - the number of samples per timestep.
+        - seq_length (`T`) - the number of sequences (e.g., trajectories).
+        - n_features (`F`) - the number of features.
+
+    pi : jax.Array
+        Policy logits with shape `(B, T, A)` or `(B, A)`:
+
+        - batch_size (`B`) - the number of samples per timestep.
+        - seq_length (`T`) - the number of sequences (e.g., trajectories).
+        - n_actions (`A`) - the number of discrete actions in the action space.
+    y : jax.Array
+        Observation-conditioned prediction vector with shape `(B, T, Y)` or `(B, Y)`:
+
+        - batch_size (`B`) - the number of samples per timestep.
+        - seq_length (`T`) - the number of sequences (e.g., trajectories).
+        - y_dim (`Y`) - the size of the observation-conditioned prediction vector.
+    """
+
+    embedding: chex.Array
+    pi: chex.Array
+    y: chex.Array
+
+    def output_values(self, ignore_embed: bool = True) -> Tuple[chex.Array, ...]:
+        """
+        Convert object into a tuple of values.
+
+        Parameters
+        ----------
+        ignore_embed : bool (optional)
+            Flag for including the `embedding` field to the dict. Not added by default.
+            Default is `True`
+
+        Returns
+        -------
+        ocm_preds : Tuple[chex.Array, ...]
+            OCM prediction values in order `(embedding, pi, y)`
+        """
+        skip = {"embedding"} if ignore_embed else set()
+        return tuple(getattr(self, f.name) for f in fields(self) if f.name not in skip)
+
+
+@struct.dataclass
+class ACMPredictions:
+    """
+    Dataclass for `ACM` network predictions.
+
+    Parameters
+    ----------
+    embedding : chex.Array
+        Command layer output with shape `(B, T, F)`
+
+        - batch_size (`B`) - the number of samples per timestep.
+        - seq_length (`T`) - the number of sequences (e.g., trajectories).
+        - n_features (`F`) - the number of features.
+    z : jax.Array
+        Action-conditioned prediction vector with shape `(B, T, A, Z)` or `(B, A, Z)`:
+
+        - batch_size (`B`) - the number of samples per timestep.
+        - seq_length (`T`) - the number of sequences (e.g., trajectories).
+        - n_actions (`A`) - the number of discrete actions in the action space.
+        - z_dim (`Z`) - the size of the action-conditioned prediction vector.
+
+    aux_pi : jax.Array
+        Auxiliary policy logits with shape `(B, T, A, A)` or `(B, A, A)`:
+
+        - batch_size (`B`) - the number of samples per timestep.
+        - seq_length (`T`) - the number of sequences (e.g., trajectories).
+        - n_actions (`A`) - the number of discrete actions in the action space.
+
+    q : jax.Array
+        Action-value predictions with shape `(B, T, A, Q)` or `(B, A, Q)`:
+
+        - batch_size (`B`) - the number of samples per timestep.
+        - seq_length (`T`) - the number of sequences (e.g., trajectories).
+        - n_actions (`A`) - the number of discrete actions in the action space.
+        - q_dim (`Q`) - the size of the action-value prediction head.
+    """
+
+    embedding: chex.Array
+    z: chex.Array
+    aux_pi: chex.Array
+    q: chex.Array
+
+    def output_values(self, ignore_embed: bool = True) -> Tuple[chex.Array, ...]:
+        """
+        Convert object into a tuple of values.
+
+        Parameters
+        ----------
+        ignore_embed : bool (optional)
+            Flag for including the `embedding` field to the dict. Not added by default.
+            Default is `True`
+
+        Returns
+        -------
+        ocm_preds : Tuple[chex.Array, ...]
+            OCM prediction values in order `(embedding, z, aux_pi, q)`
+        """
+        skip = {"embedding"} if ignore_embed else set()
+        return tuple(getattr(self, f.name) for f in fields(self) if f.name not in skip)
 
 
 @struct.dataclass
 class AgentOutput:
     """
-    Storage container for the `VeloraAgent` output.
+    Dataclass for the `VeloraAgent` output.
 
-    Note -
-        `T` dim is removed if `T=1`.
+    If `T` dimension on values is `T=1` use `AgentOutput.create()`.
 
     Parameters
     ----------
@@ -73,11 +188,23 @@ class AgentOutput:
     aux_pi: chex.Array
     q: chex.Array
 
+    @classmethod
+    def create(
+        cls,
+        pi: chex.Array,
+        y: chex.Array,
+        z: chex.Array,
+        aux_pi: chex.Array,
+        q: chex.Array,
+    ) -> Self:
+        """Create a new instance with time dimension squeezed if `T=1`."""
+        return cls(*jax.tree.map(squeeze_time, (pi, y, z, aux_pi, q)))
+
 
 @struct.dataclass
 class BufferSamples:
     """
-    A batch of trajectories sampled from the buffer.
+    Dataclass for a batch of trajectories sampled from the buffer.
 
     Parameters
     ----------
@@ -125,10 +252,4 @@ class BufferSamples:
         dict : Dict[str, Any]
             Object in dictionary format
         """
-        return {
-            "actions": self.actions,
-            "rewards": self.rewards,
-            "discounts": self.discounts,
-            "preds": self.preds,
-            "target_preds": self.target_preds,
-        }
+        return {f.name: getattr(self, f.name) for f in fields(self)}

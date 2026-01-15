@@ -29,7 +29,6 @@ from velora.config.state import AgentHiddenStates
 from velora.core.optim import scale_by_adam_no_denom
 from velora.models.cnn import ImageEncoder
 from velora.models.policy import ACM, OCM
-from velora.utils.transforms import squeeze_time
 
 
 class PolicyAgent:
@@ -177,28 +176,21 @@ class PolicyAgent:
         encoded = self.cnn(obs)  # (B, T, F)
 
         # OCM forward - process observations and produce embeddings
-        pi, y, embedding, ocm_h_state = self.ocm(
+        ocm_preds, ocm_h_state = self.ocm(
             encoded,
             h_state=ocm_h_state,
             timespans=timespans,
         )
 
         # ACM forward - use OCM embeddings for action-value predictions
-        z, aux_pi, q, acm_h_state = self.acm(
-            embedding,
+        acm_preds, acm_h_state = self.acm(
+            ocm_preds.embedding,
             h_state=acm_h_state,
             timespans=timespans,
         )
 
-        # Squeeze time dimension if T=1
-        pi = squeeze_time(pi)
-        y = squeeze_time(y)
-        z = squeeze_time(z)
-        aux_pi = squeeze_time(aux_pi)
-        q = squeeze_time(q)
-
         return (
-            AgentOutput(pi=pi, y=y, z=z, aux_pi=aux_pi, q=q),
+            AgentOutput.create(*ocm_preds.output_values(), *acm_preds.output_values()),
             AgentHiddenStates(ocm=ocm_h_state, acm=acm_h_state),
         )
 
