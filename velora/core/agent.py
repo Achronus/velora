@@ -67,6 +67,8 @@ class PolicyAgent:
         Configuration for the policy agent
     key : jax.random.PRNGKey
         Random number generator key
+    jit_compile : bool (optional)
+        Flag to enable/disable JIT compilation. Default is `False`
     """
 
     def __init__(
@@ -76,6 +78,7 @@ class PolicyAgent:
         *,
         config: AgentSettings,
         key: chex.PRNGKey,
+        jit_compile: bool = False,
     ) -> None:
         self.obs_spec = obs_spec
         self.act_spec = act_spec
@@ -120,6 +123,11 @@ class PolicyAgent:
             optax.clip(config.max_grad_norm),
             optax.scale(-config.lr),
         )
+
+        if jit_compile:
+            self.cnn = nnx.jit(self.cnn)
+            self.ocm = nnx.jit(self.ocm)
+            self.acm = nnx.jit(self.acm)
 
     def __call__(
         self,
