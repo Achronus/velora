@@ -199,6 +199,7 @@ class BaseNCP(nnx.Module):
         x: chex.Array,
         h_state: chex.Array,
         timespans: chex.Array,
+        reverse: bool = False,
     ) -> Tuple[chex.Array, Tuple[chex.Array, ...]]:
         """
         Run forward scan through network.
@@ -213,6 +214,8 @@ class BaseNCP(nnx.Module):
             Preprocessed hidden state.
         timespans : jax.Array
             Preprocessed timespans.
+        reverse : bool (optional)
+            A flag to reverse input values (`x`, `timespans`) for bootstrapping. Default is `False`
 
         Returns
         -------
@@ -249,11 +252,20 @@ class BaseNCP(nnx.Module):
 
         # Transpose for scanning over time: (B, T, F) -> (T, B, F)
         x_t = to_time_first(x)
+
+        # Enable bootstrapping
+        if reverse:
+            x_t = jnp.flipud(x_t)
+            timespans = jnp.flipud(timespans)
+
         h_split = tuple(jnp.split(h_state, self.hidden_split_indices, axis=1))
-
         new_h, preds = jax.lax.scan(_step, h_split, (x_t, timespans), length=T)
-        h_state = jnp.concatenate(new_h, axis=1)  # (B, H)
 
+        # Reverse preds back to forward order
+        if reverse:
+            preds = jax.tree.map(lambda x: jnp.flipud(x), preds)
+
+        h_state = jnp.concatenate(new_h, axis=1)  # (B, H)
         return h_state, preds
 
     def _build_wiring(self) -> NCPWiringSpec:
