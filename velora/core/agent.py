@@ -26,7 +26,7 @@ from flax import nnx
 from velora.config.outputs import BufferSamples, DiscoAgentOutput, PolicyAgentOutput
 from velora.config.settings import DiscoAgentSettings, PolicyAgentSettings
 from velora.config.state import AgentHiddenStates
-from velora.core.optim import scale_by_adam_no_denom
+from velora.core.optim import scale_by_adan_no_denom
 from velora.models.cnn import ImageEncoder
 from velora.models.encoder import DiscoInputEncoder
 from velora.models.lnn.ncp import LNN
@@ -122,7 +122,7 @@ class PolicyAgent:
         )
 
         self.optimizer = optax.chain(
-            scale_by_adam_no_denom(),
+            scale_by_adan_no_denom(),
             optax.clip(config.max_grad_norm),
             optax.scale(-config.lr),
         )
