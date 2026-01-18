@@ -22,7 +22,7 @@ from velora.core.distributions import CategoricalBins
 
 
 @struct.dataclass(frozen=True)
-class AgentSettings:
+class PolicyAgentSettings:
     """
     Dataclass for `PolicyAgent` settings.
 
@@ -57,6 +57,7 @@ class AgentSettings:
     n_hidden: int
     prediction_size: int
     q_size: int
+
     lr: float = 3e-4
     max_grad_norm: float = 1.0
     bin_resolution: float = 0.4
@@ -88,12 +89,12 @@ class MetaAgentSettings:
 
 
 @struct.dataclass(frozen=True)
-class MetaValueSettings:
+class DiscoValueSettings:
     """
-    Dataclass for `MetaValueNetwork` settings.
+    Dataclass for `DiscoValueNetwork` settings.
 
-    The meta-value function estimates advantages for computing meta-gradients
-    during rule discovery. It is **NOT** the agent's value function - it's
+    The target-value function estimates advantages for computing meta-gradients
+    during target rule discovery. It is **NOT** the agent's value function - it's
     infrastructure for meta-optimization.
 
     Parameters
@@ -159,7 +160,7 @@ class MixedBufferSettings:
 @struct.dataclass(frozen=True)
 class LossCostSettings:
     """
-    Dataclass for loss cost settings used during meta-optimization.
+    Dataclass for loss cost settings used during meta-optimization of the target Meta-Network.
 
     These are static multipliers for each loss component, used for stability
     during training. All values are fixed at `1.0` except `value` which is `0.2`
@@ -212,7 +213,7 @@ class AgentTrainerSettings:
         Directory for saving/loading agent states
     """
 
-    agent: AgentSettings
+    agent: PolicyAgentSettings
     buffer: MixedBufferSettings
 
     num_envs: int
@@ -229,18 +230,18 @@ class RuleTrainerSettings:
     Dataclass for `RuleTrainer` settings.
 
     Configures the outer loop of DiscoRL: managing a population of agents
-    across environments, computing meta-gradients, and updating the `MetaAgent`
+    across environments, computing meta-gradients, and updating the target agent
     to discover a learning rule.
 
     Parameters
     ----------
     agent : AgentSettings
         Configuration for `PolicyAgent` architecture
-    meta_agent : MetaAgentSettings
-        Configuration for `MetaAgent` architecture
-    meta_value : MetaValueSettings (optional)
+    disco_agent : DiscoAgentSettings
+        Configuration for `DiscoAgent` architecture
+    disco_value : DiscoValueSettings (optional)
         Configuration for meta-value function used in meta-gradient computation.
-        Default is `MetaValueSettings()`
+        Default is `DiscoValueSettings()`
     buffer : MixedBufferSettings (optional)
         Configuration for trajectory buffer. Default is `MixedBufferSettings()`
     loss_cost : LossCostSettings (optional)
@@ -267,9 +268,9 @@ class RuleTrainerSettings:
         Meta-steps between full checkpoints. Default is `100`
     """
 
-    agent: AgentSettings
-    meta_agent: MetaAgentSettings
-    meta_value: MetaValueSettings = MetaValueSettings()
+    agent: PolicyAgentSettings
+    disco_agent: DiscoAgentSettings
+    disco_value: DiscoValueSettings = DiscoValueSettings()
     buffer: MixedBufferSettings = MixedBufferSettings()
     loss_cost: LossCostSettings = LossCostSettings()
 

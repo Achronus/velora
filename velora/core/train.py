@@ -23,7 +23,7 @@ import optax
 
 from velora.config.settings import AgentTrainerSettings, RuleTrainerSettings
 from velora.config.state import AgentTrainerState, BundledHiddenStates, CollectState
-from velora.core.agent import PolicyAgent
+from velora.core.agent import DiscoAgent, PolicyAgent
 from velora.core.buffer import MixedBuffer
 from velora.gym.utils import make_atari_env
 
@@ -32,12 +32,12 @@ class RuleTrainer:
     """
     Discovers a Reinforcement Learning (RL) update rule by meta-training across environments.
 
-    `RuleTrainer` handles the outer loop of DiscoRL: managing a population of
+    `RuleTrainer` handles the outer loop of target rule learning (DiscoRL): managing a population of
     `AgentTrainer`s across diverse environments, computing meta-gradients from
-    their learning progress, and updating the `MetaAgent` to improve the
+    their learning progress, and updating the target agent to improve the
     collective performance of all agents.
 
-    The discovered rule is encoded in the `MetaAgent`'s parameters. Once trained,
+    The discovered rule is encoded in the target agent's parameters. Once trained,
     these parameters can be frozen and used with `AgentTrainer` alone to train
     new agents in unseen environments.
 
@@ -64,7 +64,7 @@ class RuleTrainer:
         self.rule_key, meta_key, trainer_key = jax.random.split(self.key, 3)
         trainer_keys = jax.random.split(trainer_key, len(envs))
 
-        self.meta_agent = MetaAgent(config.meta_agent, meta_key)
+        self.meta_agent = DiscoAgent(config=config.disco_agent, key=meta_key)
         self.meta_optim = optax.chain(
             optax.clip_by_global_norm(config.meta_grad_clip),
             optax.adam(config.meta_lr),
@@ -91,8 +91,8 @@ class AgentTrainer:
     """
     Trains a single `PolicyAgent` in a single environment using a learned update rule.
 
-    `AgentTrainer` handles the inner loop of DiscoRL: collecting trajectories,
-    sampling from the buffer, generating targets via the `MetaAgent`, and
+    `AgentTrainer` handles the inner loop of target rule learning (DiscoRL): collecting trajectories,
+    sampling from the buffer, generating targets via the target agent, and
     updating the `PolicyAgent` to minimize prediction error against those targets.
 
     This class is designed to be instantiated multiple times by `RuleTrainer`,

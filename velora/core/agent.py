@@ -23,8 +23,8 @@ import jax.numpy as jnp
 import optax
 from flax import nnx
 
-from velora.config.outputs import AgentOutput
-from velora.config.settings import AgentSettings
+from velora.config.outputs import BufferSamples, DiscoAgentOutput, PolicyAgentOutput
+from velora.config.settings import DiscoAgentSettings, PolicyAgentSettings
 from velora.config.state import AgentHiddenStates
 from velora.core.optim import scale_by_adam_no_denom
 from velora.models.cnn import ImageEncoder
@@ -76,7 +76,7 @@ class PolicyAgent:
         obs_spec: gym.spaces.Box,
         act_spec: gym.spaces.Discrete,
         *,
-        config: AgentSettings,
+        config: PolicyAgentSettings,
         key: chex.PRNGKey,
         jit_compile: bool = False,
     ) -> None:
@@ -136,7 +136,7 @@ class PolicyAgent:
         ocm_h_state: Optional[chex.Array] = None,
         acm_h_state: Optional[chex.Array] = None,
         timespans: Optional[chex.Array] = None,
-    ) -> Tuple[AgentOutput, AgentHiddenStates]:
+    ) -> Tuple[PolicyAgentOutput, AgentHiddenStates]:
         """
         Forward pass through the agent.
 
@@ -198,7 +198,9 @@ class PolicyAgent:
         )
 
         return (
-            AgentOutput.create(*ocm_preds.output_values(), *acm_preds.output_values()),
+            PolicyAgentOutput.create(
+                *ocm_preds.output_values(), *acm_preds.output_values()
+            ),
             AgentHiddenStates(ocm=ocm_h_state, acm=acm_h_state),
         )
 

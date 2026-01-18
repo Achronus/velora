@@ -21,7 +21,7 @@ import jax.numpy as jnp
 import optax
 from flax import struct
 
-from velora.config.outputs import AgentOutput, BufferSamples
+from velora.config.outputs import BufferSamples, PolicyAgentOutput
 
 
 @struct.dataclass(frozen=True)
@@ -191,8 +191,8 @@ class CollectState:
     actions: Tuple[chex.Array, ...] = ()
     rewards: Tuple[chex.Array, ...] = ()
     discounts: Tuple[chex.Array, ...] = ()
-    preds: Tuple[AgentOutput, ...] = ()
-    target_preds: Tuple[AgentOutput, ...] = ()
+    preds: Tuple[PolicyAgentOutput, ...] = ()
+    target_preds: Tuple[PolicyAgentOutput, ...] = ()
     completed_returns: Tuple[float, ...] = ()
     completed_lengths: Tuple[int, ...] = ()
 
@@ -201,8 +201,8 @@ class CollectState:
         actions: chex.Array,
         rewards: chex.Array,
         discounts: chex.Array,
-        preds: AgentOutput,
-        target_preds: AgentOutput,
+        preds: PolicyAgentOutput,
+        target_preds: PolicyAgentOutput,
     ) -> Self:
         """
         Append a single timestep of data.

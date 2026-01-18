@@ -178,13 +178,13 @@ class NCPWiringBuilder:
 
     def add_output_heads(self, spec_cls: Type[HeadSpec], **attrs: int) -> Self:
         """
-        Configure wiring with output heads based on specification.
+        Configure wiring with LTCCell output heads based on specification.
 
         Parameters
         ----------
         spec_cls : Type[HeadSpec]
             The HeadSpec class to use.
-            Valid options: `[ACMHeadSpec, OCMHeadSpec, DiscoHeadSpec, SingleHeadSpec]`
+            Valid options: `[ACMHeadSpec, OCMHeadSpec, DiscoHeadSpec, SingleHeadSpec, DiscoHeadSpec]`
         **attrs : int
             Kwargs matching the spec class's field names.
             E.g., for `ACMHeadSpec`: `z=64, aux_pi=4, q=1`

@@ -20,7 +20,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from velora.config.outputs import AgentOutput, BufferSamples
+from velora.config.outputs import BufferSamples, PolicyAgentOutput
 from velora.config.settings import MixedBufferSettings
 
 
@@ -107,7 +107,7 @@ class MixedBuffer:
 
         return jnp.zeros((N, T, *dims))
 
-    def _lazy_init(self, preds: AgentOutput) -> None:
+    def _lazy_init(self, preds: PolicyAgentOutput) -> None:
         """
         Helper method that initializes agent output arrays.
 
@@ -149,8 +149,8 @@ class MixedBuffer:
         actions: chex.Array,
         rewards: chex.Array,
         discounts: chex.Array,
-        preds: AgentOutput,
-        target_preds: AgentOutput,
+        preds: PolicyAgentOutput,
+        target_preds: PolicyAgentOutput,
     ) -> None:
         """
         Adds a batch of trajectories to the buffer.
@@ -256,14 +256,14 @@ class MixedBuffer:
             actions=self.actions[indices],
             rewards=self.rewards[indices],
             discounts=self.discounts[indices],
-            preds=AgentOutput(
+            preds=PolicyAgentOutput(
                 pi=self.pi[indices],
                 y=self.y[indices],
                 z=self.z[indices],
                 aux_pi=self.aux_pi[indices],
                 q=self.q[indices],
             ),
-            target_preds=AgentOutput(
+            target_preds=PolicyAgentOutput(
                 pi=self.target_pi[indices],
                 y=self.target_y[indices],
                 z=self.target_z[indices],
