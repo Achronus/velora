@@ -14,6 +14,7 @@
 # ==============================================================================
 
 from pathlib import Path
+from typing import Self
 
 import jax.numpy as jnp
 from flax import struct
@@ -82,10 +83,186 @@ class PolicyAgentSettings:
 
 
 @struct.dataclass(frozen=True)
-class MetaAgentSettings:
+class DiscoEncoderSettings:
     """
-    Dataclass for `MetaAgent` settings.
+    Dataclass for `DiscoInputEncoder` settings.
+
+    Embedding dimensions can be set manually or computed dynamically based on
+    `prediction_size` using the `create()` method.
+
+    Parameters
+    ----------
+    n_actions : int
+        Number of discrete actions in the action space
+    prediction_size : int
+        Size of the observation/action-conditioned prediction vectors (y, z).
+    q_size : int
+        Size of action-value prediction head.
+    obs_embed_dim : int (optional)
+        Embedding output dimension for observation-conditioned predictions (y).
+        Default is `32`
+    action_embed_dim : int (optional)
+        Embedding output dimension for action-conditional inputs (z, q, pi).
+        Default is `32`
+    scalar_embed_dim : int (optional)
+        Embedding output dimension for scalar inputs (rewards, discounts).
+        Default is `8`
     """
+
+    n_actions: int
+    prediction_size: int
+    q_size: int
+
+    obs_embed_dim: int = 32
+    action_embed_dim: int = 32
+    scalar_embed_dim: int = 16
+
+    @classmethod
+    def create(cls, n_actions: int, prediction_size: int, q_size: int) -> Self:
+        """
+        Creates a new settings object using dynamic computation of embedding dimensions based on `prediction_size`.
+
+        Uses the following ratios:
+            - `obs_embed_dim` = `prediction_size // 2`
+            - `action_embed_dim` = `prediction_size // 2`
+            - `scalar_embed_dim` = `max(prediction_size // 8, 4)`
+
+        Parameters
+        ----------
+        n_actions : int
+            Number of discrete actions in the action space
+        prediction_size : int
+            Size of the observation/action-conditioned prediction vectors (y, z).
+        q_size : int
+            Size of action-value prediction head.
+
+        Returns
+        -------
+        config : DiscoEncoderSettings
+            New settings with computed embedding dimensions
+        """
+        return cls(
+            n_actions=n_actions,
+            prediction_size=prediction_size,
+            q_size=q_size,
+            obs_embed_dim=prediction_size // 2,
+            action_embed_dim=prediction_size // 2,
+            scalar_embed_dim=max(prediction_size // 8, 4),  # Min of 4
+        )
+
+    @property
+    def output_dim(self) -> int:
+        """
+        Total output dimension of the encoder. Used as input to Disco network.
+
+        Returns
+        -------
+        dim : int
+            Flattened embedding dimension
+        """
+        return (
+            self.obs_embed_dim * 2 + self.action_embed_dim * 2 + self.scalar_embed_dim
+        )
+
+    @property
+    def action_input_dim(self) -> int:
+        """
+        Input dimension for action-conditional encoder.
+
+        Combines `(z, q, pi, one_hot_actions)` for normal and target predictions.
+
+        Result: `2 * (prediction_size + q_size + 1) + 1`
+
+        Returns
+        -------
+        dim : int
+            Action encoder input dimension
+        """
+        return 2 * (self.prediction_size + self.q_size + 1) + 1
+
+
+@struct.dataclass(frozen=True)
+class DiscoAgentSettings:
+    """
+    Dataclass for `DiscoAgent` settings.
+
+    Parameters
+    ----------
+    n_hidden : int
+        Number of decision nodes for networks (inter + command nodes)
+    prediction_size : int
+        Size of the observation/action-conditioned prediction vectors (y, z)
+    q_size : int
+        Size of action-value prediction head
+    n_actions : int
+        Number of discrete actions in the action space
+    lr : float (optional)
+        Learning rate for the agent's optimizer. Default is `0.0003`
+    max_grad_norm : float (optional)
+        Maximum gradient norm for gradient clipping. Default is `1.0`
+    sparsity : float (optional)
+        Network connection sparsity for LNNs. Default is `0.5`
+    dynamic_embed_dims : bool (optional)
+        Whether to dynamically compute encoder embedding dimensions based on
+        `prediction_size`. When `False`, uses manual values. Default is `True`
+
+        When `True` uses the following ratios:
+            - `obs_embed_dim` = `prediction_size // 2`
+            - `action_embed_dim` = `prediction_size // 2`
+            - `scalar_embed_dim` = `max(prediction_size // 8, 4)`
+
+    obs_embed_dim : int (optional)
+        Manual embedding dimension for state-conditional predictions (y).
+        Only used when `dynamic_embed_dims=False`. Default is `32`
+    action_embed_dim : int (optional)
+        Manual embedding dimension for action-conditional inputs (z, q, pi).
+        Only used when `dynamic_embed_dims=False`. Default is `32`
+    scalar_embed_dim : int (optional)
+        Manual embedding dimension for scalars (rewards, discounts).
+        Only used when `dynamic_embed_dims=False`. Default is `8`
+    """
+
+    n_hidden: int
+    prediction_size: int
+    q_size: int
+    n_actions: int
+
+    lr: float = 3e-4
+    max_grad_norm: float = 1.0
+    sparsity: float = 0.5
+
+    dynamic_embed_dims: bool = True
+    obs_embed_dim: int = 32
+    action_embed_dim: int = 32
+    scalar_embed_dim: int = 8
+
+    def encoder_config(self) -> DiscoEncoderSettings:
+        """
+        Extracts encoder configuration from agent settings.
+
+        When `dynamic_embed_dims=True`, computes embedding dimensions
+        automatically. Otherwise, uses manual values.
+
+        Returns
+        -------
+        config : DiscoEncoderSettings
+            Encoder configuration
+        """
+        if self.dynamic_embed_dims:
+            return DiscoEncoderSettings.create(
+                self.n_actions,
+                self.prediction_size,
+                self.q_size,
+            )
+
+        return DiscoEncoderSettings(
+            n_actions=self.n_actions,
+            prediction_size=self.prediction_size,
+            q_size=self.q_size,
+            obs_embed_dim=self.obs_embed_dim,
+            action_embed_dim=self.action_embed_dim,
+            scalar_embed_dim=self.scalar_embed_dim,
+        )
 
 
 @struct.dataclass(frozen=True)

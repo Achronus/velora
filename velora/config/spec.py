@@ -106,6 +106,32 @@ class OCMHeadSpec(HeadSpec):
 
 
 @struct.dataclass(frozen=True)
+class DiscoHeadSpec(HeadSpec):
+    """
+    Output head specification for the Disco Meta-Network.
+
+    Parameters
+    ----------
+    pi : LayerSpec
+        Policy targets head
+    y : LayerSpec
+        Observation-conditioned targets head
+    z : LayerSpec
+        Action-conditioned targets head
+    """
+
+    pi: LayerSpec
+    y: LayerSpec
+    z: LayerSpec
+
+    def hidden_count(self) -> int:
+        return self.pi.n_hidden + self.y.n_hidden + self.z.n_hidden
+
+    def hidden_sizes(self) -> Tuple[int, ...]:
+        return (self.pi.n_hidden, self.y.n_hidden, self.z.n_hidden)
+
+
+@struct.dataclass(frozen=True)
 class SingleHeadSpec(HeadSpec):
     """
     Output head specification for a standard motor layer with one output head.

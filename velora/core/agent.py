@@ -28,6 +28,9 @@ from velora.config.settings import DiscoAgentSettings, PolicyAgentSettings
 from velora.config.state import AgentHiddenStates
 from velora.core.optim import scale_by_adam_no_denom
 from velora.models.cnn import ImageEncoder
+from velora.models.encoder import DiscoInputEncoder
+from velora.models.lnn.ncp import LNN
+from velora.models.meta import DiscoNetwork
 from velora.models.policy import ACM, OCM
 
 
@@ -228,3 +231,143 @@ class PolicyAgent:
         # Compute actions
         actions = distrax.Softmax(logits).sample(seed=key_sample)
         return actions
+
+
+class DiscoAgent:
+    """
+    Creates a target agent used to discover RL update (target) rules.
+
+    Combines DiscoRL techniques with Liquid Neural Networks (LNNs).
+
+    Architecture:
+        - Encoder - converts buffer samples into embeddings for the Disco network
+        - Disco Network - processes embeddings backwards through time to produce learned targets `(π̂, ŷ, ẑ)` for training the policy agent
+        - Meta LNN - captures learning dynamics across the agent's lifetime, providing conditioning signals that modulate target generation
+        - Meta Projection - projects meta conditioning to match encoder output to inject lifetime context into target generation
+
+    Parameters
+    ----------
+    config : DiscoAgentSettings
+        Configuration for the update rule agent
+    key : jax.random.PRNGKey
+        Random number generator key
+    """
+
+    def __init__(
+        self,
+        *,
+        config: DiscoAgentSettings,
+        key: chex.PRNGKey,
+    ) -> None:
+        self.config = config
+        self.encoder_config = config.encoder_config()
+
+        encoder_key, disco_key, meta_key, proj_key = jax.random.split(key, 4)
+
+        self.encoder = DiscoInputEncoder(
+            config=self.encoder_config,
+            rngs=nnx.Rngs(encoder_key),
+        )
+
+        self.disco_net = DiscoNetwork(
+            self.encoder_config.output_dim,
+            self.config.n_hidden,
+            self.config.n_actions,
+            self.config.prediction_size,
+            self.config.action_embed_dim,
+            key=disco_key,
+            sparsity=self.config.sparsity,
+        )
+
+        self.meta_lnn = LNN(
+            self.encoder_config.output_dim,
+            self.config.n_hidden,
+            self.disco_net.hidden_size,
+            key=meta_key,
+            sparsity=self.config.sparsity,
+        )
+
+        self.meta_proj = nnx.Linear(
+            self.disco_net.hidden_size,
+            self.encoder_config.output_dim,
+            rngs=nnx.Rngs(proj_key),
+        )
+
+        self.optimizer = optax.chain(
+            optax.clip_by_global_norm(self.config.max_grad_norm),
+            optax.scale(self.config.lr),
+        )
+
+    def __call__(
+        self,
+        samples: BufferSamples,
+        disco_h_state: chex.Array | None = None,
+        meta_h_state: chex.Array | None = None,
+    ) -> Tuple[DiscoAgentOutput, chex.Array, chex.Array]:
+        """
+        Generate targets for agent training.
+
+        Parameters
+        ----------
+        samples : BufferSamples
+            Batch from replay buffer
+        disco_h_state : chex.Array (optional)
+            Hidden state for DiscoNetwork. Shape: `(B, H)`.
+            Default is `None`
+        meta_h_state : chex.Array (optional)
+            Hidden state for MetaLNN. Shape: `(B, H_meta)`.
+            Default is `None`
+
+        Returns
+        -------
+        targets : DiscoAgentOutput
+            Generated targets `(π̂, ŷ, ẑ)`
+        disco_h_state : chex.Array
+            Updated Disco network hidden state
+        meta_h_state : chex.Array
+            Updated Meta-LNN hidden state
+        """
+        # embed: (B, T, E), act_embed: (B, T, A, C)
+        embedding, action_embed = self.encoder(samples)
+        disco_input = embedding
+
+        # Apply meta conditioning from previous update (if available)
+        if meta_h_state is not None:
+            disco_input = self._meta_conditioning(embedding, meta_h_state)
+
+        preds, disco_h_state = self.disco_net(
+            disco_input,
+            action_embed,
+            h_state=disco_h_state,
+        )
+
+        # Update Meta-LNN for next iteration using trajectory summary
+        summary = jnp.mean(embedding, axis=(0, 1))  # (B, T, E) -> (E,)
+        summary = jnp.expand_dims(summary, axis=0)  # (1, E)
+        _, meta_h_state = self.meta_lnn(summary, h_state=meta_h_state)
+
+        targets = DiscoAgentOutput(pi=preds.pi, y=preds.y, z=preds.z)
+        return targets, disco_h_state, meta_h_state
+
+    def _meta_conditioning(
+        self, embedding: chex.Array, meta_h_state: chex.Array
+    ) -> chex.Array:
+        """
+        Applies multiplicative interaction with meta conditioning to encoder output.
+
+        Parameters
+        ----------
+        embedding : chex.Array
+            Encoder output. Shape: `(B, T, E)`
+        meta_h_state : chex.Array
+            Meta-LNN hidden state. Shape: `(B, H_meta)`
+
+        Returns
+        -------
+        result : chex.Array
+            Conditioned embedding. Shape: `(B, T, E)`
+        """
+        # (B, H_meta) -> (B, E)
+        new_h = self.meta_proj(meta_h_state)  # type: ignore
+        new_h = jnp.expand_dims(new_h, axis=1)  # (B, E) -> (B, 1, E)
+        return embedding * new_h

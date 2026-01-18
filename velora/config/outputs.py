@@ -136,9 +136,67 @@ class ACMPredictions:
 
 
 @struct.dataclass
-class AgentOutput:
+class DiscoPredictions:
     """
-    Dataclass for the `VeloraAgent` output.
+    Dataclass for `DiscoNetwork` predictions.
+
+    Parameters
+    ----------
+    embedding : chex.Array
+        Command layer output with shape `(B, T, F)`
+
+        - batch_size (`B`) - the number of samples per timestep.
+        - seq_length (`T`) - the number of sequences (e.g., trajectories).
+        - n_features (`F`) - the number of features.
+
+    pi : jax.Array
+        Policy targets (`π̂,`) with shape `(B, T, A)`:
+
+        - batch_size (`B`) - the number of samples per timestep.
+        - seq_length (`T`) - the number of sequences (e.g., trajectories).
+        - n_actions (`A`) - the number of discrete actions in the action space.
+    y : jax.Array
+        Observation-conditioned targets (`ŷ`) with shape `(B, T, Y)`:
+
+        - batch_size (`B`) - the number of samples per timestep.
+        - seq_length (`T`) - the number of sequences (e.g., trajectories).
+        - y_dim (`Y`) - the size of the observation-conditioned vector.
+    z : jax.Array
+        Action-conditioned targets (`ẑ`) with shape `(B, T, Z)`:
+
+        - batch_size (`B`) - the number of samples per timestep.
+        - seq_length (`T`) - the number of sequences (e.g., trajectories).
+        - z_dim (`Z`) - the size of the action-conditioned vector.
+    """
+
+    embedding: chex.Array
+    pi: chex.Array
+    y: chex.Array
+    z: chex.Array
+
+    def output_values(self, ignore_embed: bool = True) -> Tuple[chex.Array, ...]:
+        """
+        Convert object into a tuple of values.
+
+        Parameters
+        ----------
+        ignore_embed : bool (optional)
+            Flag for including the `embedding` field to the dict. Not added by default.
+            Default is `True`
+
+        Returns
+        -------
+        target_preds : Tuple[chex.Array, ...]
+            Target prediction values in order `(embedding, pi, y, z)`
+        """
+        skip = {"embedding"} if ignore_embed else set()
+        return tuple(getattr(self, f.name) for f in fields(self) if f.name not in skip)
+
+
+@struct.dataclass
+class PolicyAgentOutput:
+    """
+    Dataclass for the `PolicyAgent` output.
 
     If `T` dimension on values is `T=1` use `AgentOutput.create()`.
 
@@ -202,6 +260,40 @@ class AgentOutput:
 
 
 @struct.dataclass
+class DiscoAgentOutput:
+    """
+    Dataclass for the `DiscoAgentOutput` output.
+
+    Parameters
+    ----------
+    pi : jax.Array
+        Policy logits with shape `(B, T, A)`:
+
+        - batch_size (`B`) - the number of samples per timestep.
+        - seq_length (`T`) - the number of sequences (e.g., trajectories).
+        - n_actions (`A`) - the number of discrete actions in the action space.
+
+    y : jax.Array
+        Observation-conditioned prediction vector with shape `(B, T, Y)`:
+
+        - batch_size (`B`) - the number of samples per timestep.
+        - seq_length (`T`) - the number of sequences (e.g., trajectories).
+        - y_dim (`Y`) - the size of the observation-conditioned prediction vector.
+
+    z : jax.Array
+        Action-conditioned prediction vector with shape `(B, T, Z)`:
+
+        - batch_size (`B`) - the number of samples per timestep.
+        - seq_length (`T`) - the number of sequences (e.g., trajectories).
+        - z_dim (`Z`) - the size of the action-conditioned prediction vector.
+    """
+
+    pi: chex.Array
+    y: chex.Array
+    z: chex.Array
+
+
+@struct.dataclass
 class BufferSamples:
     """
     Dataclass for a batch of trajectories sampled from the buffer.
@@ -238,8 +330,8 @@ class BufferSamples:
     actions: chex.Array
     rewards: chex.Array
     discounts: chex.Array
-    preds: AgentOutput
-    target_preds: AgentOutput
+    preds: PolicyAgentOutput
+    target_preds: PolicyAgentOutput
 
     def to_dict(self) -> Dict[str, Any]:
         """
