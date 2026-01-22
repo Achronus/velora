@@ -245,6 +245,36 @@ class PolicyAgent:
         actions = distrax.Softmax(logits).sample(seed=key_sample)
         return actions
 
+    def get_params(self) -> nnx.State:
+        """
+        Extract trainable parameters from all sub-modules.
+
+        Returns
+        -------
+        params : nnx.State
+            Combined parameter states from `(cnn, ocm, acm)`
+        """
+        return nnx.State(
+            {
+                "cnn": nnx.state(self._cnn, nnx.Param),
+                "ocm": nnx.state(self._ocm, nnx.Param),
+                "acm": nnx.state(self._acm, nnx.Param),
+            }
+        )
+
+    def update_params(self, params: nnx.State) -> None:
+        """
+        Update parameters for all sub-modules.
+
+        Parameters
+        ----------
+        params : nnx.State
+            Parameter states to apply
+        """
+        nnx.update(self._cnn, params["cnn"])
+        nnx.update(self._ocm, params["ocm"])
+        nnx.update(self._acm, params["acm"])
+
 
 class DiscoAgent:
     """
@@ -423,6 +453,38 @@ class DiscoAgent:
         new_h = self.meta_proj(meta_h_state)  # type: ignore
         new_h = jnp.expand_dims(new_h, axis=1)  # (B, E) -> (B, 1, E)
         return embedding * new_h
+
+    def get_params(self) -> nnx.State:
+        """
+        Extract trainable parameters from all sub-modules.
+
+        Returns
+        -------
+        params : nnx.State
+            Combined parameter states from `(encoder, disco_net, meta_lnn, meta_proj)`
+        """
+        return nnx.State(
+            {
+                "encoder": nnx.state(self._encoder, nnx.Param),
+                "disco_net": nnx.state(self._disco_net, nnx.Param),
+                "meta_lnn": nnx.state(self._meta_lnn, nnx.Param),
+                "meta_proj": nnx.state(self._meta_proj, nnx.Param),
+            }
+        )
+
+    def update_params(self, params: nnx.State) -> None:
+        """
+        Update parameters for all sub-modules.
+
+        Parameters
+        ----------
+        params : nnx.State
+            Parameter states to apply
+        """
+        nnx.update(self._encoder, params["encoder"])
+        nnx.update(self._disco_net, params["disco_net"])
+        nnx.update(self._meta_lnn, params["meta_lnn"])
+        nnx.update(self._meta_proj, params["meta_proj"])
 
 
 class ValueAgent:
