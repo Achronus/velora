@@ -31,32 +31,46 @@ class ElapsedTime:
         Minutes taken
     secs : float
         Seconds taken
+    start_time : float (optional)
+        Start time. Default is `0.0`
     """
 
     hrs: float
     mins: float
     secs: float
+    start_time: float = 0.0
 
     @classmethod
-    def elapsed(cls, start_time: float) -> Self:
+    def create(cls) -> Self:
         """
-        Calculates the elapsed time from `now` and a `start_time`.
-
-        Parameters
-        ----------
-        start_time : float
-            The start time of an event
+        Creates a new instance with a new start time.
 
         Returns
         -------
         self : Self
             A newly populated storage container
         """
-        elapsed = time.time() - start_time
+        return cls(hrs=0.0, mins=0.0, secs=0.0, start_time=time.time())
+
+    def elapsed(self) -> Self:
+        """
+        Calculates the elapsed time from `now` and a `start_time`.
+
+        Returns
+        -------
+        self : Self
+            A newly populated storage container
+        """
+        elapsed = time.time() - self.start_time
         hrs, remainder = divmod(elapsed, 3600)
         mins, secs = divmod(remainder, 60)
 
-        return cls(hrs=hrs, mins=mins, secs=secs)
+        return self.__class__(
+            hrs=hrs,
+            mins=mins,
+            secs=secs,
+            start_time=self.start_time,
+        )
 
     def __str__(self) -> str:
         return f"{self.hrs:.2f}h {self.mins:.2f}m {self.secs:.2f}s"
