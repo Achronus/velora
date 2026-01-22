@@ -13,7 +13,7 @@
 # limitations under the License.
 # ==============================================================================
 
-from dataclasses import fields
+from dataclasses import field, fields
 from typing import Any, Dict, Self, Tuple
 
 import chex
@@ -382,7 +382,7 @@ class AgentLosses:
     z: chex.Array
     value: chex.Array
     aux_pi: chex.Array
-    total: chex.Array = jnp.array(0)
+    total: chex.Array = field(default_factory=lambda: jnp.array(0))
 
     def compute_total(self, loss_costs: LossCostSettings) -> Self:
         """

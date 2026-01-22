@@ -66,11 +66,10 @@ class MovingAverage:
         state : EMAState
             A new EMA state object
         """
-        zeros = jax.tree.map(lambda: jnp.zeros((), jnp.float32), self._x)
         return EMAState(
-            moment1=zeros,
-            moment2=zeros,
-            decay_product=jnp.ones([], jnp.float32),
+            moment1=jnp.zeros(()),
+            moment2=jnp.zeros(()),
+            decay_product=jnp.ones([]),
         )
 
     def update(
