@@ -25,8 +25,7 @@ from flax import nnx
 
 from velora.config.outputs import BufferSamples, DiscoAgentOutput, PolicyAgentOutput
 from velora.config.settings import DiscoAgentSettings, PolicyAgentSettings
-from velora.config.state import AgentHiddenStates
-from velora.core.optim import scale_by_adan_no_denom
+from velora.config.state import PolicyAgentHiddenStates
 from velora.models.cnn import ImageEncoder
 from velora.models.encoder import DiscoInputEncoder
 from velora.models.lnn.ncp import LNN
@@ -139,7 +138,7 @@ class PolicyAgent:
         ocm_h_state: Optional[chex.Array] = None,
         acm_h_state: Optional[chex.Array] = None,
         timespans: Optional[chex.Array] = None,
-    ) -> Tuple[PolicyAgentOutput, AgentHiddenStates]:
+    ) -> Tuple[PolicyAgentOutput, PolicyAgentHiddenStates]:
         """
         Forward pass through the agent.
 
@@ -179,7 +178,7 @@ class PolicyAgent:
         -------
         preds : AgentOutput
             An object of agent predictions
-        h_state : AgentHiddenStates
+        h_state : PolicyAgentHiddenStates
             An object of the agents hidden states
         """
 
@@ -204,7 +203,7 @@ class PolicyAgent:
             PolicyAgentOutput.create(
                 *ocm_preds.output_values(), *acm_preds.output_values()
             ),
-            AgentHiddenStates(ocm=ocm_h_state, acm=acm_h_state),
+            PolicyAgentHiddenStates(ocm=ocm_h_state, acm=acm_h_state),
         )
 
     def act(self, logits: chex.Array) -> chex.Array:

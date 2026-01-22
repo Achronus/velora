@@ -59,9 +59,9 @@ class AgentTrainerState:
 
 
 @struct.dataclass
-class AgentHiddenStates:
+class PolicyAgentHiddenStates:
     """
-    Dataclass for agent hidden states.
+    Dataclass for `PolicyAgent` hidden states.
 
     Parameters
     ----------
@@ -86,7 +86,7 @@ class AgentHiddenStates:
 @struct.dataclass
 class BundledHiddenStates:
     """
-    Dataclass for bundled hidden states used during data collection.
+    Dataclass for bundled hidden states for the `AgentTrainer` used during data collection.
 
     Parameters
     ----------
@@ -137,8 +137,8 @@ class BundledHiddenStates:
 
     def update(
         self,
-        h_state: AgentHiddenStates,
-        target_h_state: AgentHiddenStates,
+        h_state: PolicyAgentHiddenStates,
+        target_h_state: PolicyAgentHiddenStates,
     ) -> Self:
         """
         Update hidden states from forward pass outputs.
