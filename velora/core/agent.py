@@ -423,3 +423,166 @@ class DiscoAgent:
         new_h = self.meta_proj(meta_h_state)  # type: ignore
         new_h = jnp.expand_dims(new_h, axis=1)  # (B, E) -> (B, 1, E)
         return embedding * new_h
+
+
+class ValueAgent:
+    """
+    Value function agent for computing state values `V(s)` during meta-training.
+
+    Architecture:
+        1. CNN Encoder - extracts visual features from image observations
+        2. LNN - processes encoded features to produce
+           state value estimates
+
+    Parameters
+    ----------
+    obs_spec : gym.spaces.Box
+        A single observation space of the vectorized Gymnasium environment
+    n_hidden : int
+        Number of decision nodes for policy networks (inter + command nodes)
+    key : jax.random.PRNGKey
+        Random number generator key
+    sparsity : float (optional)
+        Network connection sparsity between neurons used for the Liquid Neural
+        Networks (LNNs). Default is `0.5`.
+
+        Must be a value between `[0.1, 0.9]`:
+
+            - Where `0.1` neurons are very dense
+            - Where `0.9` neurons are very sparse
+    jit_compile : bool (optional)
+        Flag to enable/disable JIT compilation. Default is `False`
+    """
+
+    def __init__(
+        self,
+        obs_spec: gym.spaces.Box,
+        n_hidden: int,
+        *,
+        key: chex.PRNGKey,
+        sparsity: float = 0.5,
+        jit_compile: bool = False,
+    ) -> None:
+        self.obs_spec = obs_spec
+        self.key = key
+
+        key_cnn, key_value = jax.random.split(self.key, 2)
+
+        self._cnn = ImageEncoder(
+            obs_spec.shape[-1],
+            n_hidden,
+            key=key_cnn,
+        )
+
+        self._net = LNN(
+            self._cnn.output_dim,
+            n_hidden,
+            out_features=1,
+            key=key_value,
+            sparsity=sparsity,
+        )
+
+        self.cnn, self.net = self._compile(jit_compile)
+
+    def _compile(self, jit_compile: bool) -> Tuple[ImageEncoder, LNN]:
+        """
+        Returns JIT-compiled or original modules based on compilation flag.
+
+        Parameters
+        ----------
+        jit_compile : bool
+            Whether to JIT compile the modules
+
+        Returns
+        -------
+        cnn : ImageEncoder
+            CNN encoder (possibly JIT-wrapped)
+        net : LNN
+            Value network (possibly JIT-wrapped)
+        """
+        if jit_compile:
+            return nnx.jit(self._cnn), nnx.jit(self._net)  # type: ignore
+
+        return self._cnn, self._net
+
+    def __call__(
+        self,
+        obs: chex.Array,
+        *,
+        h_state: Optional[chex.Array] = None,
+        timespans: Optional[chex.Array] = None,
+    ) -> Tuple[chex.Array, chex.Array]:
+        """
+        Forward pass through the agent.
+
+        Parameters
+        ----------
+        obs : jax.Array
+            Image input observations `(B, H, W, C)` or `(B, T, H, W, C)`
+
+            - `batch_size (B)` the number of samples per timestep
+            - `seq_length (T)` the number of sequences (e.g., trajectories)
+            - `height (H)` the height of the image observation
+            - `width (W)` the width of the image observation
+            - `channels (C)` the number of channels in the image
+
+        h_state : jax.Array (optional)
+            Hidden state for the network `(B, HS)`. If `None`, initializes to zeros.
+            Default is `None`
+
+            - `batch_size (B)` the number of samples per timestep
+            - `n_units (HS)` the total number of hidden neurons
+
+        timespans : jax.Array (optional)
+            Time intervals between observations `(T,)`. If `None`, uses uniform
+            time intervals. Default is `None`
+
+            - `seq_length (T)` the number of sequences (e.g., trajectories)
+
+
+        Returns
+        -------
+        v : chex.Array
+            State-value estimates with shape `(B, T, 1)`
+        h_state : chex.Array
+            Updated hidden state
+        """
+        # Encode images -> (B, T, F)
+        features = self.cnn(obs)
+
+        # Compute state-value -> (B, T, 1)
+        v, h_state = self.net(
+            features,
+            h_state=h_state,
+            timespans=timespans,
+        )
+
+        return v, h_state
+
+    def get_params(self) -> nnx.State:
+        """
+        Extract trainable parameters from all sub-modules.
+
+        Returns
+        -------
+        params : nnx.State
+            Combined parameter states from `(cnn, net)`
+        """
+        return nnx.State(
+            {
+                "cnn": nnx.state(self._cnn, nnx.Param),
+                "net": nnx.state(self._net, nnx.Param),
+            }
+        )
+
+    def update_params(self, params: nnx.State) -> None:
+        """
+        Update parameters for all sub-modules.
+
+        Parameters
+        ----------
+        params : nnx.State
+            Parameter states to apply
+        """
+        nnx.update(self._cnn, params["cnn"])
+        nnx.update(self._net, params["net"])
