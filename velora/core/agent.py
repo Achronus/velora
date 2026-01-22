@@ -95,14 +95,14 @@ class PolicyAgent:
         # Categorical bins for Q-values
         self.categorical_bins = config.categorical_bins()
 
-        self.cnn = ImageEncoder(
+        self._cnn = ImageEncoder(
             obs_spec.shape[-1],
             config.n_hidden,
             key=key_cnn,
         )
 
-        self.ocm = OCM(
-            self.cnn.output_dim,
+        self._ocm = OCM(
+            self._cnn.output_dim,
             config.n_hidden,
             config.prediction_size,
             self.n_actions,
@@ -110,8 +110,8 @@ class PolicyAgent:
             sparsity=config.sparsity,
         )
 
-        self.acm = ACM(
-            self.ocm.embedding_size,
+        self._acm = ACM(
+            self._ocm.embedding_size,
             config.n_hidden,
             config.prediction_size,
             self.n_actions,
@@ -120,16 +120,30 @@ class PolicyAgent:
             sparsity=config.sparsity,
         )
 
-        self.optimizer = optax.chain(
-            scale_by_adan_no_denom(),
-            optax.clip(config.max_grad_norm),
-            optax.scale(-config.lr),
-        )
+        self.cnn, self.ocm, self.acm = self._compile(jit_compile)
 
+    def _compile(self, jit_compile: bool) -> Tuple[ImageEncoder, OCM, ACM]:
+        """
+        Returns JIT-compiled or original modules based on compilation flag.
+
+        Parameters
+        ----------
+        jit_compile : bool
+            Whether to JIT compile the modules
+
+        Returns
+        -------
+        cnn : ImageEncoder
+            CNN encoder (possibly JIT-wrapped)
+        ocm : OCM
+            Observation-Conditional Model (possibly JIT-wrapped)
+        acm : ACM
+            Action-Conditional Model (possibly JIT-wrapped)
+        """
         if jit_compile:
-            self.cnn = nnx.jit(self.cnn)
-            self.ocm = nnx.jit(self.ocm)
-            self.acm = nnx.jit(self.acm)
+            return nnx.jit(self._cnn), nnx.jit(self._ocm), nnx.jit(self._acm)  # type: ignore
+
+        return self._cnn, self._ocm, self._acm
 
     def __call__(
         self,
@@ -250,6 +264,8 @@ class DiscoAgent:
         Configuration for the update rule agent
     key : jax.random.PRNGKey
         Random number generator key
+    jit_compile : bool (optional)
+        Flag to enable/disable JIT compilation. Default is `False`
     """
 
     def __init__(
@@ -257,18 +273,19 @@ class DiscoAgent:
         *,
         config: DiscoAgentSettings,
         key: chex.PRNGKey,
+        jit_compile: bool = False,
     ) -> None:
         self.config = config
         self.encoder_config = config.encoder_config()
 
         encoder_key, disco_key, meta_key, proj_key = jax.random.split(key, 4)
 
-        self.encoder = DiscoInputEncoder(
+        self._encoder = DiscoInputEncoder(
             config=self.encoder_config,
             rngs=nnx.Rngs(encoder_key),
         )
 
-        self.disco_net = DiscoNetwork(
+        self._disco_net = DiscoNetwork(
             self.encoder_config.output_dim,
             self.config.n_hidden,
             self.config.n_actions,
@@ -278,24 +295,60 @@ class DiscoAgent:
             sparsity=self.config.sparsity,
         )
 
-        self.meta_lnn = LNN(
+        self._meta_lnn = LNN(
             self.encoder_config.output_dim,
             self.config.n_hidden,
-            self.disco_net.hidden_size,
+            self._disco_net.hidden_size,
             key=meta_key,
             sparsity=self.config.sparsity,
         )
 
-        self.meta_proj = nnx.Linear(
-            self.disco_net.hidden_size,
+        self._meta_proj = nnx.Linear(
+            self._disco_net.hidden_size,
             self.encoder_config.output_dim,
             rngs=nnx.Rngs(proj_key),
         )
 
+        self.encoder, self.disco_net, self.meta_lnn, self.meta_proj = self._compile(
+            jit_compile
+        )
+
         self.optimizer = optax.chain(
             optax.clip_by_global_norm(self.config.max_grad_norm),
-            optax.scale(self.config.lr),
+            optax.adan(self.config.lr),
         )
+
+    def _compile(
+        self, jit_compile: bool
+    ) -> Tuple[DiscoInputEncoder, DiscoNetwork, LNN, nnx.Linear]:
+        """
+        Returns JIT-compiled or original modules based on compilation flag.
+
+        Parameters
+        ----------
+        jit_compile : bool
+            Whether to JIT compile the modules
+
+        Returns
+        -------
+        encoder : DiscoInputEncoder
+            Input encoder (possibly JIT-wrapped)
+        disco_net : DiscoNetwork
+            Disco network (possibly JIT-wrapped)
+        meta_lnn : LNN
+            Meta LNN (possibly JIT-wrapped)
+        meta_proj : nnx.Linear
+            Meta projection layer (possibly JIT-wrapped)
+        """
+        if jit_compile:
+            return (
+                nnx.jit(self._encoder),
+                nnx.jit(self._disco_net),
+                nnx.jit(self._meta_lnn),
+                nnx.jit(self._meta_proj),
+            )  # type: ignore
+
+        return self._encoder, self._disco_net, self._meta_lnn, self._meta_proj
 
     def __call__(
         self,
