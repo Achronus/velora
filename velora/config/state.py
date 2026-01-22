@@ -24,6 +24,26 @@ from flax import struct
 from velora.config.outputs import BufferSamples, PolicyAgentOutput
 
 
+@struct.dataclass
+class EMAState:
+    """
+    Exponential Moving Average (EMA) state.
+
+    Parameters
+    ----------
+    moment1 : jax.ArrayTree
+        The first set of moments
+    moment2 : jax.ArrayTree
+        The second set of moments
+    decay_product : jax.Array
+        The product of all decays from start of accumulation
+    """
+
+    moment1: chex.ArrayTree
+    moment2: chex.ArrayTree
+    decay_product: chex.Array
+
+
 @struct.dataclass(frozen=True)
 class AgentTrainerState:
     """

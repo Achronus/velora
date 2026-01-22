@@ -295,11 +295,13 @@ class DiscoValueSettings:
         The loss weight. Controls how much the meta-value function loss contributes
         to the total loss. Default is `1.0`
     ema_decay : float (optional)
-        Exponential moving average (EMA) decay rate for advantage normalization.
-        Default is `0.99`
+        Exponential moving average (EMA) decay rate for normalizing
+        advantages in the meta policy gradient loss. Controls how
+        quickly the meta-level normalization statistics adapt.
+        Default is `0.999`
     ema_eps : float (optional)
-        Exponential moving average (EMA) epsilon for numerical stability.
-        Default is `0.000001`
+        Epsilon for numerical stability when normalizing meta-level advantages.
+        Default is `1e-6`
     """
 
     lr: float = 3e-4
@@ -307,7 +309,7 @@ class DiscoValueSettings:
     gamma: float = 0.997
     td_lambda: float = 0.95
     loss_weight: float = 1.0  # outer_value_cost
-    ema_decay: float = 0.99
+    ema_decay: float = 0.999
     ema_eps: float = 1e-6
 
 
@@ -378,6 +380,8 @@ class AgentTrainerSettings:
         Configuration for `PolicyAgent` architecture
     buffer : MixedBufferSettings
         Configuration for trajectory buffer
+    loss_cost : LossCostSettings
+        Loss component weights
     num_envs : int
         Number of vectorized environments for throughput
     n_updates : int
@@ -386,17 +390,28 @@ class AgentTrainerSettings:
         EMA coefficient for target network updates
     batch_size : int
         Number of trajectories per training batch
+    ema_decay : float
+        Exponential moving average (EMA) decay rate for normalizing
+        advantages and TD errors during policy agent value learning.
+        Higher values give more weight to historical statistics
+    ema_eps : float
+        Epsilon for numerical stability when normalizing by EMA
+        variance during policy agent training
     checkpoint_dir : pathlib.Path
         Directory for saving/loading agent states
     """
 
     agent: PolicyAgentSettings
     buffer: MixedBufferSettings
+    loss_costs: LossCostSettings
 
     num_envs: int
     n_updates: int
     tau: float
     batch_size: int
+
+    ema_decay: float
+    ema_eps: float
 
     checkpoint_dir: Path
 
@@ -438,6 +453,14 @@ class RuleTrainerSettings:
         Number of trajectories per training batch. Default is `96`
     tau : float (optional)
         EMA coefficient for target network updates. Default is `0.9`
+    ema_decay : float (optional)
+        Exponential moving average (EMA) decay rate for normalizing
+        advantages and TD errors during policy agent value learning.
+        Higher values give more weight to historical statistics.
+        Default is `0.999`
+    ema_eps : float (optional)
+        Epsilon for numerical stability when normalizing by EMA
+        variance during policy agent training. Default is `1e-6`
     checkpoint_dir : pathlib.Path (optional)
         Directory for saving agent states and checkpoints.
         Default is `./checkpoints`
@@ -460,6 +483,9 @@ class RuleTrainerSettings:
     batch_size: int = 96
     tau: float = 0.9
 
+    ema_decay: float = 0.999
+    ema_eps: float = 1e-6
+
     checkpoint_dir: Path = Path(".", "checkpoints")
     checkpoint_freq: int = 100
 
@@ -479,5 +505,8 @@ class RuleTrainerSettings:
             n_updates=self.n_updates,
             tau=self.tau,
             batch_size=self.batch_size,
+            ema_decay=self.ema_decay,
+            ema_eps=self.ema_eps,
             checkpoint_dir=self.checkpoint_dir,
+            loss_costs=self.loss_cost,
         )
