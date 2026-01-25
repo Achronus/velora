@@ -370,6 +370,27 @@ class LossCostSettings:
 
 
 @struct.dataclass(frozen=True)
+class CheckpointSettings:
+    """
+    Dataclass for `CheckpointManager` settings.
+
+    Parameters
+    ----------
+    dirpath : Path (optional)
+        Directory for saving agent states and checkpoints.
+        Default is `./checkpoints`
+    freq : int (optional)
+        Checkpoint save frequency between timesteps. Default is `100_000`
+    max : int (optional)
+        Maximum number of checkpoints to store. Default is `100`
+    """
+
+    dirpath: Path = Path(".", "checkpoints")
+    freq: int = 100_000
+    max: int = 100
+
+
+@struct.dataclass(frozen=True)
 class AgentTrainerSettings:
     """
     Dataclass for `AgentTrainer` settings.
