@@ -2723,6 +2723,20 @@ wheels = [
 ]
 
 [[package]]
+name = "tensorboardx"
+version = "2.6.4"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+    { name = "packaging" },
+    { name = "protobuf" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/2b/c5/d4cc6e293fb837aaf9f76dd7745476aeba8ef7ef5146c3b3f9ee375fe7a5/tensorboardx-2.6.4.tar.gz", hash = "sha256:b163ccb7798b31100b9f5fa4d6bc22dad362d7065c2f24b51e50731adde86828", size = 4769801, upload-time = "2025-06-10T22:37:07.419Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e0/1d/b5d63f1a6b824282b57f7b581810d20b7a28ca951f2d5b59f1eb0782c12b/tensorboardx-2.6.4-py3-none-any.whl", hash = "sha256:5970cf3a1f0a6a6e8b180ccf46f3fe832b8a25a70b86e5a237048a7c0beb18e2", size = 87201, upload-time = "2025-06-10T22:37:05.44Z" },
+]
+
+[[package]]
 name = "tensorstore"
 version = "0.1.80"
 source = { registry = "https://pypi.org/simple" }
@@ -2915,6 +2929,7 @@ dependencies = [
     { name = "optax" },
     { name = "rlax" },
     { name = "safetensors" },
+    { name = "tensorboardx" },
 ]
 
 [package.dev-dependencies]
@@ -2943,6 +2958,7 @@ requires-dist = [
     { name = "optax", specifier = ">=0.2.6" },
     { name = "rlax", specifier = ">=0.1.8" },
     { name = "safetensors", specifier = ">=0.7.0" },
+    { name = "tensorboardx", specifier = ">=2.6.4" },
 ]
 
 [package.metadata.requires-dev]
