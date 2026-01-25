@@ -285,6 +285,26 @@ class CollectState:
             target_preds=target_batch_preds,
         )
 
+    def episode_metrics(self) -> Dict[str, float] | None:
+        """
+        Return episode metrics if any episodes completed.
+
+        Returns
+        -------
+        metrics : Dict[str, float] | None
+            Episode metrics dict, or `None` if no episodes completed
+        """
+        if not self.completed_returns:
+            return None
+
+        return {
+            "episode/reward_mean": self.mean_episode_return,
+            "episode/reward_min": float(min(self.completed_returns)),
+            "episode/reward_max": float(max(self.completed_returns)),
+            "episode/length_mean": self.mean_episode_length,
+            "episode/count": self.num_completed_episodes,
+        }
+
     @property
     def num_completed_episodes(self) -> int:
         return len(self.completed_returns)

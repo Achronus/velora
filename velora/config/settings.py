@@ -386,6 +386,31 @@ class CheckpointSettings:
 
 
 @struct.dataclass(frozen=True)
+class MetricLoggerSettings:
+    """
+    Dataclass for `MetricsLogger` settings.
+
+    Default settings create the following experiment directory:
+    `logs/disco_[ddmmyy]_[hhmmss]/`.
+
+    Parameters
+    ----------
+    base_dir : Path (optional)
+        Root directory for Tensorboard experiment logs. Default is `./logs`
+    experiment_name : str (optional)
+        Sub-directory name for Tensorboard experiment logs.
+        Get's combined with `base_dir`. Default is `disco`.
+    timestamp : bool (optional)
+        Whether to append timestamps to experiment directory.
+        Uses timestamp format: `ddmmyy_hhmmss`. Default is `True`
+    """
+
+    base_dir: Path = Path("logs")
+    experiment_name: str = "disco"
+    timestamp: bool = True
+
+
+@struct.dataclass(frozen=True)
 class AgentTrainerSettings:
     """
     Dataclass for `AgentTrainer` settings.
@@ -458,6 +483,8 @@ class RuleTrainerSettings:
         Loss component weights. Default is `LossCostSettings()`
     checkpoint : CheckpointSettings (optional)
         Configuration for checkpoints. Default is `CheckpointSettings()`
+    logger : MetricLoggerSettings (optional)
+        Configuration for `MetricsLogger`. Default is `MetricLoggerSettings()`
     meta_lr : float (optional)
         Learning rate for meta-network optimizer. Default is `0.001`
     meta_grad_clip : float (optional)
@@ -490,6 +517,7 @@ class RuleTrainerSettings:
     buffer: MixedBufferSettings = MixedBufferSettings()
     loss_cost: LossCostSettings = LossCostSettings()
     checkpoint: CheckpointSettings = CheckpointSettings()
+    logger: MetricLoggerSettings = MetricLoggerSettings()
 
     meta_lr: float = 0.001
     meta_grad_clip: float = 1.0

@@ -326,6 +326,27 @@ class DiscoValueOutputs:
     normalized_td: chex.Array
     rho: chex.Array
 
+    def to_metrics(self) -> Dict[str, float]:
+        """
+        Convert to metrics dict for logging.
+
+        Returns
+        -------
+        dict : Dict[str, float]
+            Object in dictionary format
+        """
+        return {
+            "value/mean": float(self.value.mean()),
+            "value/advantage_mean": float(self.advantages.mean()),
+            "value/advantage_std": float(self.advantages.std()),
+            "value/normalized_advantage_mean": float(self.normalized_advantages.mean()),
+            "value/normalized_advantage_std": float(self.normalized_advantages.std()),
+            "value/td_mean": float(self.td.mean()),
+            "value/td_std": float(self.td.std()),
+            "value/normalized_td_mean": float(self.normalized_td.mean()),
+            "value/rho_mean": float(self.rho.mean()),
+        }
+
 
 @struct.dataclass
 class BufferSamples:
@@ -463,3 +484,16 @@ class AgentLosses:
             if f.name != "total"
         )
         return self.__replace__(total=jnp.array(total))
+
+    def to_metrics(self) -> Dict[str, float]:
+        """
+        Convert to metrics dict for logging.
+
+        Returns
+        -------
+        dict : Dict[str, float]
+            Object in dictionary format
+        """
+        return {
+            f"inner/{f.name}_loss": float(getattr(self, f.name)) for f in fields(self)
+        }
