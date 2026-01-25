@@ -24,7 +24,11 @@ import optax
 from flax import nnx
 
 from velora.config.outputs import BufferSamples, DiscoAgentOutput, PolicyAgentOutput
-from velora.config.settings import DiscoAgentSettings, PolicyAgentSettings
+from velora.config.settings import (
+    DiscoAgentSettings,
+    DiscoValueSettings,
+    PolicyAgentSettings,
+)
 from velora.config.state import PolicyAgentHiddenStates
 from velora.models.cnn import ImageEncoder
 from velora.models.encoder import DiscoInputEncoder
@@ -487,9 +491,12 @@ class DiscoAgent:
         nnx.update(self._meta_proj, params["meta_proj"])
 
 
-class ValueAgent:
+class DiscoValueAgent:
     """
     Value function agent for computing state values `V(s)` during meta-training.
+
+    Estimates advantages for computing meta-gradients during target rule
+    discovery.
 
     Architecture:
         1. CNN Encoder - extracts visual features from image observations
@@ -502,6 +509,8 @@ class ValueAgent:
         A single observation space of the vectorized Gymnasium environment
     n_hidden : int
         Number of decision nodes for policy networks (inter + command nodes)
+    config : DiscoValueSettings
+        Value function configuration settings
     key : jax.random.PRNGKey
         Random number generator key
     sparsity : float (optional)
@@ -521,11 +530,13 @@ class ValueAgent:
         obs_spec: gym.spaces.Box,
         n_hidden: int,
         *,
+        config: DiscoValueSettings,
         key: chex.PRNGKey,
         sparsity: float = 0.5,
         jit_compile: bool = False,
     ) -> None:
         self.obs_spec = obs_spec
+        self.config = config
         self.key = key
 
         key_cnn, key_value = jax.random.split(self.key, 2)

@@ -268,18 +268,14 @@ class DiscoAgentSettings:
 @struct.dataclass(frozen=True)
 class DiscoValueSettings:
     """
-    Dataclass for `DiscoValueNetwork` settings.
-
-    The target-value function estimates advantages for computing meta-gradients
-    during target rule discovery. It is **NOT** the agent's value function - it's
-    infrastructure for meta-optimization.
+    Dataclass for `DiscoValueAgent` settings.
 
     Parameters
     ----------
     lr : float (optional)
         Learning rate. Default is `0.0003`
     max_grad_clip : float (optional)
-        Maximum value gradients can be. Default is `1.0`
+        Maximum gradient clip value. Default is `1.0`
     gamma : float (optional)
         Discount factor for rewards. Default is `0.997`
     td_lambda : float (optional)
@@ -292,23 +288,22 @@ class DiscoValueSettings:
         - `λ=0.95` → Blend of n-step returns (weighted toward longer horizons)
 
     loss_weight : float (optional)
-        The loss weight. Controls how much the meta-value function loss contributes
-        to the total loss. Default is `1.0`
+        Weight for value loss contribution to total meta-loss. Default is `1.0`
     ema_decay : float (optional)
         Exponential moving average (EMA) decay rate for normalizing
         advantages in the meta policy gradient loss. Controls how
         quickly the meta-level normalization statistics adapt.
         Default is `0.999`
     ema_eps : float (optional)
-        Epsilon for numerical stability when normalizing meta-level advantages.
+        Epsilon for numerical stability in EMA normalization.
         Default is `1e-6`
     """
 
     lr: float = 3e-4
-    max_grad_clip: float = 1.0  # max_abs_update
+    max_grad_clip: float = 1.0
     gamma: float = 0.997
     td_lambda: float = 0.95
-    loss_weight: float = 1.0  # outer_value_cost
+    loss_weight: float = 1.0
     ema_decay: float = 0.999
     ema_eps: float = 1e-6
 
@@ -401,8 +396,12 @@ class AgentTrainerSettings:
         Configuration for `PolicyAgent` architecture
     buffer : MixedBufferSettings
         Configuration for trajectory buffer
+    value : DiscoValueSettings
+        Configuration for the Disco value function
     loss_cost : LossCostSettings
         Loss component weights
+    checkpoint : CheckpointSettings
+        Configuration for checkpoints
     num_envs : int
         Number of vectorized environments for throughput
     n_updates : int
@@ -418,13 +417,13 @@ class AgentTrainerSettings:
     ema_eps : float
         Epsilon for numerical stability when normalizing by EMA
         variance during policy agent training
-    checkpoint_dir : pathlib.Path
-        Directory for saving/loading agent states
     """
 
     agent: PolicyAgentSettings
     buffer: MixedBufferSettings
+    value: DiscoValueSettings
     loss_costs: LossCostSettings
+    checkpoint: CheckpointSettings
 
     num_envs: int
     n_updates: int
@@ -433,8 +432,6 @@ class AgentTrainerSettings:
 
     ema_decay: float
     ema_eps: float
-
-    checkpoint_dir: Path
 
 
 @struct.dataclass(frozen=True)
@@ -459,6 +456,8 @@ class RuleTrainerSettings:
         Configuration for trajectory buffer. Default is `MixedBufferSettings()`
     loss_cost : LossCostSettings (optional)
         Loss component weights. Default is `LossCostSettings()`
+    checkpoint : CheckpointSettings (optional)
+        Configuration for checkpoints. Default is `CheckpointSettings()`
     meta_lr : float (optional)
         Learning rate for meta-network optimizer. Default is `0.001`
     meta_grad_clip : float (optional)
@@ -482,18 +481,15 @@ class RuleTrainerSettings:
     ema_eps : float (optional)
         Epsilon for numerical stability when normalizing by EMA
         variance during policy agent training. Default is `1e-6`
-    checkpoint_dir : pathlib.Path (optional)
-        Directory for saving agent states and checkpoints.
-        Default is `./checkpoints`
-    checkpoint_freq : int (optional)
-        Meta-steps between full checkpoints. Default is `100`
     """
 
     agent: PolicyAgentSettings
     disco_agent: DiscoAgentSettings
     disco_value: DiscoValueSettings = DiscoValueSettings()
+
     buffer: MixedBufferSettings = MixedBufferSettings()
     loss_cost: LossCostSettings = LossCostSettings()
+    checkpoint: CheckpointSettings = CheckpointSettings()
 
     meta_lr: float = 0.001
     meta_grad_clip: float = 1.0
@@ -507,9 +503,6 @@ class RuleTrainerSettings:
     ema_decay: float = 0.999
     ema_eps: float = 1e-6
 
-    checkpoint_dir: Path = Path(".", "checkpoints")
-    checkpoint_freq: int = 100
-
     def agent_trainer_config(self) -> AgentTrainerSettings:
         """
         Sets the configuration for the `AgentTrainer`.
@@ -522,12 +515,13 @@ class RuleTrainerSettings:
         return AgentTrainerSettings(
             agent=self.agent,
             buffer=self.buffer,
+            value=self.disco_value,
             num_envs=self.num_envs,
             n_updates=self.n_updates,
             tau=self.tau,
             batch_size=self.batch_size,
             ema_decay=self.ema_decay,
             ema_eps=self.ema_eps,
-            checkpoint_dir=self.checkpoint_dir,
+            checkpoint=self.checkpoint,
             loss_costs=self.loss_cost,
         )

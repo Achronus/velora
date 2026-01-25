@@ -296,6 +296,38 @@ class DiscoAgentOutput:
 
 
 @struct.dataclass
+class DiscoValueOutputs:
+    """
+    Outputs from value function computation.
+
+    Parameters
+    ----------
+    value : chex.Array
+        State value estimates `V(s)`. Shape: `(T, B)`
+    value_target : chex.Array
+        V-trace value targets. Shape: `(T-1, B)`
+    advantages : chex.Array
+        Advantage estimates `A(s, a)`. Shape: `(T-1, B)`
+    normalized_advantages : chex.Array
+        EMA-normalized advantages. Shape: `(T-1, B)`
+    td : chex.Array
+        Temporal difference errors. Shape: `(T-1, B)`
+    normalized_td : chex.Array
+        EMA-normalized TD errors. Shape: `(T-1, B)`
+    rho : chex.Array
+        Importance sampling weights. Shape: `(T-1, B)`
+    """
+
+    value: chex.Array
+    value_target: chex.Array
+    advantages: chex.Array
+    normalized_advantages: chex.Array
+    td: chex.Array
+    normalized_td: chex.Array
+    rho: chex.Array
+
+
+@struct.dataclass
 class BufferSamples:
     """
     Dataclass for a batch of trajectories sampled from the buffer.
@@ -367,9 +399,6 @@ class AgentLosses:
     z : chex.Array
         Action-conditioned prediction loss. KL divergence between
         agent's `z` predictions and meta-network's target `ẑ`.
-    value : chex.Array
-        Distributional value loss. TD error for categorical Q-value
-        predictions.
     aux_pi : chex.Array
         Auxiliary policy loss. Prediction error for the auxiliary policy head (predicts policy from action-conditioned representations).
     total : chex.Array (optional)
@@ -380,7 +409,6 @@ class AgentLosses:
     pi: chex.Array
     y: chex.Array
     z: chex.Array
-    value: chex.Array
     aux_pi: chex.Array
     total: chex.Array = field(default_factory=lambda: jnp.array(0))
 
