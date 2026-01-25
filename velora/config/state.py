@@ -87,12 +87,15 @@ class BundledHiddenStates:
         Target network OCM hidden state. Default is `None`
     target_acm : chex.Array (optional)
         Target network ACM hidden state. Default is `None`
+    value : chex.Array (optional)
+        Value network hidden state. Default is `None`
     """
 
     ocm: chex.Array | None = None
     acm: chex.Array | None = None
     target_ocm: chex.Array | None = None
     target_acm: chex.Array | None = None
+    value: chex.Array | None = None
 
     def reset_on_done(self, discounts: chex.Array, n_actions: int) -> None:
         """
@@ -117,12 +120,14 @@ class BundledHiddenStates:
             acm=_end_check(self.acm, discounts_expanded),
             target_ocm=_end_check(self.target_ocm, discounts),
             target_acm=_end_check(self.target_acm, discounts_expanded),
+            value=_end_check(self.value, discounts_expanded),
         )
 
     def update(
         self,
         h_state: PolicyAgentHiddenStates,
         target_h_state: PolicyAgentHiddenStates,
+        value_h_state: chex.Array,
     ) -> None:
         """
         Update hidden states from forward pass outputs.
@@ -133,12 +138,15 @@ class BundledHiddenStates:
             Policy network hidden states
         target_h_state : AgentHiddenStates
             Target network hidden states
+        value_h_state : chex.Array
+            Value network hidden state
         """
         self = self.__replace__(
             ocm=h_state.ocm,
             acm=h_state.acm,
             target_ocm=target_h_state.ocm,
             target_acm=target_h_state.acm,
+            value=value_h_state,
         )
 
 
@@ -155,6 +163,8 @@ class CollectState:
         Rewards for a trajectory. Default is `()`
     discounts : Tuple[chex.Array, ...] (optional)
         Discounts for a trajectory. Default is `()`
+    value : Tuple[chex.Array, ...] (optional)
+        State-value estimates for a trajectory. Default is `()`
     preds : Tuple[AgentOutput, ...] (optional)
         Policy network predictions for a trajectory.
         Default is `()`
@@ -170,6 +180,7 @@ class CollectState:
     actions: Tuple[chex.Array, ...] = ()
     rewards: Tuple[chex.Array, ...] = ()
     discounts: Tuple[chex.Array, ...] = ()
+    values: Tuple[chex.Array, ...] = ()
     preds: Tuple[PolicyAgentOutput, ...] = ()
     target_preds: Tuple[PolicyAgentOutput, ...] = ()
     completed_returns: Tuple[float, ...] = ()
@@ -180,6 +191,7 @@ class CollectState:
         actions: chex.Array,
         rewards: chex.Array,
         discounts: chex.Array,
+        values: chex.Array,
         preds: PolicyAgentOutput,
         target_preds: PolicyAgentOutput,
     ) -> Self:
@@ -194,6 +206,8 @@ class CollectState:
             Rewards obtained from the environment
         discounts : chex.Array
             Done status from the environment
+        values : chex.Array
+            State-value estimate predictions at timestep
         preds : AgentOutput
             Policy network predictions at timestep
         target_preds : AgentOutput
@@ -208,6 +222,7 @@ class CollectState:
             actions=self.actions + (actions,),
             rewards=self.rewards + (rewards,),
             discounts=self.discounts + (discounts,),
+            values=self.values + (values,),
             preds=self.preds + (preds,),
             target_preds=self.target_preds + (target_preds,),
         )
@@ -254,6 +269,7 @@ class CollectState:
         actions_batch = jnp.stack(self.actions, axis=1)
         rewards_batch = jnp.stack(self.rewards, axis=1)
         discounts_batch = jnp.stack(self.discounts, axis=1)
+        values_batch = jnp.stack(self.values, axis=1)
 
         batch_preds = jax.tree.map(lambda *xs: jnp.stack(xs, axis=1), *self.preds)
         target_batch_preds = jax.tree.map(
@@ -264,6 +280,7 @@ class CollectState:
             actions=actions_batch,
             rewards=rewards_batch,
             discounts=discounts_batch,
+            values=values_batch,
             preds=batch_preds,
             target_preds=target_batch_preds,
         )
@@ -371,22 +388,19 @@ class DiscoValueState:
             ),
         )
 
+    def apply_gradients(self, grads: nnx.State) -> None:
+        """
+        Apply gradients to update parameters.
 
-@struct.dataclass
-class TrainerOptimizers:
-    """
-    Dataclass for `AgentTrainer` optimizers.
+        Parameters
+        ----------
+        grads : nnx.State
+            Gradients for parameters
+        """
+        updates, new_opt_state = self.optim.update(grads, self.opt_state, self.params)
+        new_params = optax.apply_updates(self.params, updates)
 
-    Parameters
-    ----------
-    agent : optax.GradientTransformation
-        Optimizer for policy agent network
-    value : optax.GradientTransformation
-        Optimizer for value function network
-    """
-
-    agent: optax.GradientTransformation
-    value: optax.GradientTransformation
+        self = self.__replace__(params=new_params, opt_state=new_opt_state)  # type: ignore
 
 
 @struct.dataclass
@@ -404,6 +418,8 @@ class AgentTrainerState:
         Policy agent optimizer state
     hidden : BundledHiddenStates
         Hidden states for recurrent policy/target networks
+    value : DiscoValueState
+        Value agent state
     current_obs : chex.Array
         Current observation from environment
     steps_trained : int (optional)
@@ -415,6 +431,7 @@ class AgentTrainerState:
     opt_state: optax.OptState
 
     hidden: BundledHiddenStates
+    value: DiscoValueState
 
     current_obs: chex.Array
     steps_trained: int = 0
@@ -424,7 +441,11 @@ class AgentTrainerState:
         cls,
         policy_params: nnx.State,
         target_params: nnx.State,
+        value_params: nnx.State,
         optim: optax.GradientTransformation,
+        value_optim: optax.GradientTransformation,
+        ema_decay: float,
+        ema_eps: float,
         current_obs: chex.Array,
     ) -> Self:
         """
@@ -436,8 +457,16 @@ class AgentTrainerState:
             Policy agent parameter state
         target_params : nnx.State
             Target agent parameter state
+        value_params : nnx.State
+            Value agent parameter state
         optim : optax.GradientTransformation
             Policy agent optimizer
+        value_optim : optax.GradientTransformation
+            Value agent optimizer
+        ema_decay : float
+            EMA decay rate
+        ema_eps : float
+            EMA epsilon
         current_obs : chex.Array
             Current observation
 
@@ -456,6 +485,12 @@ class AgentTrainerState:
             optim=optim,
             opt_state=opt_state,
             hidden=BundledHiddenStates(),
+            value=DiscoValueState.create(
+                value_params,
+                value_optim,
+                ema_decay,
+                ema_eps,
+            ),
             current_obs=current_obs,
         )
 
@@ -508,6 +543,17 @@ class AgentTrainerState:
             New hidden states
         """
         self = self.__replace__(hidden=new_hidden)
+
+    def update_value_state(self, new_state: DiscoValueState) -> None:
+        """
+        Update value state.
+
+        Parameters
+        ----------
+        new_state : DiscoValueState
+            New value state
+        """
+        self = self.__replace__(value=new_state)
 
     def update_obs(self, new_obs: chex.Array) -> None:
         """

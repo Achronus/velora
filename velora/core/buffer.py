@@ -56,6 +56,7 @@ class MixedBuffer:
         self.actions = jnp.zeros((self.capacity, self.seq_len), dtype=jnp.int32)
         self.rewards = jnp.zeros((self.capacity, self.seq_len))
         self.discounts = jnp.zeros((self.capacity, self.seq_len))
+        self.values = jnp.zeros((self.capacity, self.seq_len))
 
         # Agent outputs (placeholders)
         self.pi = jnp.zeros(1)
@@ -149,6 +150,7 @@ class MixedBuffer:
         actions: chex.Array,
         rewards: chex.Array,
         discounts: chex.Array,
+        values: chex.Array,
         preds: PolicyAgentOutput,
         target_preds: PolicyAgentOutput,
     ) -> None:
@@ -179,6 +181,12 @@ class MixedBuffer:
             - `seq_length (T)` the number of timesteps in the trajectory
             - Binary values: `1.0` = episode continues, `0.0` = episode ended
 
+        values : jax.Array
+            State value estimates `(B, T)`.
+
+            - batch_size (`B`) - the number of samples per timestep.
+            - seq_length (`T`) - the number of timesteps in the trajectory.
+
         preds : AgentOutput
             Agent network outputs for the trajectory
         target_preds : AgentOutput
@@ -194,6 +202,7 @@ class MixedBuffer:
         self.actions = self.actions.at[indices].set(actions)
         self.rewards = self.rewards.at[indices].set(rewards)
         self.discounts = self.discounts.at[indices].set(discounts)
+        self.values = self.values.at[indices].set(values)
 
         # Update agent outputs
         self.pi = self.pi.at[indices].set(preds.pi)
@@ -256,6 +265,7 @@ class MixedBuffer:
             actions=self.actions[indices],
             rewards=self.rewards[indices],
             discounts=self.discounts[indices],
+            values=self.values[indices],
             preds=PolicyAgentOutput(
                 pi=self.pi[indices],
                 y=self.y[indices],

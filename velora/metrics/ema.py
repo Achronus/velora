@@ -75,7 +75,7 @@ class MovingAverage:
     def update(
         self,
         x: chex.ArrayTree,
-        pmean_axis_name: str | None,
+        pmean_axis_name: str | None = None,
     ) -> None:
         """
         Updates the EMA state.
@@ -83,16 +83,16 @@ class MovingAverage:
         Parameters
         ----------
         x : jax.ArrayTree
-            Data array
-        pmean_axis_name : str | None
-            The optional axis name for parallel mean computation across multiple devices
+            Data to use to update state
+        pmean_axis_name : str (optional)
+            The optional axis name for parallel mean computation across multiple devices. Default is `None`
         """
         squared_tree = jax.tree.map(jnp.square, x)
 
         def _update(
             moment: chex.Array,
             x: chex.Array,
-            pmean_axis_name: str | None,
+            pmean_axis_name: str | None = None,
         ) -> chex.Array:
             """
             Computes the mean across all learner devices involved in the `pmap`.
@@ -103,8 +103,8 @@ class MovingAverage:
                 EMA moment array
             x : jax.Array
                 Data array
-            pmean_axis_name : str | None
-                The optional axis name for parallel mean computation across multiple devices
+            pmean_axis_name : str (optional)
+                The optional axis name for parallel mean computation across multiple devices. Default is `None`
             """
             mean = jnp.mean(x)
 
@@ -155,7 +155,7 @@ class MovingAverage:
         x: chex.ArrayTree,
         subtract_mean: bool = True,
         root_eps: float = 1e-12,
-    ) -> chex.ArrayTree:
+    ) -> chex.Array:
         """
         Normalizes `x` by dividing by the second moment and subtracting its mean.
 
@@ -173,7 +173,7 @@ class MovingAverage:
 
         Returns
         -------
-        x_normalized : jax.ArrayTree
+        x_normalized : jax.Array
             Normalized data
         """
 
@@ -187,6 +187,35 @@ class MovingAverage:
 
         mean, variance = self._compute_moments()
         return jax.tree.map(_normalize, mean, variance, x)
+
+    def update_and_normalize(
+        self,
+        x: chex.ArrayTree,
+        subtract_mean: bool = True,
+        root_eps: float = 1e-12,
+        pmean_axis_name: str | None = None,
+    ) -> chex.Array:
+        """
+        Updates EMA state and then normalizes `x` using it.
+
+        Parameters
+        ----------
+        x : jax.ArrayTree
+            Data to use to update EMA state and normalize
+        subtract_mean : bool, optional
+            A flag for mean subtraction. Default is `True`
+        root_eps : float, optional
+            Primary epsilon value. Default is `1e-12`
+        pmean_axis_name : str (optional)
+            The optional axis name for parallel mean computation across multiple devices. Default is `None`
+
+        Returns
+        -------
+        norm : jax.Array
+            Normalized x
+        """
+        self.update(x, pmean_axis_name)
+        return self.normalize(x, subtract_mean, root_eps)
 
     def reset(self) -> None:
         """

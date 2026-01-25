@@ -13,7 +13,7 @@
 # limitations under the License.
 # ==============================================================================
 
-from typing import List
+from typing import Dict, List, Tuple
 
 import chex
 import gymnasium as gym
@@ -21,11 +21,21 @@ import jax
 import jax.numpy as jnp
 import optax
 
+from velora.config.outputs import (
+    AgentLosses,
+    BufferSamples,
+    DiscoAgentOutput,
+    DiscoValueOutputs,
+)
 from velora.config.settings import AgentTrainerSettings, RuleTrainerSettings
-from velora.config.state import AgentTrainerState, BundledHiddenStates, CollectState
-from velora.core.agent import DiscoAgent, PolicyAgent
+from velora.config.state import AgentTrainerState, CollectState
+from velora.core.agent import DiscoAgent, DiscoValueAgent, PolicyAgent
 from velora.core.buffer import MixedBuffer
+from velora.core.manager import CheckpointManager
+from velora.core.optim import scale_by_adan_no_denom
 from velora.gym.utils import make_atari_env
+from velora.metrics.loss import compute_aux_policy_loss, compute_kl_loss
+from velora.metrics.vtrace import compute_importance_weights, compute_vtrace
 
 
 class RuleTrainer:
@@ -49,39 +59,47 @@ class RuleTrainer:
         Configuration for meta-training
     seed : int (optional)
         Random number generator seed. Default is `42`
+    jit_compile : bool (optional)
+        Flag to enable/disable JIT compilation. Default is `False`
     """
 
     def __init__(
         self,
         envs: List[str],
+        *,
         config: RuleTrainerSettings,
         seed: int = 42,
+        jit_compile: bool = False,
     ) -> None:
-        self.envs = envs
+        self.env_names = envs
+        self.num_envs = len(self.env_names)
         self.config = config
+        self.jit_compile = jit_compile
+
+        self.current_env_idx = 0
+
+        # Configure RNG keys
         self.key = jax.random.key(seed)
-
         self.rule_key, meta_key, trainer_key = jax.random.split(self.key, 3)
-        trainer_keys = jax.random.split(trainer_key, len(envs))
+        trainer_keys = jax.random.split(trainer_key, self.num_envs)
 
+        # Init agents
         self.meta_agent = DiscoAgent(config=config.disco_agent, key=meta_key)
         self.meta_optim = optax.chain(
             optax.clip_by_global_norm(config.meta_grad_clip),
             optax.adam(config.meta_lr),
         )
-        self.meta_optim_state = self.meta_optim.init(self.meta_agent.params)
+        self.meta_optim_state = self.meta_optim.init(self.meta_agent.get_params())
 
         self.trainers = [
             AgentTrainer(
                 env_name,
                 self.config.agent_trainer_config(),
                 key=trainer_keys[i],
+                jit_compile=self.jit_compile,
             )
-            for i, env_name in enumerate(envs)
+            for i, env_name in enumerate(self.env_names)
         ]
-
-        self.num_envs = len(self.envs)
-        self.current_env_idx = 0
 
     def train(self) -> None:
         pass
@@ -122,14 +140,18 @@ class AgentTrainer:
     ) -> None:
         self.config = config
         self.env_name = env_name
-        self.envs = make_atari_env(self.env_name, self.config.num_envs)
+
+        # TODO: create dynamic environment make method - not all are Atari
+        self.envs = make_atari_env(self.env_name, self.config.num_vec_envs)
         self.jit_compile = jit_compile
 
         action_space: gym.spaces.Discrete = self.envs.single_action_space  # type: ignore
         obs_space: gym.spaces.Box = self.envs.single_observation_space  # type: ignore
 
         self.n_actions = action_space.n.item()
-        self.key, agent_key, target_key, buffer_key = jax.random.split(key, 4)
+        self.key, agent_key, target_key, value_key, buffer_key = jax.random.split(
+            key, 5
+        )
 
         self.policy_agent = PolicyAgent(
             obs_space,
@@ -147,6 +169,15 @@ class AgentTrainer:
             jit_compile=self.jit_compile,
         )
 
+        self.value_agent = DiscoValueAgent(
+            obs_space,
+            self.config.agent.n_hidden,
+            config=self.config.value,
+            key=value_key,
+            sparsity=self.config.agent.sparsity,
+            jit_compile=self.jit_compile,
+        )
+
         self.buffer = MixedBuffer(buffer_key, config=self.config.buffer)
 
         # Init agent state
@@ -155,13 +186,18 @@ class AgentTrainer:
         self.state = AgentTrainerState.create(
             self.policy_agent.get_params(),
             self.target_agent.get_params(),
+            self.value_agent.get_params(),
             self._create_optim(),
+            self._create_optim(),
+            self.config.ema_decay,
+            self.config.ema_eps,
             current_obs=current_obs,
         )
 
         # Checkpointing
         self.cp_manager = CheckpointManager(
-            self.env_name, config=self.config.checkpoint
+            self.env_name,
+            config=self.config.checkpoint,
         )
 
         # Warm policy networks and buffer
@@ -197,11 +233,12 @@ class AgentTrainer:
             The environment observation space
         """
         dummy_obs = jnp.zeros(
-            (self.config.num_envs, *obs_space.shape),
+            (self.config.num_vec_envs, *obs_space.shape),
             dtype=obs_space.dtype,
         )
         _ = self.policy_agent(dummy_obs)
         _ = self.target_agent(dummy_obs)
+        _ = self.value_agent(dummy_obs)
 
         # Warm buffer
         self.collect()
@@ -284,7 +321,7 @@ class AgentTrainer:
         """
         params = self.state.params.policy
 
-        def loss_fn(p):
+        def loss_fn(p) -> AgentLosses:
             self.policy_agent.update_params(p)
             return self._compute_policy_loss(batch, targets)
 
@@ -344,6 +381,7 @@ class AgentTrainer:
         # Sync parameters
         self.policy_agent.update_params(self.state.params.policy)
         self.target_agent.update_params(self.state.params.target)
+        self.value_agent.update_params(self.state.value.params)
 
         # Tracking
         collect_state = CollectState()
@@ -363,18 +401,23 @@ class AgentTrainer:
                 acm_h_state=hidden.target_acm,
             )
 
+            values, value_h_state = self.value_agent(
+                current_obs,
+                h_state=hidden.value,
+            )
+
             # Env step
             actions = self.policy_agent.act(preds.pi)
             next_obs, rewards, discounts, info = self.envs.step(actions)
 
             # Accumulate step data and episode stats
             collect_state = collect_state.append_step(
-                actions, rewards, discounts, preds, target_preds
+                actions, rewards, discounts, values, preds, target_preds
             )
             collect_state = collect_state.record_episodes(info)
 
             # Update and reset hidden states on episode boundaries
-            hidden.update(h_state, target_h_state)
+            hidden.update(h_state, target_h_state, value_h_state)
             hidden.reset_on_done(discounts, self.n_actions)
 
             current_obs = next_obs
@@ -388,3 +431,114 @@ class AgentTrainer:
         self.buffer.add(**batched_samples.to_dict())
 
         return collect_state
+
+    def get_values(self, batch: BufferSamples) -> DiscoValueOutputs:
+        """
+        Computes state-value function predictions for meta-gradient computation.
+
+        Parameters
+        ----------
+        batch : BufferSamples
+            Batch of experience from buffer
+
+        Returns
+        -------
+        value_outs : DiscoValueOutputs
+            Value function outputs
+        """
+        value_state = self.state.value
+
+        # Sync params to network
+        self.value_agent.update_params(value_state.params)
+
+        # Transpose to (T, B) for V-trace
+        batch = batch.to_time_first()
+        discounts = batch.discounts * self.config.value.gamma
+
+        # [:-1] = Drop last timestep
+        rho = compute_importance_weights(
+            batch.preds.pi[:-1],  # type: ignore
+            batch.target_preds.pi[:-1],  # type: ignore
+            batch.actions[:-1],  # type: ignore
+        )
+
+        value_targets, advantages = compute_vtrace(
+            batch.values,
+            batch.rewards[:-1],  # type: ignore
+            discounts[:-1],  # type: ignore
+            self.config.value.td_lambda,
+            rho,
+        )
+
+        td = value_targets - batch.values[:-1]  # type: ignore
+
+        # Compute EMAs
+        norm_adv = value_state.adv_ema.update_and_normalize(advantages)
+        norm_td = value_state.td_ema.update_and_normalize(td, subtract_mean=False)
+
+        # Update state
+        self.state.update_value_state(value_state)
+
+        return DiscoValueOutputs(
+            value=batch.values,
+            value_targets=value_targets,
+            advantages=advantages,
+            normalized_advantages=norm_adv,
+            td=td,
+            normalized_td=norm_td,
+            rho=rho,
+        )
+
+    def update_value_params(self, batch: BufferSamples) -> DiscoValueOutputs:
+        """
+        Update value function parameters.
+
+        Parameters
+        ----------
+        batch : BufferSamples
+            Batch of experience from buffer
+
+        Returns
+        -------
+        values_outs : DiscoValueOutputs
+            Value function outputs
+        """
+        v_state = self.state.value
+
+        def value_loss_fn(params) -> Tuple[chex.Array, DiscoValueOutputs]:
+            """Compute value loss."""
+            self.value_agent.update_params(params)
+            value_outs = self.get_values(batch)
+
+            net_out = value_outs.value[:-1]  # type: ignore
+
+            # Value loss from normalized TD
+            # loss = 0.5 * (value - stop_grad[value + TD])^2
+            value_target = jax.lax.stop_gradient(net_out + value_outs.normalized_td)
+            value_loss = 0.5 * jnp.square(net_out - value_target).mean()
+            value_loss = self.config.loss_costs.value * value_loss
+
+            return value_loss, value_outs
+
+        # Compute gradients
+        (v_loss, v_outs), grads = jax.value_and_grad(value_loss_fn, has_aux=True)(
+            v_state.params
+        )
+
+        # Update state
+        v_state.apply_gradients(grads)
+        self.state.update_value_state(v_state)
+
+        # Sync params to network
+        self.value_agent.update_params(v_state.params)
+
+        # Log metrics
+        v_outs: DiscoValueOutputs = v_outs
+        metrics = {
+            "value/loss": v_loss,
+            **v_outs.to_metrics(),
+            "value/grad_norm": optax.global_norm(grads),
+        }
+        self.log(metrics)
+
+        return v_outs

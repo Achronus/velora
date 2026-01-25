@@ -402,7 +402,7 @@ class AgentTrainerSettings:
         Loss component weights
     checkpoint : CheckpointSettings
         Configuration for checkpoints
-    num_envs : int
+    num_vec_envs : int
         Number of vectorized environments for throughput
     n_updates : int
         Number of agent updates to backpropagate through
@@ -425,7 +425,7 @@ class AgentTrainerSettings:
     loss_costs: LossCostSettings
     checkpoint: CheckpointSettings
 
-    num_envs: int
+    num_vec_envs: int
     n_updates: int
     tau: float
     batch_size: int
@@ -467,7 +467,7 @@ class RuleTrainerSettings:
     n_updates : int (optional)
         Number of agent updates to backpropagate through for meta-gradient
         computation (sliding window size). Default is `20`
-    num_envs : int (optional)
+    num_vec_envs : int (optional)
         Number of vectorized environments. Default is `8`
     batch_size : int (optional)
         Number of trajectories per training batch. Default is `96`
@@ -496,7 +496,7 @@ class RuleTrainerSettings:
     n_steps: int = 1_000_000
     n_updates: int = 20
 
-    num_envs: int = 8
+    num_vec_envs: int = 8
     batch_size: int = 96
     tau: float = 0.9
 
@@ -516,7 +516,7 @@ class RuleTrainerSettings:
             agent=self.agent,
             buffer=self.buffer,
             value=self.disco_value,
-            num_envs=self.num_envs,
+            num_vec_envs=self.num_vec_envs,
             n_updates=self.n_updates,
             tau=self.tau,
             batch_size=self.batch_size,

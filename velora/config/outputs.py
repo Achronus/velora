@@ -22,7 +22,7 @@ import jax.numpy as jnp
 from flax import struct
 
 from velora.config.settings import LossCostSettings
-from velora.utils.transforms import squeeze_time
+from velora.utils.transforms import squeeze_time, to_time_first
 
 
 @struct.dataclass
@@ -303,8 +303,8 @@ class DiscoValueOutputs:
     Parameters
     ----------
     value : chex.Array
-        State value estimates `V(s)`. Shape: `(T, B)`
-    value_target : chex.Array
+        State-value estimates `V(s)`. Shape: `(T, B)`
+    value_targets : chex.Array
         V-trace value targets. Shape: `(T-1, B)`
     advantages : chex.Array
         Advantage estimates `A(s, a)`. Shape: `(T-1, B)`
@@ -319,7 +319,7 @@ class DiscoValueOutputs:
     """
 
     value: chex.Array
-    value_target: chex.Array
+    value_targets: chex.Array
     advantages: chex.Array
     normalized_advantages: chex.Array
     td: chex.Array
@@ -354,6 +354,12 @@ class BufferSamples:
         - batch_size (`B`) - the number of samples per timestep.
         - seq_length (`T`) - the number of timesteps in the trajectory.
 
+    values : jax.Array
+        State-value estimates `V(s)` from the value network with shape `(B, T)`.
+
+        - batch_size (`B`) - the number of samples per timestep.
+        - seq_length (`T`) - the number of timesteps in the trajectory.
+
     preds : AgentOutput
         Agent network output predictions at each timestep
 
@@ -364,6 +370,8 @@ class BufferSamples:
     actions: chex.Array
     rewards: chex.Array
     discounts: chex.Array
+    values: chex.Array
+
     preds: PolicyAgentOutput
     target_preds: PolicyAgentOutput
 
@@ -379,6 +387,29 @@ class BufferSamples:
             Object in dictionary format
         """
         return {f.name: getattr(self, f.name) for f in fields(self)}
+
+    def to_time_first(self) -> Self:
+        """
+        Transpose batch from batch-first to time-first format.
+
+        Converts shape from `(B, T, ...)` to `(T, B, ...)` for all array fields.
+        Useful for V-trace and other temporal computations that expect time
+        as the leading dimension.
+
+        Returns
+        -------
+        samples : BufferSamples
+            New instance with time-first arrays
+        """
+
+        return self.__replace__(
+            actions=to_time_first(self.actions),
+            rewards=to_time_first(self.rewards),
+            discounts=to_time_first(self.discounts),
+            values=to_time_first(self.values),
+            preds=jax.tree.map(to_time_first, self.preds),
+            target_preds=jax.tree.map(to_time_first, self.target_preds),
+        )
 
 
 @struct.dataclass
