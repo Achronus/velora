@@ -36,7 +36,7 @@ from velora.core.manager import CheckpointManager
 from velora.core.optim import scale_by_adan_no_denom
 from velora.gym.utils import make_atari_env
 from velora.metrics.logger import MetricsLogger
-from velora.metrics.loss import compute_aux_policy_loss, compute_kl_loss
+from velora.metrics.loss import compute_aux_policy_loss, compute_kl_loss, compute_z_loss
 from velora.metrics.vtrace import compute_importance_weights, compute_vtrace
 
 
@@ -302,24 +302,14 @@ class AgentTrainer:
         losses : AgentLosses
             An object containing the agent losses
         """
-        preds = batch.preds
-
-        pi_loss = compute_kl_loss(targets.pi, preds.pi).mean()
-        y_loss = compute_kl_loss(targets.y, preds.y).mean()
-
-        # z_loss - gather by action taken
-        action_preds = jnp.take_along_axis(
-            preds.z,
-            batch.actions[..., None, None],  # (B, T, 1, 1), # type: ignore
-            axis=2,
-        ).squeeze(2)  # (B, T, Z)
-        z_loss = compute_kl_loss(targets.z, action_preds).mean()
-
-        # aux_pi_loss - predict next timesteps policy
+        pi_loss = compute_kl_loss(targets.pi, batch.preds.pi).mean()
+        y_loss = compute_kl_loss(targets.y, batch.preds.y).mean()
+        z_loss = compute_z_loss(batch.preds.z, targets.z, batch.actions).mean()
         aux_pi_loss = compute_aux_policy_loss(
-            preds.aux_pi[:, :-1],  # type: ignore
-            preds.pi[:, 1:],  # type: ignore
-            batch.discounts[:, :-1],  # type: ignore
+            batch.preds.aux_pi,
+            batch.preds.pi,
+            batch.actions,
+            batch.discounts,
         ).mean()
 
         return AgentLosses(

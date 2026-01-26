@@ -15,6 +15,7 @@
 
 import chex
 import jax
+import jax.numpy as jnp
 import rlax
 
 
@@ -42,9 +43,44 @@ def compute_kl_loss(
     return rlax.categorical_kl_divergence(target, preds)
 
 
+def compute_z_loss(
+    z: chex.Array,
+    z_targets: chex.Array,
+    actions: chex.Array,
+) -> chex.Array:
+    """
+    Compute KL divergence loss for goal distribution predictions.
+
+    Extracts the predicted goal distribution for the actions taken and
+    computes KL divergence against the target goal distribution.
+
+    Parameters
+    ----------
+    z : chex.Array
+        Predicted goal distributions for all actions `(B, T, A, Z)`
+    z_targets : chex.Array
+        Target goal distributions `(B, T, Z)`
+    actions : chex.Array
+        Actions taken at each timestep `(B, T, 1)`
+
+    Returns
+    -------
+    loss : chex.Array
+        Per-timestep goal distribution loss `(B, T)`
+    """
+    action_preds = jnp.take_along_axis(
+        z,
+        actions[..., None],  # (B, T, 1, 1), # type: ignore
+        axis=2,
+    ).squeeze(2)  # (B, T, Z)
+
+    return compute_kl_loss(z_targets, action_preds)
+
+
 def compute_aux_policy_loss(
     aux_pi: chex.Array,
     next_pi: chex.Array,
+    actions: chex.Array,
     discounts: chex.Array,
 ) -> chex.Array:
     """
@@ -56,18 +92,30 @@ def compute_aux_policy_loss(
     Parameters
     ----------
     aux_pi : chex.Array
-        Auxiliary policy predictions for action taken `(T, B, A)`
+        Auxiliary policy predictions for action taken `(B, T, A, A)`
     next_pi : chex.Array
-        Actual policy at next timestep `(T, B, A)`
+        Actual policy at next timestep `(B, T, A)`
+    actions : chex.Array
+        Actions at next timestep `(B, T, 1)`
     discounts : chex.Array
-        Episode continuation signals `(T, B)`
+        Episode continuation signals `(B, T, 1)`
 
     Returns
     -------
     loss : chex.Array
-        Per-timestep auxiliary policy loss `(T, B)`
+        Per-timestep auxiliary policy loss `(B, T)`
     """
-    loss = compute_kl_loss(jax.lax.stop_gradient(next_pi), aux_pi)
+    # Predict next timesteps policy
+    aux_pi_a = jnp.take_along_axis(
+        aux_pi[:, :-1],  # (B, T-1, A, A), # type: ignore
+        actions[:, :-1, ..., None],  # (B, T-1, 1, 1), # type: ignore
+        axis=2,
+    )
+
+    loss = compute_kl_loss(
+        jax.lax.stop_gradient(next_pi[:, 1:]),  # (B, T-1, A), # type: ignore
+        jnp.squeeze(aux_pi_a, axis=2),  # (B, T-1, A)
+    )
 
     # Mask out terminal states
-    return loss * discounts
+    return loss * jnp.squeeze(discounts[:, :-1], axis=-1)  # type: ignore
