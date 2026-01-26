@@ -630,6 +630,8 @@ class DiscoValueAgent:
             timespans=timespans,
         )
 
+        # (B, T, 1) -> (B, 1) if T=1
+        v = squeeze_time(v)
         return v, h_state
 
     def get_params(self) -> nnx.State:
