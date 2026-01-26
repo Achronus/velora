@@ -13,7 +13,7 @@
 # limitations under the License.
 # ==============================================================================
 
-from typing import TYPE_CHECKING, Any, Dict, Self, Tuple
+from typing import Any, Dict, Self, Tuple
 
 import chex
 import jax
@@ -22,29 +22,7 @@ import optax
 from flax import nnx, struct
 
 from velora.config.outputs import BufferSamples, PolicyAgentOutput
-
-if TYPE_CHECKING:
-    from velora.metrics.ema import MovingAverage
-
-
-@struct.dataclass
-class EMAState:
-    """
-    Exponential Moving Average (EMA) state.
-
-    Parameters
-    ----------
-    moment1 : jax.ArrayTree
-        The first set of moments
-    moment2 : jax.ArrayTree
-        The second set of moments
-    decay_product : jax.Array
-        The product of all decays from start of accumulation
-    """
-
-    moment1: chex.ArrayTree
-    moment2: chex.ArrayTree
-    decay_product: chex.Array
+from velora.metrics.ema import MovingAverage
 
 
 @struct.dataclass
@@ -373,8 +351,8 @@ class DiscoValueState:
     optim: optax.GradientTransformation
     opt_state: optax.OptState
 
-    adv_ema: "MovingAverage"
-    td_ema: "MovingAverage"
+    adv_ema: MovingAverage
+    td_ema: MovingAverage
 
     @classmethod
     def create(
