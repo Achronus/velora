@@ -356,19 +356,19 @@ class BufferSamples:
     Parameters
     ----------
     actions : jax.Array
-        Actions taken with shape `(B, T)`:
+        Actions taken with shape `(B, T, 1)`:
 
         - batch_size (`B`) - the number of samples per timestep.
         - seq_length (`T`) - the number of timesteps in the trajectory.
 
     rewards : jax.Array
-        Rewards received with shape `(B, T)`:
+        Rewards received with shape `(B, T, 1)`:
 
         - batch_size (`B`) - the number of samples per timestep.
         - seq_length (`T`) - the number of timesteps in the trajectory.
 
     discounts : jax.Array
-        Raw environment discounts (dones) with shape `(B, T)`. Binary values
+        Raw environment discounts (dones) with shape `(B, T, 1)`. Binary values
         where `1.0` = episode continues, `0.0` = episode ended. Multiply by
         gamma at training time:
 
@@ -376,7 +376,7 @@ class BufferSamples:
         - seq_length (`T`) - the number of timesteps in the trajectory.
 
     values : jax.Array
-        State-value estimates `V(s)` from the value network with shape `(B, T)`.
+        State-value estimates `V(s)` from the value network with shape `(B, T, 1)`.
 
         - batch_size (`B`) - the number of samples per timestep.
         - seq_length (`T`) - the number of timesteps in the trajectory.

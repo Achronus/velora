@@ -83,25 +83,30 @@ class JaxConversion(gym.vector.VectorWrapper):
         Parameters
         ----------
         action : jax.Array
-            Batch of actions with the `action_space` shape
+            Batch of actions with the `action_space` shape `(B, 1)`
 
         Returns
         -------
         next_obs : jax.Array
-            Batch of next observations
+            Batch of next observations `(B, F)`
         reward : jax.Array
-            Batch of rewards obtained
-        done : jax.Array
-            Batch of episode dones (terminations/truncations). Values:
+            Batch of rewards obtained `(B, 1)`
+        discount : jax.Array
+            Batch of episode discounts (terminations/truncations) `(B, 1)`. Values:
                 - `1.0` = episode continues
                 - `0.0` = episode ended
         info : Dict[str, Any]
             Environment metadata
         """
-        obs, reward, terminated, truncated, info = self.env.step(self._to_numpy(action))
-        done = jnp.where(terminated | truncated, 0.0, 1.0).astype(jnp.float32)
+        obs, reward, terminated, truncated, info = self.env.step(
+            self._to_numpy(action.squeeze())
+        )
+        discount = jnp.where(terminated | truncated, 0.0, 1.0).astype(jnp.float32)
 
-        return self._to_jax(obs), self._to_jax(reward), done, info
+        reward = jnp.expand_dims(self._to_jax(reward), axis=-1)
+        discount = jnp.expand_dims(discount, axis=-1)
+
+        return self._to_jax(obs), reward, discount, info
 
 
 class FrameStackReshape(gym.ObservationWrapper):

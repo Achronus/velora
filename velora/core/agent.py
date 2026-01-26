@@ -35,6 +35,7 @@ from velora.models.encoder import DiscoInputEncoder
 from velora.models.lnn.ncp import LNN
 from velora.models.meta import DiscoNetwork
 from velora.models.policy import ACM, OCM
+from velora.utils.transforms import squeeze_time
 
 
 class PolicyAgent:
@@ -236,7 +237,7 @@ class PolicyAgent:
         Returns
         -------
         actions : jax.Array
-            Sampled actions `(B,)`
+            Sampled actions `(B, 1)`
         """
         # Handle both squeezed (B, A) and non-squeezed (B, T, A) inputs
         if logits.ndim == 3:
@@ -247,7 +248,7 @@ class PolicyAgent:
 
         # Compute actions
         actions = distrax.Softmax(logits).sample(seed=key_sample)
-        return actions
+        return jnp.expand_dims(actions, axis=-1)
 
     def get_params(self) -> nnx.State:
         """
@@ -612,11 +613,10 @@ class DiscoValueAgent:
 
             - `seq_length (T)` the number of sequences (e.g., trajectories)
 
-
         Returns
         -------
         v : chex.Array
-            State-value estimates with shape `(B, T, 1)`
+            State-value estimates with shape `(B, T, 1)` or `(B, 1)` if `T=1`
         h_state : chex.Array
             Updated hidden state
         """

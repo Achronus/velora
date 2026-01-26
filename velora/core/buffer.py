@@ -53,10 +53,10 @@ class MixedBuffer:
         self.split_ratio = config.split_ratio
 
         # Core data
-        self.actions = jnp.zeros((self.capacity, self.seq_len), dtype=jnp.int32)
-        self.rewards = jnp.zeros((self.capacity, self.seq_len))
-        self.discounts = jnp.zeros((self.capacity, self.seq_len))
-        self.values = jnp.zeros((self.capacity, self.seq_len))
+        self.actions = jnp.zeros((self.capacity, self.seq_len, 1), dtype=jnp.int32)
+        self.rewards = jnp.zeros((self.capacity, self.seq_len, 1))
+        self.discounts = jnp.zeros((self.capacity, self.seq_len, 1))
+        self.values = jnp.zeros((self.capacity, self.seq_len, 1))
 
         # Agent outputs (placeholders)
         self.pi = jnp.zeros(1)
