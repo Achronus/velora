@@ -20,6 +20,7 @@ import gymnasium as gym
 import jax
 import jax.numpy as jnp
 import optax
+import orbax.checkpoint as ocp
 
 from velora.config.outputs import (
     AgentLosses,
@@ -565,3 +566,68 @@ class AgentTrainer:
         self.log(metrics)
 
         return v_outs
+
+    def save_checkpoint(self, force: bool = False) -> bool:
+        """
+        Save current state to checkpoint.
+
+        Parameters
+        ----------
+        force : bool
+            Force save even if within save interval. Default is `False`
+
+        Returns
+        -------
+        saved : bool
+            Whether checkpoint was actually saved
+        """
+        return self.cp_manager.save(
+            self.state.steps_trained,
+            self.state,
+            force=force,
+        )
+
+    def load_checkpoint(self, step: int | None = None) -> bool:
+        """
+        Restore state from a checkpoint.
+
+        Parameters
+        ----------
+        step : int (optional)
+            Specific step to restore, or `None` for latest. Default is `None`
+
+        Returns
+        -------
+        success : bool
+            Whether restoration was successful
+        """
+        # Create abstract state for safe restoration
+        abstract_state: AgentTrainerState = jax.tree.map(
+            ocp.utils.to_shape_dtype_struct,
+            self.state,
+        )
+
+        restored_state = self.cp_manager.restore(step, abstract_state)
+
+        if restored_state is None:
+            return False
+
+        # Update state
+        self.state = restored_state
+
+        # Sync params to agent objects
+        self.policy_agent.update_params(self.state.params.policy)
+        self.target_agent.update_params(self.state.params.target)
+        self.value_agent.update_params(self.state.value.params)
+
+        return True
+
+    def close(self) -> None:
+        """
+        Clean up resources.
+
+        Ensures all async checkpoint operations complete and closes
+        the checkpoint manager.
+        """
+        self.cp_manager.close()
+        self.envs.close()
