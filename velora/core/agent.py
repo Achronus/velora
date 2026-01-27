@@ -13,7 +13,9 @@
 # limitations under the License.
 # ==============================================================================
 
-from typing import Optional, Tuple
+import json
+from pathlib import Path
+from typing import Optional, Self, Tuple
 
 import chex
 import distrax
@@ -21,6 +23,7 @@ import gymnasium as gym
 import jax
 import jax.numpy as jnp
 import optax
+import orbax.checkpoint as ocp
 from flax import nnx
 
 from velora.config.outputs import BufferSamples, DiscoAgentOutput, PolicyAgentOutput
@@ -35,6 +38,8 @@ from velora.models.encoder import DiscoInputEncoder
 from velora.models.lnn.ncp import LNN
 from velora.models.meta import DiscoNetwork
 from velora.models.policy import ACM, OCM
+from velora.utils.format import create_directory
+from velora.utils.seed import get_rng_key_data, restore_rng_key
 from velora.utils.transforms import squeeze_time
 
 
@@ -299,6 +304,9 @@ class DiscoAgent:
         Configuration for the update rule agent
     key : jax.random.PRNGKey
         Random number generator key
+    freeze : bool (optional)
+        Freezes parameters so they cannot be trained.
+        Useful for reusing trained target rules. Default is `False`
     jit_compile : bool (optional)
         Flag to enable/disable JIT compilation. Default is `False`
     """
@@ -308,9 +316,12 @@ class DiscoAgent:
         *,
         config: DiscoAgentSettings,
         key: chex.PRNGKey,
+        freeze: bool = False,
         jit_compile: bool = False,
     ) -> None:
         self.config = config
+        self.key = key
+        self.is_frozen = freeze
         self.encoder_config = config.encoder_config()
 
         encoder_key, disco_key, meta_key, proj_key = jax.random.split(key, 4)
@@ -434,6 +445,13 @@ class DiscoAgent:
         _, meta_h_state = self.meta_lnn(summary, h_state=meta_h_state)
 
         targets = DiscoAgentOutput(pi=preds.pi, y=preds.y, z=preds.z)
+
+        # Freeze training
+        if self.is_frozen:
+            targets = jax.tree.map(jax.lax.stop_gradient, targets)
+            disco_h_state = jax.lax.stop_gradient(disco_h_state)
+            meta_h_state = jax.lax.stop_gradient(meta_h_state)
+
         return targets, disco_h_state, meta_h_state
 
     def _meta_conditioning(
@@ -490,6 +508,95 @@ class DiscoAgent:
         nnx.update(self._disco_net, params["disco_net"])
         nnx.update(self._meta_lnn, params["meta_lnn"])
         nnx.update(self._meta_proj, params["meta_proj"])
+
+    def save(
+        self,
+        root_path: Path | str = "checkpoints/models",
+        model_name: str = "disco",
+        timestamp: bool = True,
+    ) -> None:
+        """
+        Saves the agent's network parameters and configuration to disk.
+
+        Useful for saving discovered update rules.
+
+        Default directory path: `./checkpoints/models/disco_[ddmmyy]_[hhmmss]/`.
+
+        Parameters
+        ----------
+        root_path : Path | str (optional)
+            Directory path for saving. Default is `checkpoints/models`
+        model_name : str (optional)
+            The folder name to save the agents state. Gets merged with `root_path`.
+            Default is `disco`
+        timestamp : bool (optional)
+            Whether to append timestamps to experiment directory.
+            Uses timestamp format: `ddmmyy_hhmmss`. Default is `True`
+        """
+        model_dir = create_directory(root_path, model_name, timestamp)
+        model_dir.mkdir(parents=True, exist_ok=True)
+
+        cp = ocp.StandardCheckpointer()
+
+        # Set config as JSON
+        key_data = get_rng_key_data(self.key)
+        config_json = self.config.to_json(key=key_data)
+
+        # Save params and config
+        cp.save(model_dir / "params", self.get_params())
+        (model_dir / "config.json").write_text(config_json)
+
+        cp.wait_until_finished()
+
+    @classmethod
+    def load(
+        cls,
+        path: Path | str,
+        freeze: bool = True,
+        jit_compile: bool = False,
+    ) -> Self:
+        """
+        Restore a saved agents state. Useful for loading a discovered update rule.
+
+        Parameters
+        ----------
+        path : Path | str
+            Directory path to load from
+        freeze : bool (optional)
+            Freezes parameters so they cannot be trained. Default is `True`
+        jit_compile : bool (optional)
+            Whether to JIT compile. Default is `False`
+
+        Returns
+        -------
+        disco_agent : DiscoAgent
+            Agent with restored parameters
+        """
+        path = Path(path).resolve()
+
+        # Load config
+        config_dict: dict = json.loads((path / "config.json").read_text())
+        key = restore_rng_key(config_dict.pop("key"))
+        config = DiscoAgentSettings(**config_dict)
+
+        agent = cls(
+            config=config,
+            key=key,
+            freeze=freeze,
+            jit_compile=jit_compile,
+        )
+
+        # Restore parameters
+        abstract_params = jax.tree.map(
+            ocp.utils.to_shape_dtype_struct,
+            agent.get_params(),
+        )
+
+        cp = ocp.StandardCheckpointer()
+        params = cp.restore(path / "params", abstract_params)
+
+        agent.update_params(params)
+        return agent
 
 
 class DiscoValueAgent:

@@ -13,6 +13,8 @@
 # limitations under the License.
 # ==============================================================================
 
+import json
+from dataclasses import fields
 from pathlib import Path
 from typing import Self
 
@@ -263,6 +265,24 @@ class DiscoAgentSettings:
             action_embed_dim=self.action_embed_dim,
             scalar_embed_dim=self.scalar_embed_dim,
         )
+
+    def to_json(self, **extras) -> str:
+        """
+        Converts the object to a JSON string with `extras` added.
+
+        Parameters
+        ----------
+        extras : kwargs (optional)
+            Additional key-value arguments to merge into JSON string.
+            Default is `None`
+
+        Returns
+        -------
+        json : str
+            The object as a JSON serialized string
+        """
+        items = {f.name: getattr(self, f.name) for f in fields(self)}
+        return json.dumps(items | (extras or {}), indent=2)
 
 
 @struct.dataclass(frozen=True)
