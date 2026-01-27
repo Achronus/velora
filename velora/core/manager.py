@@ -15,7 +15,7 @@
 
 
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import List
 
 import orbax.checkpoint as ocp
 from orbax.checkpoint.checkpoint_managers import FixedIntervalPolicy, LatestN
@@ -48,7 +48,7 @@ class CheckpointManager:
         *,
         config: CheckpointSettings,
     ) -> None:
-        self.cp_dir = config.dirpath / env_name
+        self.cp_dir = Path(config.dirpath, env_name).resolve()
         self.config = config
 
         self.cp_dir.mkdir(parents=True, exist_ok=True)
@@ -59,14 +59,12 @@ class CheckpointManager:
             save_decision_policy=FixedIntervalPolicy(config.freq),
             preservation_policy=LatestN(config.max),
         )
-
         self._manager = ocp.CheckpointManager(self.cp_dir, options=options)
 
     def save(
         self,
         step: int,
         state: AgentTrainerState,
-        metrics: Dict[str, Any] | None = None,
         force: bool = False,
     ) -> bool:
         """
@@ -78,8 +76,6 @@ class CheckpointManager:
             Current training step
         state : AgentTrainerState
             State to save
-        metrics : Dict[str, Any] (optional)
-            Optional metrics to save alongside state. Default is `None`
         force : bool
             Force save even if within save_interval. Default is `False`
 

@@ -72,4 +72,4 @@ def create_directory(
     """
     ts = datetime.now().strftime("%d%m%y_%H%M%S")
     name = f"{folder_name}_{ts}" if timestamp else folder_name
-    return Path(root_dir) / name
+    return Path(root_dir, name).resolve()

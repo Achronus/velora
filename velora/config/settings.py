@@ -371,16 +371,16 @@ class CheckpointSettings:
 
     Parameters
     ----------
-    dirpath : Path (optional)
+    dirpath : Path | str (optional)
         Directory for saving agent states and checkpoints.
-        Default is `./checkpoints`
+        Default is `checkpoints`
     freq : int (optional)
         Checkpoint save frequency between timesteps. Default is `100_000`
     max : int (optional)
         Maximum number of checkpoints to store. Default is `100`
     """
 
-    dirpath: Path = Path(".", "checkpoints")
+    dirpath: Path | str = "checkpoints"
     freq: int = 100_000
     max: int = 100
 
