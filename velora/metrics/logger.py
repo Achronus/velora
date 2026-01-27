@@ -14,13 +14,13 @@
 # ==============================================================================
 
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
 from pathlib import Path
 from typing import Dict
 
 from tensorboardX import SummaryWriter
 
 from velora.config.settings import MetricLoggerSettings
+from velora.utils.format import create_directory
 
 
 class MetricsLogger:
@@ -52,7 +52,7 @@ class MetricsLogger:
     def __init__(self, config: MetricLoggerSettings) -> None:
         self.config = config
 
-        self.root_dir = self._create_root_log_dir(
+        self.root_dir = self._create_log_dir(
             self.config.base_dir,
             self.config.experiment_name,
             self.config.timestamp,
@@ -108,13 +108,13 @@ class MetricsLogger:
         self.executor.submit(self._write, writer_name, step, metrics)
 
     @staticmethod
-    def _create_root_log_dir(
+    def _create_log_dir(
         base_dir: str | Path = "logs",
         experiment_name: str = "disco",
         timestamp: bool = True,
     ) -> Path:
         """
-        Creates the root experiment log directory.
+        Creates the experiment log directory.
 
         Parameters
         ----------
@@ -131,15 +131,8 @@ class MetricsLogger:
         log_dir : Path
             Path to experiment log directory. E.g., `logs/disco_250126_174222/`
         """
-        if timestamp:
-            ts = datetime.now().strftime("%d%m%y_%H%M%S")
-            name = f"{experiment_name}_{ts}"
-        else:
-            name = experiment_name
-
-        log_dir = Path(base_dir) / name
+        log_dir = create_directory(base_dir, experiment_name, timestamp)
         log_dir.mkdir(parents=True, exist_ok=True)
-
         return log_dir
 
     def _write(self, writer_name: str, step: int, metrics: dict) -> None:

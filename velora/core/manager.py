@@ -29,7 +29,7 @@ class CheckpointManager:
     Handles checkpoint saving and loading for `AgentTrainerState` using Orbax.
 
     Supports:
-    - Automatic checkpoint rotation (max_to_keep)
+    - Automatic checkpoint rotation (`config.max`)
     - Async saving for non-blocking training
     - Restore from specific step or latest
     - Metadata tracking
@@ -40,8 +40,6 @@ class CheckpointManager:
         Name of the environment being trained on
     config : CheckpointSettings
         Configuration settings for the manager
-    enable_async : bool (optional)
-        Enable asynchronous checkpointing. Default is `True`
     """
 
     def __init__(
@@ -49,7 +47,6 @@ class CheckpointManager:
         env_name: str,
         *,
         config: CheckpointSettings,
-        enable_async: bool = True,
     ) -> None:
         self.cp_dir = config.dirpath / env_name
         self.config = config

@@ -14,6 +14,10 @@
 # ==============================================================================
 
 
+from datetime import datetime
+from pathlib import Path
+
+
 def number_to_short(value: int) -> str:
     """
     Converts a number into a human-readable format like `1M` or `1.25K`.
@@ -40,3 +44,32 @@ def number_to_short(value: int) -> str:
             return f"-{result}" if is_negative else result
 
     return str(value)
+
+
+def create_directory(
+    root_dir: str | Path,
+    folder_name: str,
+    timestamp: bool = True,
+) -> Path:
+    """
+    Creates a directory path with the sub-folder name containing optional timestamps.
+
+    Parameters
+    ----------
+    root_dir : str | Path
+        Root directory path.
+    folder_name : str
+        Unique folder name stored inside `root_dir`. Merged with `timestamp`
+    timestamp : bool (optional)
+        Whether to append timestamps to experiment directory.
+        Uses timestamp format: `ddmmyy_hhmmss`. Default is `True`
+
+    Returns
+    -------
+    dirpath : Path
+        Directory path in format: `[root_dir]/[folder_name]_[ddmmyy]_[hhmmss]/`
+        or `[root_dir]/[folder_name]/`
+    """
+    ts = datetime.now().strftime("%d%m%y_%H%M%S")
+    name = f"{folder_name}_{ts}" if timestamp else folder_name
+    return Path(root_dir) / name
