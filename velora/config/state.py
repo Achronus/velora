@@ -24,6 +24,8 @@ from flax import nnx, struct
 from velora.config.outputs import BufferSamples, PolicyAgentOutput
 from velora.metrics.ema import MovingAverage
 
+HiddenState = chex.Array | None
+
 
 @struct.dataclass
 class PolicyAgentHiddenStates:
@@ -51,9 +53,9 @@ class PolicyAgentHiddenStates:
 
 
 @struct.dataclass
-class BundledHiddenStates:
+class AgentTrainerHiddenStates:
     """
-    Dataclass for bundled hidden states for the `AgentTrainer` used during data collection.
+    Dataclass for `AgentTrainer` hidden states.
 
     Parameters
     ----------
@@ -69,11 +71,11 @@ class BundledHiddenStates:
         Value network hidden state. Default is `None`
     """
 
-    ocm: chex.Array | None = None
-    acm: chex.Array | None = None
-    target_ocm: chex.Array | None = None
-    target_acm: chex.Array | None = None
-    value: chex.Array | None = None
+    ocm: HiddenState = None
+    acm: HiddenState = None
+    target_ocm: HiddenState = None
+    target_acm: HiddenState = None
+    value: HiddenState = None
 
     def reset_on_done(self, discounts: chex.Array, n_actions: int) -> None:
         """
@@ -126,6 +128,101 @@ class BundledHiddenStates:
             target_acm=target_h_state.acm,
             value=value_h_state,
         )
+
+
+@struct.dataclass
+class RuleTrainerHiddenStates:
+    """
+    Dataclass for `RuleTrainer` hidden states.
+
+    Maintains hidden states for the `DiscoNetwork` and `MetaLNN` across
+    all environments during meta-training.
+
+    Make a new instance using the `.create()` method.
+
+    Parameters
+    ----------
+    disco : Tuple[chex.Array | None, ...]
+        `DiscoNetwork` hidden states for each environment
+    meta : Tuple[chex.Array | None, ...]
+        `MetaLNN` hidden states for each environment
+    """
+
+    disco: Tuple[HiddenState, ...]
+    meta: Tuple[HiddenState, ...]
+
+    @classmethod
+    def create(cls, num_envs: int) -> Self:
+        """
+        Create initial hidden states for all environments.
+
+        Parameters
+        ----------
+        num_envs : int
+            Number of environments in the population
+
+        Returns
+        -------
+        states : RuleTrainerHiddenStates
+            Initialized hidden states (all `None`)
+        """
+        return cls(
+            disco=tuple(None for _ in range(num_envs)),
+            meta=tuple(None for _ in range(num_envs)),
+        )
+
+    def update(self, env_idx: int, disco_h: HiddenState, meta_h: HiddenState) -> None:
+        """
+        Update hidden states for a specific environment.
+
+        Parameters
+        ----------
+        env_idx : int
+            Index of the environment to update
+        disco_h : chex.Array | None
+            New disco network hidden state
+        meta_h : chex.Array | None
+            New meta-LNN hidden state
+        """
+        disco_list = list(self.disco)
+        meta_list = list(self.meta)
+
+        disco_list[env_idx] = disco_h
+        meta_list[env_idx] = meta_h
+
+        self = self.__replace__(
+            disco=tuple(disco_list),
+            meta=tuple(meta_list),
+        )
+
+    def reset(self, env_idx: int) -> None:
+        """
+        Reset hidden states for a specific environment.
+
+        Parameters
+        ----------
+        env_idx : int
+            Index of the environment to reset
+        """
+        self.update(env_idx, None, None)
+
+    def get(self, env_idx: int) -> Tuple[HiddenState, HiddenState]:
+        """
+        Get hidden states for a specific environment.
+
+        Parameters
+        ----------
+        env_idx : int
+            Index of the environment
+
+        Returns
+        -------
+        disco_h : chex.Array | None
+            An environments Disco network hidden state
+        meta_h : chex.Array | None
+            An environments Meta-LNN hidden state
+        """
+        return self.disco[env_idx], self.meta[env_idx]
 
 
 @struct.dataclass
@@ -428,7 +525,7 @@ class AgentTrainerState:
     optim: optax.GradientTransformation
     opt_state: optax.OptState
 
-    hidden: BundledHiddenStates
+    hidden: AgentTrainerHiddenStates
     value: DiscoValueState
 
     current_obs: chex.Array
@@ -482,7 +579,7 @@ class AgentTrainerState:
             ),
             optim=optim,
             opt_state=opt_state,
-            hidden=BundledHiddenStates(),
+            hidden=AgentTrainerHiddenStates(),
             value=DiscoValueState.create(
                 value_params,
                 value_optim,
@@ -531,7 +628,7 @@ class AgentTrainerState:
             steps_trained=self.steps_trained + 1,
         )
 
-    def update_hidden_states(self, new_hidden: BundledHiddenStates) -> None:
+    def update_hidden_states(self, new_hidden: AgentTrainerHiddenStates) -> None:
         """
         Update recurrent hidden states.
 
@@ -568,3 +665,26 @@ class AgentTrainerState:
             New state with updated observation state
         """
         self = self.__replace__(current_obs=new_obs)
+
+
+@struct.dataclass
+class RuleTrainerState:
+    """
+    Dataclass for `RuleTrainer` checkpoint state.
+
+    Parameters
+    ----------
+    meta_step : int
+        Current meta-training step
+    meta_params : nnx.State
+        Meta-network (disco) parameters
+    meta_optim_state : optax.OptState
+        Meta-optimizer state
+    hidden_states : RuleTrainerHiddenStates
+        Rule Trainer hidden states per environment
+    """
+
+    meta_step: int
+    meta_params: nnx.State
+    meta_optim_state: optax.OptState
+    hidden_states: RuleTrainerHiddenStates

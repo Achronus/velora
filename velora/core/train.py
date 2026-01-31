@@ -21,6 +21,7 @@ import jax
 import jax.numpy as jnp
 import optax
 import orbax.checkpoint as ocp
+import rlax
 
 from velora.config.outputs import (
     AgentLosses,
@@ -29,15 +30,29 @@ from velora.config.outputs import (
     DiscoValueOutputs,
 )
 from velora.config.settings import AgentTrainerSettings, RuleTrainerSettings
-from velora.config.state import AgentTrainerState, CollectState
+from velora.config.state import (
+    AgentTrainerState,
+    CollectState,
+    RuleTrainerHiddenStates,
+    RuleTrainerState,
+)
 from velora.core.agent import DiscoAgent, DiscoValueAgent, PolicyAgent
 from velora.core.buffer import MixedBuffer
 from velora.core.manager import CheckpointManager
 from velora.core.optim import scale_by_adan_no_denom
 from velora.gym.utils import make_atari_env
+from velora.metrics.compute import (
+    compute_importance_weights,
+    compute_l2_mean_penalty,
+    compute_vtrace,
+)
 from velora.metrics.logger import MetricsLogger
-from velora.metrics.loss import compute_aux_policy_loss, compute_kl_loss, compute_z_loss
-from velora.metrics.vtrace import compute_importance_weights, compute_vtrace
+from velora.metrics.loss import (
+    compute_aux_policy_loss,
+    compute_entropy_loss,
+    compute_kl_loss,
+    compute_z_loss,
+)
 
 
 class RuleTrainer:
@@ -79,6 +94,7 @@ class RuleTrainer:
         self.jit_compile = jit_compile
 
         self.current_env_idx = 0
+        self.meta_step = 0
 
         # Init logger
         self.logger = MetricsLogger(self.config.logger)
@@ -93,12 +109,18 @@ class RuleTrainer:
         trainer_keys = jax.random.split(trainer_key, self.num_envs)
 
         # Init agents
-        self.meta_agent = DiscoAgent(config=config.disco_agent, key=meta_key)
+        self.meta_agent = DiscoAgent(
+            config=config.disco_agent,
+            key=meta_key,
+            jit_compile=self.jit_compile,
+        )
         self.meta_optim = optax.chain(
             optax.clip_by_global_norm(config.meta_grad_clip),
             optax.adam(config.meta_lr),
         )
         self.meta_optim_state = self.meta_optim.init(self.meta_agent.get_params())
+
+        self.h_state = RuleTrainerHiddenStates.create(self.num_envs)
 
         self.trainers = [
             AgentTrainer(
@@ -112,8 +134,403 @@ class RuleTrainer:
             for i, env_name in enumerate(self.env_names)
         ]
 
+        self.cp_manager = CheckpointManager(
+            "rule_trainer",
+            config=self.config.checkpoint,
+        )
+
     def train(self) -> None:
-        pass
+        """
+        Performs meta-training loop to discover an RL update rule.
+
+        Includes -
+        1. For each meta-step:
+
+            a. Collect trajectories from all environments
+            b. For each agent, perform inner loop updates
+            c. Compute meta-gradients through the learning process
+            d. Average gradients across agents and update meta-network
+
+        2. Log metrics and checkpoints periodically
+        """
+        for step in range(self.config.n_steps):
+            self.meta_step = step
+
+            meta_grads_list = []
+            for idx, trainer in enumerate(self.trainers):
+                trainer.collect()
+
+                # Compute meta_gradient for this agent
+                meta_grad = self._compute_meta_gradient(idx)
+                meta_grads_list.append(meta_grad)
+
+            # Average meta-gradients across all agents
+            avg_meta_grad = jax.tree.map(
+                lambda *grads: jnp.mean(jnp.stack(grads), axis=0),
+                *meta_grads_list,
+            )
+            self._apply_meta_update(avg_meta_grad)
+
+            # Log metrics
+            self.logger.log(
+                "meta",
+                self.meta_step,
+                {
+                    "meta/grad_norm": float(optax.global_norm(avg_meta_grad)),
+                    "meta/step": self.meta_step,
+                },
+            )
+
+            # Checkpoint periodically
+            if step % self.config.checkpoint.freq == 0:
+                self.save_checkpoint()
+
+        # Final cleanup
+        self.close()
+
+    def _compute_meta_gradient(self, trainer_idx: int) -> chex.ArrayTree:
+        """
+        Compute meta-gradient for a single agent through the inner learning loop.
+
+        Parameters
+        ----------
+        trainer_idx : int
+            Index of the agent trainer to update
+
+        Returns
+        -------
+        meta_grad : chex.ArrayTree
+            Gradients w.r.t. meta-network parameters
+        """
+        trainer = self.trainers[trainer_idx]
+        n_updates = self.config.n_updates
+
+        def meta_loss_fn(meta_params) -> chex.Array:
+            # Set current params
+            self.meta_agent.update_params(meta_params)
+
+            disco_h, meta_h = self.h_state.get(trainer_idx)
+            policy_params = trainer.state.params.policy
+
+            # Inner loop: perform n updates
+            last_targets = None
+            for _ in range(n_updates):
+                batch = trainer.buffer.sample(self.config.batch_size)
+
+                targets, disco_h, meta_h = self.meta_agent(
+                    batch,
+                    disco_h_state=disco_h,
+                    meta_h_state=meta_h,
+                )
+                last_targets = targets
+
+                def policy_loss_fn(params):
+                    trainer.policy_agent.update_params(params)
+                    return trainer._compute_policy_loss(batch, targets)
+
+                _, grads = jax.value_and_grad(policy_loss_fn, has_aux=True)(
+                    policy_params
+                )
+
+                # Apply inner update
+                updates, _ = trainer.state.optim.update(
+                    grads,
+                    trainer.state.opt_state,
+                    policy_params,
+                )
+                policy_params = optax.apply_updates(policy_params, updates)
+
+            # Update hidden states and params
+            self.h_state.update(trainer_idx, disco_h, meta_h)
+            trainer.policy_agent.update_params(policy_params)  # type: ignore
+
+            # Compute values function outputs
+            value_batch = trainer.buffer.sample(self.config.batch_size)
+            value_outs = trainer.get_values(value_batch)
+
+            # Compute meta-loss
+            pg_loss = self._policy_gradient_loss(
+                value_batch.preds.pi,
+                value_batch.actions,
+                value_outs.normalized_advantages,
+            )
+            entropy_loss = compute_entropy_loss(
+                value_batch.preds.pi,
+                self.config.entropy_coef,
+            )
+            reg_loss = self._compute_meta_reg_loss(last_targets, value_batch)  # type: ignore
+            meta_loss = pg_loss + entropy_loss + reg_loss
+
+            # Log metrics
+            self._log_meta_metrics(
+                trainer_idx,
+                pg_loss,
+                entropy_loss,
+                reg_loss,
+                meta_loss,
+                value_outs,
+            )
+
+            return meta_loss
+
+        # Compute gradients w.r.t meta-network params
+        meta_params = self.meta_agent.get_params()
+        _, meta_grad = jax.value_and_grad(meta_loss_fn, has_aux=True)(meta_params)
+
+        # Update value function
+        batch = trainer.buffer.sample(self.config.batch_size)
+        trainer.update_value_params(batch)
+
+        return meta_grad
+
+    def _log_meta_metrics(
+        self,
+        trainer_idx: int,
+        pg_loss: chex.Array,
+        entropy_loss: chex.Array,
+        reg_loss: chex.Array,
+        total_loss: chex.Array,
+        value_outs: DiscoValueOutputs,
+    ) -> None:
+        """
+        Log meta-training metrics for a single environment.
+
+        Parameters
+        ----------
+        trainer_idx : int
+            Index of the current agent trainer
+        pg_loss : chex.Array
+            Policy gradient loss
+        entropy_loss : chex.Array
+            Entropy regularization loss
+        reg_loss : chex.Array
+            L2 and KL regularization loss on meta-network targets
+        total_loss : chex.Array
+            Sum of all loss components
+        value_outs : DiscoValueOutputs
+            Value function outputs containing advantage estimates
+        """
+        metrics = {
+            "meta/pg_loss": float(pg_loss),
+            "meta/entropy_loss": float(entropy_loss),
+            "meta/reg_loss": float(reg_loss),
+            "meta/total_loss": float(total_loss),
+            "meta/advantages": float(jnp.mean(value_outs.advantages)),
+            "meta/normalized_advantages": float(
+                jnp.mean(value_outs.normalized_advantages)
+            ),
+        }
+        self.logger.log(f"envs/{self.env_names[trainer_idx]}", self.meta_step, metrics)
+
+    def _policy_gradient_loss(
+        self, logits: chex.Array, actions: chex.Array, advantages: chex.Array
+    ) -> chex.Array:
+        """
+        Compute differentiable policy gradient loss (REINFORCE-style).
+
+        Calculates `-log π(a|s) * A(s, a)` for each timestep. Advantages are
+        stopped from gradient flow as they should not influence the meta-network
+        through this path.
+
+        Parameters
+        ----------
+        logits : chex.Array
+            Policy logits. Shape: `(B, T, A)`
+        actions : chex.Array
+            Actions taken. Shape: `(B, T, 1)`
+        advantages : chex.Array
+            Advantage estimates. Shape: `(T, B)`
+
+        Returns
+        -------
+        loss : chex.Array
+            Per-timestep policy gradient loss. Shape: `(B, T)`
+        """
+        advantages = jnp.transpose(advantages)  # (B, T)
+        actions = jnp.squeeze(actions, axis=-1)  # (B, T)
+
+        log_pi = jax.nn.log_softmax(logits)
+        log_pi_a = rlax.batched_index(log_pi, actions)
+        return -log_pi_a * jax.lax.stop_gradient(advantages)  # type: ignore
+
+    def _compute_meta_reg_loss(
+        self,
+        targets: DiscoAgentOutput,
+        batch: BufferSamples,
+    ) -> chex.Array:
+        """
+        Compute regularization terms for meta-network outputs.
+
+        Includes -
+        - L2 regularization on target means (prevent divergence)
+        - KL divergence between targets and current policy (stability)
+
+        Parameters
+        ----------
+        targets : DiscoAgentOutput
+            Generated targets `(π̂, ŷ, ẑ)`
+        batch : BufferSamples
+            Batch of experience
+
+        Returns
+        -------
+        reg_loss : chex.Array
+            Total regularization loss
+        """
+        pi_reg = compute_l2_mean_penalty(targets.pi)
+        y_reg = compute_l2_mean_penalty(targets.y)
+        z_reg = compute_l2_mean_penalty(targets.z)
+
+        target_kl = compute_kl_loss(
+            jax.lax.stop_gradient(batch.target_preds.pi),
+            targets.pi,
+        ).mean()
+
+        l2_reg = self.config.reg_scale * (pi_reg + y_reg + z_reg)
+        kl_reg = self.config.kl_reg * target_kl
+        return l2_reg + kl_reg
+
+    def _apply_meta_update(self, meta_grad: chex.ArrayTree) -> None:
+        """
+        Apply meta-gradient update to meta-network parameters.
+
+        Parameters
+        ----------
+        meta_grad : chex.ArrayTree
+            Averaged gradients across all agents
+        """
+        meta_params = self.meta_agent.get_params()
+
+        updates, self.meta_optim_state = self.meta_optim.update(
+            meta_grad,
+            self.meta_optim_state,
+            meta_params,
+        )
+        new_params = optax.apply_updates(meta_params, updates)
+        self.meta_agent.update_params(new_params)  # type: ignore
+
+    def save_checkpoint(self, force: bool = False) -> bool:
+        """
+        Save current state to checkpoint.
+
+        Saves both meta-network state and all individual trainer states.
+
+        Parameters
+        ----------
+        force : bool (optional)
+            Force save even if within save interval. Default is `False`
+
+        Returns
+        -------
+        saved : bool
+            Whether checkpoint was actually saved
+        """
+        if not force and not self.cp_manager.should_save(self.meta_step):
+            return False
+
+        state = RuleTrainerState(
+            meta_step=self.meta_step,
+            meta_params=self.meta_agent.get_params(),
+            meta_optim_state=self.meta_optim_state,
+            hidden_states=self.hidden_states,
+        )
+
+        self.cp_manager.save(self.meta_step, state, force=True)
+
+        # Save individual trainer states
+        for trainer in self.trainers:
+            trainer.save_checkpoint(force=True)
+
+        return True
+
+    def load_checkpoint(self, step: int | None = None) -> bool:
+        """
+        Restore state from a checkpoint.
+
+        Restores both meta-network state and all individual trainer states.
+
+        Parameters
+        ----------
+        step : int (optional)
+            Specific step to restore, or `None` for latest. Default is `None`
+
+        Returns
+        -------
+        success : bool
+            Whether restoration was successful
+        """
+        # Create abstract state for safe restoration
+        abstract_state = RuleTrainerState(
+            meta_step=0,
+            meta_params=jax.tree.map(
+                ocp.utils.to_shape_dtype_struct,
+                self.meta_agent.get_params(),
+            ),
+            meta_optim_state=jax.tree.map(
+                ocp.utils.to_shape_dtype_struct,
+                self.meta_optim_state,
+            ),
+            hidden_states=jax.tree.map(
+                lambda x: ocp.utils.to_shape_dtype_struct(x) if x is not None else None,
+                self.hidden_states,
+            ),
+        )
+
+        restored_state: RuleTrainerState = self.cp_manager.restore(step, abstract_state)  # type: ignore
+
+        if restored_state is None:
+            return False
+
+        # Restore meta state
+        self.meta_step = restored_state.meta_step
+        self.meta_agent.update_params(restored_state.meta_params)
+        self.meta_optim_state = restored_state.meta_optim_state
+        self.hidden_states = restored_state.hidden_states
+
+        # Restore individual trainer states
+        for trainer in self.trainers:
+            trainer.load_checkpoint(step)
+
+        return True
+
+    def reset_trainer(self, trainer_idx: int) -> None:
+        """
+        Reset a trainer to initial state.
+
+        Used when an agent has consumed its experience budget during
+        meta-training. Creates a fresh agent while preserving the
+        meta-network parameters.
+
+        Parameters
+        ----------
+        trainer_idx : int
+            Index of the trainer to reset
+        """
+        env_name = self.env_names[trainer_idx]
+
+        # Close existing trainer
+        self.trainers[trainer_idx].close()
+
+        # Fresh RNG keys
+        self.rule_key, new_key = jax.random.split(self.rule_key)
+
+        # Init new trainer
+        self.trainers[trainer_idx] = AgentTrainer(
+            env_name,
+            self.config.agent_trainer_config(),
+            key=new_key,
+            logger=self.logger,
+            writer_name=f"envs/{env_name}",
+            jit_compile=self.jit_compile,
+        )
+        self.h_state.reset(trainer_idx)
+
+    def close(self) -> None:
+        """Clean up resources."""
+        self.cp_manager.close()
+
+        for trainer in self.trainers:
+            trainer.close()
 
 
 class AgentTrainer:
@@ -203,7 +620,7 @@ class AgentTrainer:
         # Init agent state
         current_obs, _ = self.envs.reset()
 
-        self.state = AgentTrainerState.create(
+        self.state: AgentTrainerState = AgentTrainerState.create(
             self.policy_agent.get_params(),
             self.target_agent.get_params(),
             self.value_agent.get_params(),
@@ -280,7 +697,7 @@ class AgentTrainer:
         self,
         batch: BufferSamples,
         targets: DiscoAgentOutput,
-    ) -> AgentLosses:
+    ) -> Tuple[chex.Array, AgentLosses]:
         """
         Computes the policy agent losses for a single timestep.
 
@@ -299,6 +716,8 @@ class AgentTrainer:
 
         Returns
         -------
+        total_loss : chex.Array
+            Total loss
         losses : AgentLosses
             An object containing the agent losses
         """
@@ -312,12 +731,14 @@ class AgentTrainer:
             batch.discounts,
         ).mean()
 
-        return AgentLosses(
+        losses = AgentLosses(
             pi=pi_loss,
             y=y_loss,
             z=z_loss,
             aux_pi=aux_pi_loss,
         ).compute_total(self.config.loss_costs)
+
+        return losses.total, losses
 
     def _update_policy_step(
         self,
@@ -336,7 +757,7 @@ class AgentTrainer:
         """
         params = self.state.params.policy
 
-        def loss_fn(p) -> AgentLosses:
+        def loss_fn(p) -> Tuple[chex.Array, AgentLosses]:
             self.policy_agent.update_params(p)
             return self._compute_policy_loss(batch, targets)
 
@@ -597,7 +1018,9 @@ class AgentTrainer:
             self.state,
         )
 
-        restored_state = self.cp_manager.restore(step, abstract_state)
+        restored_state: AgentTrainerState = self.cp_manager.restore(
+            step, abstract_state
+        )  # type: ignore
 
         if restored_state is None:
             return False

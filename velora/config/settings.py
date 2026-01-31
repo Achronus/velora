@@ -509,6 +509,17 @@ class RuleTrainerSettings:
         Learning rate for meta-network optimizer. Default is `0.001`
     meta_grad_clip : float (optional)
         Gradient clipping threshold for meta-updates. Default is `1.0`
+    entropy_coef : float (optional)
+        Coefficient for entropy regularization in the meta-loss. Encourages
+        exploration by penalizing low-entropy (overly deterministic) policies.
+        Higher values promote more exploration. Default is `0.01`
+    reg_scale : float (optional)
+        L2 regularization scale for meta-network target outputs. Penalizes
+        large target means to prevent divergence. Default is `0.001`
+    kl_reg : float (optional)
+        KL divergence regularization scale between meta-network targets and
+        current policy. Encourages stability by keeping targets close to the
+        agent's current predictions. Default is `0.01`
     n_steps : int (optional)
         Total number of meta-training steps. Default is `1_000_000`
     n_updates : int (optional)
@@ -541,6 +552,10 @@ class RuleTrainerSettings:
 
     meta_lr: float = 0.001
     meta_grad_clip: float = 1.0
+    entropy_coef: float = 1e-2
+    reg_scale: float = 1e-3
+    kl_reg: float = 1e-2
+
     n_steps: int = 1_000_000
     n_updates: int = 20
 

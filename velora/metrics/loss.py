@@ -14,6 +14,7 @@
 # ==============================================================================
 
 import chex
+import distrax
 import jax
 import jax.numpy as jnp
 import rlax
@@ -119,3 +120,32 @@ def compute_aux_policy_loss(
 
     # Mask out terminal states
     return loss * jnp.squeeze(discounts[:, :-1], axis=-1)  # type: ignore
+
+
+def compute_entropy_loss(logits: chex.Array, coef: float = 1e-2) -> chex.Array:
+    """
+    Compute entropy loss for policy regularization.
+
+    Encourages exploration by penalizing low-entropy (overly deterministic)
+    policies. Returns negative entropy so that minimizing the loss
+    maximizes entropy.
+
+    Parameters
+    ----------
+    logits : chex.Array
+        Policy logits. Shape: `(B, T, A)` or `(B, A)`
+
+        - batch_size (`B`) - the number of samples per timestep
+        - seq_length (`T`) - the number of timesteps (optional)
+        - n_actions (`A`) - the number of discrete actions
+
+    coef : float (optional)
+        Entropy coefficient. Higher values promote more exploration.
+        Default is `0.01`
+
+    Returns
+    -------
+    loss : chex.Array
+        Scalar negative mean entropy loss
+    """
+    return -coef * jnp.mean(distrax.Softmax(logits).entropy())
