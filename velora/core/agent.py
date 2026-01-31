@@ -225,7 +225,8 @@ class PolicyAgent:
 
         return (
             PolicyAgentOutput.create(
-                *ocm_preds.output_values(), *acm_preds.output_values()
+                *ocm_preds.output_values(),
+                *acm_preds.output_values(),
             ),
             PolicyAgentHiddenStates(ocm=ocm_h_state, acm=acm_h_state),
         )

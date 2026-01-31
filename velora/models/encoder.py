@@ -174,7 +174,7 @@ class DiscoInputEncoder(nnx.Module):
         targets : PolicyAgentOutput
             Policy agent target network output predictions
         actions : jax.Array
-            Actions taken with shape `(B, T)`:
+            Actions taken with shape `(B, T, 1)`:
 
             - batch_size (`B`) - the number of samples per timestep.
             - seq_length (`T`) - the number of timesteps in the trajectory.
@@ -193,6 +193,7 @@ class DiscoInputEncoder(nnx.Module):
         pi_target_probs = jnp.expand_dims(self._encode(targets.pi), axis=-1)
 
         # One-hot encode actions taken: (B, T) -> (B, T, A) -> (B, T, A, 1)
+        actions = jnp.squeeze(actions, axis=-1)  # (B, T)
         one_hot_actions = jax.nn.one_hot(actions, self.n_actions)
         one_hot_actions = jnp.expand_dims(one_hot_actions, axis=-1)
 
@@ -231,15 +232,18 @@ class DiscoInputEncoder(nnx.Module):
         Parameters
         ----------
         rewards : chex.Array
-            Rewards. Shape: `(B, T)`
+            Rewards. Shape: `(B, T, 1)`
         discounts : chex.Array
-            Discounts. Shape: `(B, T)`
+            Discounts. Shape: `(B, T, 1)`
 
         Returns
         -------
         scalar_emb : chex.Array
             Scalar embedding. Shape: `(B, T, E_s)`
         """
+        rewards = jnp.squeeze(rewards, axis=-1)  # (B, T)
+        discounts = jnp.squeeze(discounts, axis=-1)  # (B, T)
+
         rewards = jnp.sign(rewards) * jnp.log1p(jnp.abs(rewards) + 1e-3)
         scalars = jnp.stack([rewards, discounts], axis=-1)
         return self.scalar_encoder(scalars)
