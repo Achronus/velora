@@ -21,7 +21,9 @@ import orbax.checkpoint as ocp
 from orbax.checkpoint.checkpoint_managers import FixedIntervalPolicy, LatestN
 
 from velora.config.settings import CheckpointSettings
-from velora.config.state import AgentTrainerState
+from velora.config.state import AgentTrainerState, RuleTrainerState
+
+CheckpointState = AgentTrainerState | RuleTrainerState
 
 
 class CheckpointManager:
@@ -36,19 +38,19 @@ class CheckpointManager:
 
     Parameters
     ----------
-    env_name : str
-        Name of the environment being trained on
+    name : str
+        Name of the sub-directory in `config.dirpath`
     config : CheckpointSettings
         Configuration settings for the manager
     """
 
     def __init__(
         self,
-        env_name: str,
+        name: str,
         *,
         config: CheckpointSettings,
     ) -> None:
-        self.cp_dir = Path(config.dirpath, env_name).resolve()
+        self.cp_dir = Path(config.dirpath, name).resolve()
         self.config = config
 
         self.cp_dir.mkdir(parents=True, exist_ok=True)
@@ -61,12 +63,7 @@ class CheckpointManager:
         )
         self._manager = ocp.CheckpointManager(self.cp_dir, options=options)
 
-    def save(
-        self,
-        step: int,
-        state: AgentTrainerState,
-        force: bool = False,
-    ) -> bool:
+    def save(self, step: int, state: CheckpointState, force: bool = False) -> bool:
         """
         Save trainer state to checkpoint.
 
@@ -74,7 +71,7 @@ class CheckpointManager:
         ----------
         step : int
             Current training step
-        state : AgentTrainerState
+        state : CheckpointState
             State to save
         force : bool
             Force save even if within save_interval. Default is `False`
@@ -95,8 +92,8 @@ class CheckpointManager:
     def restore(
         self,
         step: int | None = None,
-        state_template: AgentTrainerState | None = None,
-    ) -> AgentTrainerState | None:
+        state_template: CheckpointState | None = None,
+    ) -> CheckpointState | None:
         """
         Restore trainer state from checkpoint.
 
@@ -104,12 +101,12 @@ class CheckpointManager:
         ----------
         step : int (optional)
             Specific step to restore, or None for latest. Default is `None`
-        state_template : AgentTrainerState (optional)
+        state_template : CheckpointState (optional)
             Template for restoration (helps with structure). Default is `None`
 
         Returns
         -------
-        state : AgentTrainerState | None
+        state : CheckpointState | None
             Restored state, or `None` if no checkpoint exists
         """
         if self._manager.latest_step() is None:
