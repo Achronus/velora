@@ -83,3 +83,32 @@ def make_atari_env(
         **kwargs,
     )
     return JaxConversion(RecordEpisodeStatistics(envs))
+
+
+def get_n_actions(env_name: str) -> int:
+    """
+    Gets the number of actions for a Gymnasium environment.
+
+    Parameters
+    ----------
+    env_name : str
+        Name of the Gymnasium environment.
+
+    Returns
+    -------
+    n_actions : int
+        Number of actions in the environment.
+
+    Raises
+    ------
+    invalid_env : ValueError
+        Unsupported environment if it does not have a `Discrete` action space.
+    """
+    env = gym.make(env_name)
+
+    if isinstance(env.action_space, gym.spaces.Discrete):
+        return env.action_space.n.item()
+
+    raise ValueError(
+        f"Unsupported environment. Must have a 'Discrete' action space. Got: {type(env.action_space)}"
+    )
