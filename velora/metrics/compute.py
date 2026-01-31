@@ -104,3 +104,24 @@ def compute_vtrace(
     advantages = vtrace_out.pg_advantage
 
     return value_targets, advantages
+
+
+def compute_l2_mean_penalty(x: chex.Array) -> chex.Array:
+    """
+    Compute L2 penalty on the mean of a tensor.
+
+    Penalizes the global mean drifting from zero, encouraging
+    centered outputs. Useful for regularizing meta-network targets
+    to prevent divergence.
+
+    Parameters
+    ----------
+    x : chex.Array
+        Input tensor of any shape
+
+    Returns
+    -------
+    penalty : chex.Array
+        Scalar L2 penalty on the mean
+    """
+    return jnp.square(jnp.mean(x))
