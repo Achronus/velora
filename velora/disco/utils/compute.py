@@ -21,6 +21,10 @@ import jax
 import jax.numpy as jnp
 import rlax
 
+from velora.core.outputs import BufferSamples
+from velora.disco.ema import MovingAverage
+from velora.disco.outputs import ValueOutputs
+
 
 def compute_importance_weights(
     pi_logits: chex.Array,
@@ -125,3 +129,76 @@ def compute_l2_mean_penalty(x: chex.Array) -> chex.Array:
         Scalar L2 penalty on the mean
     """
     return jnp.square(jnp.mean(x))
+
+
+def compute_value_outputs(
+    batch: BufferSamples,
+    adv_ema: MovingAverage,
+    td_ema: MovingAverage,
+    gamma: float,
+    td_lambda: float,
+    update_ema: bool = True,
+) -> ValueOutputs:
+    """
+    Compute value function outputs from a batch.
+
+    Pure computation that can be used inside or outside traced functions.
+
+    Parameters
+    ----------
+    batch : BufferSamples
+        Batch of experience from buffer
+    adv_ema : MovingAverage
+        EMA for advantage normalization
+    td_ema : MovingAverage
+        EMA for TD normalization
+    gamma : float
+        Discount factor
+    td_lambda : float
+        TD lambda parameter
+    update_ema : bool (optional)
+        Whether to update EMA statistics. Default is `True`
+
+    Returns
+    -------
+    value_outs : ValueOutputs
+        Value function outputs
+    """
+    # Transpose to (T, B) for V-trace
+    batch = batch.to_time_first()
+    discounts = batch.discounts * gamma
+
+    # [:-1] = Drop last timestep
+    rho = compute_importance_weights(
+        batch.preds.pi[:-1],  # type: ignore
+        batch.target_preds.pi[:-1],  # type: ignore
+        batch.actions[:-1],  # type: ignore
+    )
+
+    value_targets, advantages = compute_vtrace(
+        batch.values,
+        batch.rewards[:-1],  # type: ignore
+        discounts[:-1],  # type: ignore
+        td_lambda,
+        rho,
+    )
+
+    td = value_targets - batch.values[:-1]  # type: ignore
+
+    # Compute EMAs
+    if update_ema:
+        norm_adv = adv_ema.update_and_normalize(advantages)
+        norm_td = td_ema.update_and_normalize(td, subtract_mean=False)
+    else:
+        norm_adv = adv_ema.normalize(advantages)
+        norm_td = td_ema.normalize(td, subtract_mean=False)
+
+    return ValueOutputs(
+        value=batch.values,
+        value_targets=value_targets,
+        advantages=advantages,
+        normalized_advantages=norm_adv,
+        td=td,
+        normalized_td=norm_td,
+        rho=rho,
+    )

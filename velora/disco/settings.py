@@ -15,13 +15,13 @@
 
 import json
 from dataclasses import fields
-from pathlib import Path
 from typing import Self
 
 import jax.numpy as jnp
 from flax import struct
 
-from velora.core.distributions import CategoricalBins
+from velora.disco.distributions import CategoricalBins
+from velora.tracking.settings import CheckpointSettings, MetricLoggerSettings
 
 
 @struct.dataclass(frozen=True)
@@ -382,52 +382,6 @@ class LossCostSettings:
     z: float = 1.0
     value: float = 0.2
     aux_pi: float = 1.0
-
-
-@struct.dataclass(frozen=True)
-class CheckpointSettings:
-    """
-    Dataclass for `CheckpointManager` settings.
-
-    Parameters
-    ----------
-    dirpath : Path | str (optional)
-        Directory for saving agent states and checkpoints.
-        Default is `checkpoints`
-    freq : int (optional)
-        Checkpoint save frequency between timesteps. Default is `100_000`
-    max : int (optional)
-        Maximum number of checkpoints to store. Default is `100`
-    """
-
-    dirpath: Path | str = "checkpoints"
-    freq: int = 100_000
-    max: int = 100
-
-
-@struct.dataclass(frozen=True)
-class MetricLoggerSettings:
-    """
-    Dataclass for `MetricsLogger` settings.
-
-    Default settings create the following experiment directory:
-    `logs/disco_[ddmmyy]_[hhmmss]/`.
-
-    Parameters
-    ----------
-    base_dir : Path (optional)
-        Root directory for Tensorboard experiment logs. Default is `./logs`
-    experiment_name : str (optional)
-        Sub-directory name for Tensorboard experiment logs.
-        Get's combined with `base_dir`. Default is `disco`.
-    timestamp : bool (optional)
-        Whether to append timestamps to experiment directory.
-        Uses timestamp format: `ddmmyy_hhmmss`. Default is `True`
-    """
-
-    base_dir: Path = Path("logs")
-    experiment_name: str = "disco"
-    timestamp: bool = True
 
 
 @struct.dataclass(frozen=True)

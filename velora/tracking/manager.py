@@ -13,17 +13,15 @@
 # limitations under the License.
 # ==============================================================================
 
-
 from pathlib import Path
-from typing import List
+from typing import Any, List
 
 import orbax.checkpoint as ocp
 from orbax.checkpoint.checkpoint_managers import FixedIntervalPolicy, LatestN
 
-from velora.config.settings import CheckpointSettings
-from velora.config.state import AgentTrainerState, RuleTrainerState
+from velora.tracking.settings import CheckpointSettings
 
-CheckpointState = AgentTrainerState | RuleTrainerState
+CheckpointState = Any  # Any flax.struct.dataclass instance
 
 
 class CheckpointManager:
@@ -72,7 +70,7 @@ class CheckpointManager:
         step : int
             Current training step
         state : CheckpointState
-            State to save
+            A Flax dataclass state to save
         force : bool
             Force save even if within save_interval. Default is `False`
 

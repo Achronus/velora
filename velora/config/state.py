@@ -21,8 +21,9 @@ import jax.numpy as jnp
 import optax
 from flax import nnx, struct
 
-from velora.config.outputs import BufferSamples, PolicyAgentOutput
-from velora.metrics.ema import MovingAverage
+from velora.core.outputs import BufferSamples
+from velora.disco.ema import MovingAverage
+from velora.disco.outputs import PolicyAgentOutput
 
 HiddenState = chex.Array | None
 

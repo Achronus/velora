@@ -19,7 +19,7 @@ import chex
 import jax.numpy as jnp
 from flax import nnx
 
-from velora.config.outputs import DiscoPredictions
+from velora.disco.outputs import DiscoPredictions
 from velora.disco.spec import DiscoHeadSpec
 from velora.lnn.base import BaseCfC
 from velora.lnn.spec import NCPWiringSpec

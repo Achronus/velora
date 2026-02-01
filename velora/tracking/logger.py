@@ -19,7 +19,7 @@ from typing import Dict
 
 from tensorboardX import SummaryWriter
 
-from velora.config.settings import MetricLoggerSettings
+from velora.tracking.settings import MetricLoggerSettings
 from velora.utils.format import create_directory
 
 

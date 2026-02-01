@@ -20,8 +20,9 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from velora.config.outputs import BufferSamples, PolicyAgentOutput
-from velora.config.settings import MixedBufferSettings
+from velora.core.outputs import BufferSamples
+from velora.disco.outputs import PolicyAgentOutput
+from velora.disco.settings import MixedBufferSettings
 
 
 class MixedBuffer:

@@ -21,38 +21,35 @@ import jax
 import jax.numpy as jnp
 import optax
 import orbax.checkpoint as ocp
-import rlax
+from flax import nnx
 
-from velora.config.outputs import (
-    AgentLosses,
-    BufferSamples,
-    DiscoAgentOutput,
-    DiscoValueOutputs,
-)
-from velora.config.settings import AgentTrainerSettings, RuleTrainerSettings
 from velora.config.state import (
     AgentTrainerState,
     CollectState,
     RuleTrainerHiddenStates,
     RuleTrainerState,
 )
-from velora.core.agent import DiscoAgent, DiscoValueAgent, PolicyAgent
 from velora.core.buffer import MixedBuffer
-from velora.core.manager import CheckpointManager
-from velora.core.optim import scale_by_adan_no_denom
-from velora.gym.utils import make_atari_env
-from velora.metrics.compute import (
-    compute_importance_weights,
-    compute_l2_mean_penalty,
-    compute_vtrace,
+from velora.core.outputs import BufferSamples
+from velora.disco.agent import DiscoAgent, DiscoValueAgent, PolicyAgent
+from velora.disco.outputs import (
+    AgentLosses,
+    DiscoAgentOutput,
+    MetaGradientAux,
+    ValueOutputs,
 )
-from velora.metrics.logger import MetricsLogger
-from velora.metrics.loss import (
-    compute_aux_policy_loss,
+from velora.disco.settings import AgentTrainerSettings, RuleTrainerSettings
+from velora.disco.utils.compute import compute_value_outputs
+from velora.disco.utils.loss import (
     compute_entropy_loss,
-    compute_kl_loss,
-    compute_z_loss,
+    compute_meta_reg_loss,
+    compute_policy_gradient_loss,
+    compute_policy_loss,
 )
+from velora.gym.utils import make_atari_env
+from velora.nn.optim import scale_by_adan_no_denom
+from velora.tracking.logger import MetricsLogger
+from velora.tracking.manager import CheckpointManager
 
 
 class RuleTrainer:

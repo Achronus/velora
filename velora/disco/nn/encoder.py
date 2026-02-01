@@ -20,8 +20,9 @@ import jax
 import jax.numpy as jnp
 from flax import nnx
 
-from velora.config.outputs import BufferSamples, PolicyAgentOutput
-from velora.config.settings import DiscoEncoderSettings
+from velora.core.outputs import BufferSamples
+from velora.disco.outputs import PolicyAgentOutput
+from velora.disco.settings import DiscoEncoderSettings
 
 
 class DiscoInputEncoder(nnx.Module):

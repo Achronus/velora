@@ -19,7 +19,7 @@ import chex
 import jax
 import jax.numpy as jnp
 
-from velora.config.outputs import ACMPredictions, OCMPredictions
+from velora.disco.outputs import ACMPredictions, OCMPredictions
 from velora.disco.spec import ACMHeadSpec, OCMHeadSpec
 from velora.lnn.base import BaseCfC
 from velora.lnn.spec import NCPWiringSpec
