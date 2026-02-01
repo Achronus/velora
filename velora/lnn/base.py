@@ -22,14 +22,15 @@ import jax.numpy as jnp
 from flax import nnx
 from flax.typing import Initializer
 
-from velora.config.spec import HeadSpec, LayerSpec, NCPWiringSpec
-from velora.constants import DEFAULT_HIDDEN_INIT
-from velora.models.lnn.cell import NCPLiquidCell
+from velora.base.spec import HeadSpec, LayerSpec
+from velora.lnn.cell import NCPLiquidCell
+from velora.lnn.constants import DEFAULT_HIDDEN_INIT
+from velora.lnn.spec import NCPWiringSpec
 from velora.utils.nn import active_parameters, total_parameters
 from velora.utils.transforms import to_batch_first, to_time_first
 
 
-class BaseNCP(nnx.Module):
+class BaseCfC(nnx.Module):
     """
     Base class for CfC-LNN NCP-based models.
 

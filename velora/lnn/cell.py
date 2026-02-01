@@ -20,8 +20,8 @@ import jax.numpy as jnp
 from flax import nnx
 from flax.typing import Initializer
 
-from velora.constants import DEFAULT_HIDDEN_INIT
-from velora.models.sparse import SparseLinear
+from velora.lnn.constants import DEFAULT_HIDDEN_INIT
+from velora.lnn.sparse import SparseLinear
 
 
 class NCPLiquidCell(nnx.Module):

@@ -15,45 +15,9 @@
 
 from typing import Tuple
 
-import chex
-import jax.numpy as jnp
 from flax import struct
 
-
-@struct.dataclass(frozen=True)
-class LayerSpec:
-    """
-    Specification for a single Neural Circuit Policy (NCP) layer.
-
-    Parameters
-    ----------
-    mask : chex.Array
-        Sparse connectivity mask with polarities `(-1, 0, 1)`
-    n_hidden : int
-        Number of hidden units (output dimension)
-    """
-
-    mask: chex.Array
-    n_hidden: int
-
-    @property
-    def shape(self) -> Tuple[int, ...]:
-        return jnp.shape(self.mask)
-
-
-@struct.dataclass(frozen=True)
-class HeadSpec:
-    """
-    Base class for head specifications.
-    """
-
-    def hidden_count(self) -> int:
-        """Returns the total hidden node count across all heads."""
-        raise NotImplementedError()
-
-    def hidden_sizes(self) -> Tuple[int, ...]:
-        """Returns hidden sizes in head order for state splitting."""
-        raise NotImplementedError()
+from velora.base.spec import HeadSpec, LayerSpec
 
 
 @struct.dataclass(frozen=True)
@@ -129,71 +93,3 @@ class DiscoHeadSpec(HeadSpec):
 
     def hidden_sizes(self) -> Tuple[int, ...]:
         return (self.pi.n_hidden, self.y.n_hidden, self.z.n_hidden)
-
-
-@struct.dataclass(frozen=True)
-class SingleHeadSpec(HeadSpec):
-    """
-    Output head specification for a standard motor layer with one output head.
-
-    Parameters
-    ----------
-    out : LayerSpec
-        Motor prediction head
-    """
-
-    out: LayerSpec
-
-    def hidden_count(self) -> int:
-        return self.out.n_hidden
-
-    def hidden_sizes(self) -> Tuple[int, ...]:
-        return (self.out.n_hidden,)
-
-
-@struct.dataclass(frozen=True)
-class NCPWiringSpec:
-    """
-    NCP wiring specification.
-
-    Parameters
-    ----------
-    inter : LayerSpec
-        Inter (input) layer specification
-    command : LayerSpec
-        Command (hidden) layer specification
-    motor : HeadSpec
-        Motor (output) head specification
-    """
-
-    inter: LayerSpec
-    command: LayerSpec
-    motor: HeadSpec
-
-    @property
-    def hidden_size(self) -> int:
-        """
-        Total hidden state size across all layers.
-
-        Returns
-        -------
-        n_hidden : int
-            Number of hidden nodes in the NCP
-        """
-        return self.inter.n_hidden + self.command.n_hidden + self.motor.hidden_count()
-
-    def h_split_indices(self) -> Tuple[int, ...]:
-        """
-        Compute cumulative indices for splitting the hidden state.
-
-        Returns
-        -------
-        hidden_indices : Tuple[int, ...]
-            Hidden state split indices, one value per layer
-        """
-        sizes = [
-            self.inter.n_hidden,
-            self.command.n_hidden,
-            *self.motor.hidden_sizes(),
-        ]
-        return tuple(jnp.cumsum(jnp.array(sizes[:-1])))

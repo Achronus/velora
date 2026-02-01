@@ -18,13 +18,13 @@ from typing import Optional, Tuple
 import chex
 from flax.typing import Initializer
 
-from velora.config.spec import NCPWiringSpec, SingleHeadSpec
-from velora.constants import DEFAULT_HIDDEN_INIT
-from velora.models.lnn.base import BaseNCP
-from velora.models.lnn.wiring import NCPWiringBuilder
+from velora.lnn.base import BaseCfC
+from velora.lnn.constants import DEFAULT_HIDDEN_INIT
+from velora.lnn.spec import NCPWiringSpec, SingleHeadSpec
+from velora.lnn.wiring import NCPWiringBuilder
 
 
-class LNN(BaseNCP):
+class LNN(BaseCfC):
     """
     A CfC Liquid Neural Circuit Policy (NCP) Network with three layers.
 

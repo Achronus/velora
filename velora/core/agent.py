@@ -33,9 +33,9 @@ from velora.config.settings import (
     PolicyAgentSettings,
 )
 from velora.config.state import PolicyAgentHiddenStates
+from velora.lnn.ncp import LNN
 from velora.models.cnn import ImageEncoder
 from velora.models.encoder import DiscoInputEncoder
-from velora.models.lnn.ncp import LNN
 from velora.models.meta import DiscoNetwork
 from velora.models.policy import ACM, OCM
 from velora.utils.format import create_directory

@@ -20,12 +20,13 @@ import jax.numpy as jnp
 from flax import nnx
 
 from velora.config.outputs import DiscoPredictions
-from velora.config.spec import DiscoHeadSpec, NCPWiringSpec
-from velora.models.lnn.base import BaseNCP
-from velora.models.lnn.wiring import NCPWiringBuilder
+from velora.disco.spec import DiscoHeadSpec
+from velora.lnn.base import BaseCfC
+from velora.lnn.spec import NCPWiringSpec
+from velora.lnn.wiring import NCPWiringBuilder
 
 
-class DiscoNetwork(BaseNCP):
+class DiscoNetwork(BaseCfC):
     """
     Meta-network that produces learned targets (π̂, ŷ, ẑ) for the update rule. Uses practices from the DiscoRL paper.
 

@@ -20,7 +20,8 @@ import chex
 import jax.numpy as jnp
 import numpy as np
 
-from velora.config.spec import HeadSpec, LayerSpec, NCPWiringSpec
+from velora.base.spec import HeadSpec, LayerSpec
+from velora.lnn.spec import NCPWiringSpec
 
 
 def _synapse_count(count: int, density_level: float, *, scale: int = 1) -> int:

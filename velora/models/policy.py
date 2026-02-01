@@ -20,12 +20,13 @@ import jax
 import jax.numpy as jnp
 
 from velora.config.outputs import ACMPredictions, OCMPredictions
-from velora.config.spec import ACMHeadSpec, NCPWiringSpec, OCMHeadSpec
-from velora.models.lnn.base import BaseNCP
-from velora.models.lnn.wiring import NCPWiringBuilder
+from velora.disco.spec import ACMHeadSpec, OCMHeadSpec
+from velora.lnn.base import BaseCfC
+from velora.lnn.spec import NCPWiringSpec
+from velora.lnn.wiring import NCPWiringBuilder
 
 
-class ACM(BaseNCP):
+class ACM(BaseCfC):
     """
     An Action-Conditional Model (ACM) used to enable action-aware learning.
 
@@ -269,7 +270,7 @@ class ACM(BaseNCP):
         return ACMPredictions(embedding=embedding, z=z, aux_pi=aux_pi, q=q), h_state
 
 
-class OCM(BaseNCP):
+class OCM(BaseCfC):
     """
     An Observation-Conditional Model (OCM) used to encode observations and
     capture state-level information that is usable by the meta-network.
