@@ -24,7 +24,6 @@ import orbax.checkpoint as ocp
 from flax import nnx
 
 from velora.base.rollouts import Rollout, RolloutStack
-from velora.core.outputs import BufferSamples
 from velora.disco.agent import DiscoAgent, DiscoValueAgent, PolicyAgent
 from velora.disco.ema import EMAState, MovingAverage
 from velora.disco.outputs import AgentLosses, DiscoAgentOutput, ValueOutputs

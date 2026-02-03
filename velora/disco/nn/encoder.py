@@ -20,7 +20,7 @@ import jax
 import jax.numpy as jnp
 from flax import nnx
 
-from velora.core.outputs import BufferSamples
+from velora.base.rollouts import Rollout
 from velora.disco.outputs import PolicyAgentOutput
 from velora.disco.settings import DiscoEncoderSettings
 
@@ -69,17 +69,18 @@ class DiscoInputEncoder(nnx.Module):
             rngs=rngs,
         )
 
-    def __call__(self, samples: BufferSamples) -> Tuple[chex.Array, chex.Array]:
+    def __call__(self, rollout: Rollout) -> Tuple[chex.Array, chex.Array]:
         """
         Performs a forward pass through the encoding.
 
         Parameters
         ----------
-        samples : BufferSamples
-            Batch of samples from the buffer containing:
-                - `actions`: Actions taken. Shape: `(B, T)`
-                - `rewards`: Rewards received. Shape: `(B, T)`
-                - `discounts`: Episode continuation signals. Shape: `(B, T)`
+        rollout : Rollout
+            A trajectory of experience containing:
+                - `actions`: Actions taken. Shape: `(B, T, 1)`
+                - `rewards`: Rewards received. Shape: `(B, T, 1)`
+                - `discounts`: Episode continuation signals. Shape: `(B, T, 1)`
+                - `values` : State value estimates. Shape `(B, T, 1)`
                 - `preds`: Agent predictions
                 - `target_preds`: Target network predictions
 
@@ -100,15 +101,15 @@ class DiscoInputEncoder(nnx.Module):
                 - n_actions (`A`) - the number of discrete actions in the action space.
                 - action_embed_dim (`C`) - the action embedding dimension.
         """
-        y, y_target = self._encode_states(samples.preds.y, samples.target_preds.y)
+        y, y_target = self._encode_states(rollout.preds.y, rollout.target_preds.y)
 
         action_emb, action_avg, action_a = self._encode_actions(
-            samples.preds,
-            samples.target_preds,
-            samples.actions,
+            rollout.preds,
+            rollout.target_preds,
+            rollout.actions,
         )
 
-        scalar = self._encode_scalars(samples.rewards, samples.discounts)
+        scalar = self._encode_scalars(rollout.rewards, rollout.discounts)
 
         embedding = jnp.concatenate(
             [y, y_target, action_avg, action_a, scalar],

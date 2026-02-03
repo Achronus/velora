@@ -26,7 +26,7 @@ import optax
 import orbax.checkpoint as ocp
 from flax import nnx
 
-from velora.core.outputs import BufferSamples
+from velora.base.rollouts import Rollout
 from velora.disco.nn.cnn import ImageEncoder
 from velora.disco.nn.encoder import DiscoInputEncoder
 from velora.disco.nn.meta import DiscoNetwork
@@ -420,7 +420,7 @@ class DiscoAgent:
 
     def __call__(
         self,
-        samples: BufferSamples,
+        rollout: Rollout,
         disco_h_state: chex.Array | None = None,
         meta_h_state: chex.Array | None = None,
     ) -> Tuple[DiscoAgentOutput, chex.Array, chex.Array]:
@@ -429,8 +429,8 @@ class DiscoAgent:
 
         Parameters
         ----------
-        samples : BufferSamples
-            Batch from replay buffer
+        rollout : Rollout
+            A trajectory of experience
         disco_h_state : chex.Array (optional)
             Hidden state for DiscoNetwork. Shape: `(B, H)`.
             Default is `None`
@@ -448,7 +448,7 @@ class DiscoAgent:
             Updated Meta-LNN hidden state
         """
         # embed: (B, T, E), act_embed: (B, T, A, C)
-        embedding, action_embed = self.encoder(samples)
+        embedding, action_embed = self.encoder(rollout)
         disco_input = embedding
 
         # Apply meta conditioning from previous update (if available)
