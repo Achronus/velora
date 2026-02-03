@@ -26,7 +26,6 @@ import optax
 import orbax.checkpoint as ocp
 from flax import nnx
 
-from velora.config.state import PolicyAgentHiddenStates
 from velora.core.outputs import BufferSamples
 from velora.disco.nn.cnn import ImageEncoder
 from velora.disco.nn.encoder import DiscoInputEncoder
@@ -38,6 +37,7 @@ from velora.disco.settings import (
     DiscoValueSettings,
     PolicyAgentSettings,
 )
+from velora.disco.state import PolicyAgentHiddenStates
 from velora.lnn.ncp import LNN
 from velora.utils.format import create_directory
 from velora.utils.seed import get_rng_key_data, restore_rng_key

@@ -19,10 +19,10 @@ import chex
 import jax
 import jax.numpy as jnp
 import optax
-from flax import nnx, struct
+from flax import struct
 
-from velora.core.outputs import BufferSamples
-from velora.disco.ema import MovingAverage
+from velora.base.rollouts import Rollout
+from velora.disco.ema import EMAState
 from velora.disco.outputs import PolicyAgentOutput
 
 HiddenState = chex.Array | None
@@ -60,25 +60,25 @@ class AgentTrainerHiddenStates:
 
     Parameters
     ----------
-    ocm : chex.Array (optional)
-        Policy network OCM hidden state. Default is `None`
-    acm : chex.Array (optional)
-        Policy network ACM hidden state. Default is `None`
+    policy_ocm : chex.Array (optional)
+        Policy network OCM hidden state. Shape: `(B, H)`. Default is `None`
+    policy_acm : chex.Array (optional)
+        Policy network ACM hidden state. Shape: `(B*A, H)`. Default is `None`
     target_ocm : chex.Array (optional)
-        Target network OCM hidden state. Default is `None`
+        Target network OCM hidden state. Shape: `(B, H)`. Default is `None`
     target_acm : chex.Array (optional)
-        Target network ACM hidden state. Default is `None`
+        Target network ACM hidden state. Shape: `(B*A, H)`. Default is `None`
     value : chex.Array (optional)
-        Value network hidden state. Default is `None`
+        Value network hidden state. Shape: `(B, H)`. Default is `None`
     """
 
-    ocm: HiddenState = None
-    acm: HiddenState = None
+    policy_ocm: HiddenState = None
+    policy_acm: HiddenState = None
     target_ocm: HiddenState = None
     target_acm: HiddenState = None
     value: HiddenState = None
 
-    def reset_on_done(self, discounts: chex.Array, n_actions: int) -> None:
+    def reset_on_done(self, discounts: chex.Array, n_actions: int) -> Self:
         """
         Reset hidden states where episodes terminated (`discount=0`).
 
@@ -88,20 +88,29 @@ class AgentTrainerHiddenStates:
             Episode dones from the environment
         n_actions : int
             Number of actions agent can take
+
+        Returns
+        -------
+        new_state : AgentTrainerHiddenStates
+            Updated state
         """
         if not jnp.any(discounts == 0.0):
-            return
+            return self
 
-        def _end_check(h: chex.Array | None, mask: chex.Array) -> chex.Array | None:
-            return h * mask[:, None] if h is not None else None  # type: ignore
+        # Ensure discounts is 1D: (B,)
+        mask = jnp.squeeze(discounts)
 
-        discounts_expanded = jnp.repeat(discounts, n_actions)
-        self = self.__replace__(
-            ocm=_end_check(self.ocm, discounts),
-            acm=_end_check(self.acm, discounts_expanded),
-            target_ocm=_end_check(self.target_ocm, discounts),
-            target_acm=_end_check(self.target_acm, discounts_expanded),
-            value=_end_check(self.value, discounts_expanded),
+        def _end_check(h: chex.Array | None, m: chex.Array) -> chex.Array | None:
+            return h * m[:, None] if h is not None else None  # type: ignore
+
+        mask_expanded = jnp.repeat(mask, n_actions)
+
+        return self.__class__(
+            policy_ocm=_end_check(self.policy_ocm, mask),
+            policy_acm=_end_check(self.policy_acm, mask_expanded),
+            target_ocm=_end_check(self.target_ocm, mask),
+            target_acm=_end_check(self.target_acm, mask_expanded),
+            value=_end_check(self.value, mask),
         )
 
     def update(
@@ -109,7 +118,7 @@ class AgentTrainerHiddenStates:
         h_state: PolicyAgentHiddenStates,
         target_h_state: PolicyAgentHiddenStates,
         value_h_state: chex.Array,
-    ) -> None:
+    ) -> Self:
         """
         Update hidden states from forward pass outputs.
 
@@ -121,10 +130,15 @@ class AgentTrainerHiddenStates:
             Target network hidden states
         value_h_state : chex.Array
             Value network hidden state
+
+        Returns
+        -------
+        new_state : AgentTrainerHiddenStates
+            Updated state
         """
-        self = self.__replace__(
-            ocm=h_state.ocm,
-            acm=h_state.acm,
+        return self.__class__(
+            policy_ocm=h_state.ocm,
+            policy_acm=h_state.acm,
             target_ocm=target_h_state.ocm,
             target_acm=target_h_state.acm,
             value=value_h_state,
@@ -172,7 +186,7 @@ class RuleTrainerHiddenStates:
             meta=tuple(None for _ in range(num_envs)),
         )
 
-    def update(self, env_idx: int, disco_h: HiddenState, meta_h: HiddenState) -> None:
+    def update(self, env_idx: int, disco_h: HiddenState, meta_h: HiddenState) -> Self:
         """
         Update hidden states for a specific environment.
 
@@ -184,6 +198,11 @@ class RuleTrainerHiddenStates:
             New disco network hidden state
         meta_h : chex.Array | None
             New meta-LNN hidden state
+
+        Returns
+        -------
+        new_state : RuleTrainerHiddenStates
+            An updated hidden state
         """
         disco_list = list(self.disco)
         meta_list = list(self.meta)
@@ -191,12 +210,12 @@ class RuleTrainerHiddenStates:
         disco_list[env_idx] = disco_h
         meta_list[env_idx] = meta_h
 
-        self = self.__replace__(
+        return self.__replace__(
             disco=tuple(disco_list),
             meta=tuple(meta_list),
         )
 
-    def reset(self, env_idx: int) -> None:
+    def reset(self, env_idx: int) -> Self:
         """
         Reset hidden states for a specific environment.
 
@@ -204,8 +223,13 @@ class RuleTrainerHiddenStates:
         ----------
         env_idx : int
             Index of the environment to reset
+
+        Returns
+        -------
+        new_state : RuleTrainerHiddenStates
+            An updated hidden state with a single environments reset to `None`
         """
-        self.update(env_idx, None, None)
+        return self.update(env_idx, None, None)
 
     def get(self, env_idx: int) -> Tuple[HiddenState, HiddenState]:
         """
@@ -333,13 +357,13 @@ class CollectState:
             completed_lengths=new_lengths,
         )
 
-    def to_batches(self) -> BufferSamples:
+    def to_rollout(self) -> Rollout:
         """
-        Stack collected data into batched arrays `(B, T)`.
+        Stack sequence data into a rollout.
 
         Returns
         -------
-        samples : BufferSamples
+        rollout : Rollout
             Trajectory of samples
         """
         actions_batch = jnp.stack(self.actions, axis=1)
@@ -347,12 +371,16 @@ class CollectState:
         discounts_batch = jnp.stack(self.discounts, axis=1)
         values_batch = jnp.stack(self.values, axis=1)
 
-        batch_preds = jax.tree.map(lambda *xs: jnp.stack(xs, axis=1), *self.preds)
+        batch_preds = jax.tree.map(
+            lambda *xs: jnp.stack(xs, axis=1),
+            *self.preds,
+        )
         target_batch_preds = jax.tree.map(
-            lambda *xs: jnp.stack(xs, axis=1), *self.target_preds
+            lambda *xs: jnp.stack(xs, axis=1),
+            *self.target_preds,
         )
 
-        return BufferSamples(
+        return Rollout(
             actions=actions_batch,
             rewards=rewards_batch,
             discounts=discounts_batch,
@@ -408,98 +436,6 @@ class CollectState:
 
 
 @struct.dataclass
-class ParameterState:
-    """
-    Dataclass for `AgentTrainer` parameter states.
-
-    Parameters
-    ----------
-    policy : nnx.State
-        Policy agent network parameters
-    target : nnx.State
-        Target network parameters (EMA of policy)
-    """
-
-    policy: nnx.State
-    target: nnx.State
-
-
-@struct.dataclass
-class DiscoValueState:
-    """
-    Dataclass for `DiscoValueAgent` state.
-
-    Set a new instance with `DiscoValueAgent.create()` method.
-
-    Parameters
-    ----------
-    params : nnx.State
-        Value network parameters
-    optim : optax.GradientTransformation
-        Value network optimizer
-    opt_state : optax.OptState
-        Value network optimizer state
-    adv_ema : MovingAverage
-        EMA for advantage normalization
-    td_ema : MovingAverage
-        EMA for TD error normalization
-    """
-
-    params: nnx.State
-    optim: optax.GradientTransformation
-    opt_state: optax.OptState
-
-    adv_ema: MovingAverage
-    td_ema: MovingAverage
-
-    @classmethod
-    def create(
-        cls,
-        params: nnx.State,
-        optim: optax.GradientTransformation,
-        ema_decay: float,
-        ema_eps: float,
-    ) -> Self:
-        """
-        Create a new state instance.
-
-        Returns
-        -------
-        self : DiscoValueState
-            New state instance
-        """
-        opt_state = optim.init(params)
-
-        return cls(
-            params=params,
-            optim=optim,
-            opt_state=opt_state,
-            adv_ema=MovingAverage(
-                decay=ema_decay,
-                eps=ema_eps,
-            ),
-            td_ema=MovingAverage(
-                decay=ema_decay,
-                eps=ema_eps,
-            ),
-        )
-
-    def apply_gradients(self, grads: nnx.State) -> None:
-        """
-        Apply gradients to update parameters.
-
-        Parameters
-        ----------
-        grads : nnx.State
-            Gradients for parameters
-        """
-        updates, new_opt_state = self.optim.update(grads, self.opt_state, self.params)
-        new_params = optax.apply_updates(self.params, updates)
-
-        self = self.__replace__(params=new_params, opt_state=new_opt_state)  # type: ignore
-
-
-@struct.dataclass
 class AgentTrainerState:
     """
     Dataclass for `AgentTrainer` state.
@@ -508,26 +444,28 @@ class AgentTrainerState:
 
     Parameters
     ----------
-    params : ParameterState
-        Object container policy parameter states
-    optim : optax.OptState
-        Policy agent optimizer state
-    hidden : BundledHiddenStates
-        Hidden states for recurrent policy/target networks
-    value : DiscoValueState
-        Value agent state
+    policy_opt_state : optax.OptState
+        Policy optimizer state
+    value_opt_state : optax.OptState
+        Value optimizer state
+    hidden : AgentHiddenStates
+        Recurrent hidden states
+    adv_ema : EMAState
+        EMA state for advantage normalization
+    td_ema : EMAState
+        EMA state for TD error normalization
     current_obs : chex.Array
         Current observation from environment
     steps_trained : int (optional)
         Total training steps completed. Default is `0`
     """
 
-    params: ParameterState
-    optim: optax.GradientTransformation
-    opt_state: optax.OptState
+    policy_opt_state: optax.OptState
+    value_opt_state: optax.OptState
 
     hidden: AgentTrainerHiddenStates
-    value: DiscoValueState
+    adv_ema: EMAState
+    td_ema: EMAState
 
     current_obs: chex.Array
     steps_trained: int = 0
@@ -535,13 +473,8 @@ class AgentTrainerState:
     @classmethod
     def create(
         cls,
-        policy_params: nnx.State,
-        target_params: nnx.State,
-        value_params: nnx.State,
-        optim: optax.GradientTransformation,
-        value_optim: optax.GradientTransformation,
-        ema_decay: float,
-        ema_eps: float,
+        policy_opt_state: optax.OptState,
+        value_opt_state: optax.OptState,
         current_obs: chex.Array,
     ) -> Self:
         """
@@ -549,87 +482,64 @@ class AgentTrainerState:
 
         Parameters
         ----------
-        policy_params : nnx.State
-            Policy agent parameter state
-        target_params : nnx.State
-            Target agent parameter state
-        value_params : nnx.State
-            Value agent parameter state
-        optim : optax.GradientTransformation
-            Policy agent optimizer
-        value_optim : optax.GradientTransformation
-            Value agent optimizer
-        ema_decay : float
-            EMA decay rate
-        ema_eps : float
-            EMA epsilon
+        policy_opt_state : optax.OptState
+            Initialized policy optimizer state
+        value_opt_state : optax.OptState
+            Initialized value optimizer state
         current_obs : chex.Array
-            Current observation
+            Initial observation from environment
 
         Returns
         -------
-        self : Self
-            A new state instance
+        new_state : AgentTrainerState
+            Initialized state
         """
-        opt_state = optim.init(policy_params)
-
         return cls(
-            params=ParameterState(
-                policy=policy_params,
-                target=target_params,
-            ),
-            optim=optim,
-            opt_state=opt_state,
+            policy_opt_state=policy_opt_state,
+            value_opt_state=value_opt_state,
             hidden=AgentTrainerHiddenStates(),
-            value=DiscoValueState.create(
-                value_params,
-                value_optim,
-                ema_decay,
-                ema_eps,
-            ),
+            adv_ema=EMAState.create(),
+            td_ema=EMAState.create(),
             current_obs=current_obs,
+            steps_trained=0,
         )
 
-    def update_policy_params(
-        self,
-        new_params: nnx.State,
-        new_optim_state: optax.OptState,
-        tau: float,
-    ) -> None:
+    def update_policy_opt(self, new_opt_state: optax.OptState) -> Self:
         """
-        Update policy parameters and optimizer state.
-
-        Also updates target network via EMA (Polyak averaging):
-        `target = tau * target + (1 - tau) * policy`
+        Update policy optimizer state.
 
         Parameters
         ----------
-        new_params : nnx.State
-            New policy parameters
         new_optim_state : optax.OptState
             New agent optimizer state
-        tau : float
-            Target network update rate (Polyak averaging)
+
+        Returns
+        -------
+        state : AgentTrainerState
+            A new state with updated `policy_opt_state` and `steps_trained + 1`
         """
-        # Update target network via EMA (Polyak averaging)
-        new_target_params = jax.tree.map(
-            lambda old, new: tau * old + (1.0 - tau) * new,
-            self.params.target,
-            new_params,
-        )
-
-        new_param_state = self.params.__replace__(
-            policy=new_params,
-            target=new_target_params,
-        )
-
-        self = self.__replace__(
-            params=new_param_state,
-            opt_state=new_optim_state,
+        return self.__replace__(
+            policy_opt_state=new_opt_state,
             steps_trained=self.steps_trained + 1,
         )
 
-    def update_hidden_states(self, new_hidden: AgentTrainerHiddenStates) -> None:
+    def update_value_opt(self, new_opt_state: optax.OptState) -> Self:
+        """
+        Update value optimizer state.
+
+        Parameters
+        ----------
+        new_optim_state : optax.OptState
+            New value optimizer state
+
+        Returns
+        -------
+        state : AgentTrainerState
+            A new state with updated `value_opt_state`
+        """
+        return self.__replace__(value_opt_state=new_opt_state)
+
+    def update_hidden(self, new_hidden: AgentTrainerHiddenStates) -> Self:
         """
         Update recurrent hidden states.
 
@@ -637,10 +547,15 @@ class AgentTrainerState:
         ----------
         new_hidden : BundledHiddenStates
             New hidden states
-        """
-        self = self.__replace__(hidden=new_hidden)
 
-    def update_value_state(self, new_state: DiscoValueState) -> None:
+        Returns
+        -------
+        state : AgentTrainerState
+            A new state with updated `hidden`
+        """
+        return self.__replace__(hidden=new_hidden)
+
+    def update_ema(self, adv_ema: EMAState, td_ema: EMAState) -> Self:
         """
         Update value state.
 
@@ -648,10 +563,15 @@ class AgentTrainerState:
         ----------
         new_state : DiscoValueState
             New value state
-        """
-        self = self.__replace__(value=new_state)
 
-    def update_obs(self, new_obs: chex.Array) -> None:
+        Returns
+        -------
+        state : AgentTrainerState
+            A new state with updated `adv_ema`, `td_ema`
+        """
+        return self.__replace__(adv_ema=adv_ema, td_ema=td_ema)
+
+    def update_obs(self, new_obs: chex.Array) -> Self:
         """
         Update observation state.
 
@@ -663,9 +583,9 @@ class AgentTrainerState:
         Returns
         -------
         state : AgentTrainerState
-            New state with updated observation state
+            New state with updated `current_obs`
         """
-        self = self.__replace__(current_obs=new_obs)
+        return self.__replace__(current_obs=new_obs)
 
 
 @struct.dataclass
@@ -673,19 +593,91 @@ class RuleTrainerState:
     """
     Dataclass for `RuleTrainer` checkpoint state.
 
+    Make a new instance using the `RuleTrainerState.create()` method.
+
     Parameters
     ----------
-    meta_step : int
-        Current meta-training step
-    meta_params : nnx.State
-        Meta-network (disco) parameters
-    meta_optim_state : optax.OptState
-        Meta-optimizer state
-    hidden_states : RuleTrainerHiddenStates
+    meta_opt_state : optax.OptState
+        Disco-optimizer state
+    hidden : RuleTrainerHiddenStates
         Rule Trainer hidden states per environment
+    meta_step : int (optional)
+        Current meta-training step. Default is `0`
     """
 
-    meta_step: int
-    meta_params: nnx.State
-    meta_optim_state: optax.OptState
-    hidden_states: RuleTrainerHiddenStates
+    meta_opt_state: optax.OptState
+    hidden: RuleTrainerHiddenStates
+    meta_step: int = 0
+
+    @classmethod
+    def create(
+        cls,
+        meta_opt_state: optax.OptState,
+        num_envs: int,
+    ) -> Self:
+        """
+        Create initial meta-training state.
+
+        Parameters
+        ----------
+        meta_opt_state : optax.OptState
+            Disco network optimizer state
+        num_envs : int
+            Number of environments
+
+        Returns
+        -------
+        state : RuleTrainerState
+            Initialized state
+        """
+        return cls(
+            meta_opt_state=meta_opt_state,
+            hidden=RuleTrainerHiddenStates.create(num_envs),
+            meta_step=0,
+        )
+
+    def update_opt(self, new_opt_state: optax.OptState) -> Self:
+        """
+        Update meta-optimizer state.
+
+        Parameters
+        ----------
+        new_opt_state : optax.OptState
+            New disco network optimizer state
+
+        Returns
+        -------
+        state : RuleTrainerState
+            New state with updated `meta_opt_state` and `meta_step + 1`
+        """
+        return self.__replace__(
+            meta_opt_state=new_opt_state,
+            meta_step=self.meta_step + 1,
+        )
+
+    def update_hidden(
+        self,
+        env_idx: int,
+        disco_h: HiddenState,
+        meta_h: HiddenState,
+    ) -> Self:
+        """
+        Update hidden states for specific environment.
+
+        Parameters
+        ----------
+        env_idx : int
+            Index of the environment to update
+        disco_h : HiddenState
+            Updated Disco Network hidden state
+        meta_h : HiddenState
+            Updated Meta LNN hidden state
+
+        Returns
+        -------
+        state : RuleTrainerState
+            New state with updated `hidden`
+        """
+        return self.__replace__(
+            hidden=self.hidden.update(env_idx, disco_h, meta_h),
+        )

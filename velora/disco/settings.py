@@ -309,14 +309,6 @@ class DiscoValueSettings:
 
     loss_weight : float (optional)
         Weight for value loss contribution to total meta-loss. Default is `1.0`
-    ema_decay : float (optional)
-        Exponential moving average (EMA) decay rate for normalizing
-        advantages in the meta policy gradient loss. Controls how
-        quickly the meta-level normalization statistics adapt.
-        Default is `0.999`
-    ema_eps : float (optional)
-        Epsilon for numerical stability in EMA normalization.
-        Default is `1e-6`
     """
 
     lr: float = 3e-4
@@ -324,31 +316,6 @@ class DiscoValueSettings:
     gamma: float = 0.997
     td_lambda: float = 0.95
     loss_weight: float = 1.0
-    ema_decay: float = 0.999
-    ema_eps: float = 1e-6
-
-
-@struct.dataclass(frozen=True)
-class MixedBufferSettings:
-    """
-    Dataclass for `MixedBuffer` settings.
-
-    Parameters
-    ----------
-    seq_len : int (optional)
-        Number of timesteps per trajectory (rollout size; `T`).
-        Default is `29`
-    capacity : int (optional)
-        Maximum number of trajectories to store (`N`).
-        Default is `1024`
-    split_ratio : float (optional)
-        Fraction of samples from replay vs rollouts.
-        Default is `0.9` (90% replay, 10% rollout)
-    """
-
-    seq_len: int = 29
-    capacity: int = 1024
-    split_ratio: float = 0.9
 
 
 @struct.dataclass(frozen=True)
@@ -385,6 +352,30 @@ class LossCostSettings:
 
 
 @struct.dataclass(frozen=True)
+class EMASettings:
+    """
+    Dataclass for `EMAState` and method settings.
+
+    Parameters
+    ----------
+    decay : float (optional)
+        Exponential moving average (EMA) decay rate for normalizing
+        advantages and TD errors during policy agent value learning.
+        Higher values give more weight to historical statistics.
+        Default is `0.999`
+    eps : float (optional)
+        Epsilon for numerical stability when normalizing by EMA
+        variance during policy agent training. Default is `1e-6`
+    root_eps : float (optional)
+        Epsilon value for standard deviation. Default is `1e-12`
+    """
+
+    decay: float = 0.999
+    eps: float = 1e-6
+    root_eps: float = 1e-12
+
+
+@struct.dataclass(frozen=True)
 class AgentTrainerSettings:
     """
     Dataclass for `AgentTrainer` settings.
@@ -393,44 +384,28 @@ class AgentTrainerSettings:
     ----------
     agent : AgentSettings
         Configuration for `PolicyAgent` architecture
-    buffer : MixedBufferSettings
-        Configuration for trajectory buffer
     value : DiscoValueSettings
         Configuration for the Disco value function
+    ema : EMASettings
+        Configuration for Exponential Moving Averages (EMAs)
     loss_cost : LossCostSettings
         Loss component weights
-    checkpoint : CheckpointSettings
-        Configuration for checkpoints
     num_vec_envs : int
         Number of vectorized environments for throughput
-    n_updates : int
-        Number of agent updates to backpropagate through
     tau : float
         EMA coefficient for target network updates
-    batch_size : int
-        Number of trajectories per training batch
-    ema_decay : float
-        Exponential moving average (EMA) decay rate for normalizing
-        advantages and TD errors during policy agent value learning.
-        Higher values give more weight to historical statistics
-    ema_eps : float
-        Epsilon for numerical stability when normalizing by EMA
-        variance during policy agent training
+    seq_len : int
+        Number of timesteps per trajectory (rollout size; `T`)
     """
 
     agent: PolicyAgentSettings
-    buffer: MixedBufferSettings
     value: DiscoValueSettings
+    ema: EMASettings
     loss_costs: LossCostSettings
-    checkpoint: CheckpointSettings
 
     num_vec_envs: int
-    n_updates: int
     tau: float
-    batch_size: int
-
-    ema_decay: float
-    ema_eps: float
+    seq_len: int
 
 
 @struct.dataclass(frozen=True)
@@ -451,8 +426,8 @@ class RuleTrainerSettings:
     disco_value : DiscoValueSettings (optional)
         Configuration for meta-value function used in meta-gradient computation.
         Default is `DiscoValueSettings()`
-    buffer : MixedBufferSettings (optional)
-        Configuration for trajectory buffer. Default is `MixedBufferSettings()`
+    ema : EMASettings (optional)
+        Configuration for Exponential Moving Averages (EMAs). Default is `EMASettings()`
     loss_cost : LossCostSettings (optional)
         Loss component weights. Default is `LossCostSettings()`
     checkpoint : CheckpointSettings (optional)
@@ -479,27 +454,22 @@ class RuleTrainerSettings:
     n_updates : int (optional)
         Number of agent updates to backpropagate through for meta-gradient
         computation (sliding window size). Default is `20`
+    seq_len : int (optional)
+        Number of timesteps per trajectory (rollout size; `T`).
+        Default is `29`
     num_vec_envs : int (optional)
         Number of vectorized environments. Default is `8`
     batch_size : int (optional)
         Number of trajectories per training batch. Default is `96`
     tau : float (optional)
-        EMA coefficient for target network updates. Default is `0.9`
-    ema_decay : float (optional)
-        Exponential moving average (EMA) decay rate for normalizing
-        advantages and TD errors during policy agent value learning.
-        Higher values give more weight to historical statistics.
-        Default is `0.999`
-    ema_eps : float (optional)
-        Epsilon for numerical stability when normalizing by EMA
-        variance during policy agent training. Default is `1e-6`
+        Soft update coefficient for target network updates. Default is `0.9`
     """
 
     agent: PolicyAgentSettings
     disco_agent: DiscoAgentSettings
     disco_value: DiscoValueSettings = DiscoValueSettings()
+    ema: EMASettings = EMASettings()
 
-    buffer: MixedBufferSettings = MixedBufferSettings()
     loss_cost: LossCostSettings = LossCostSettings()
     checkpoint: CheckpointSettings = CheckpointSettings()
     logger: MetricLoggerSettings = MetricLoggerSettings()
@@ -512,13 +482,11 @@ class RuleTrainerSettings:
 
     n_steps: int = 1_000_000
     n_updates: int = 20
+    seq_len: int = 29
 
     num_vec_envs: int = 8
     batch_size: int = 96
     tau: float = 0.9
-
-    ema_decay: float = 0.999
-    ema_eps: float = 1e-6
 
     def agent_trainer_config(self) -> AgentTrainerSettings:
         """
@@ -531,14 +499,10 @@ class RuleTrainerSettings:
         """
         return AgentTrainerSettings(
             agent=self.agent,
-            buffer=self.buffer,
             value=self.disco_value,
-            num_vec_envs=self.num_vec_envs,
-            n_updates=self.n_updates,
-            tau=self.tau,
-            batch_size=self.batch_size,
-            ema_decay=self.ema_decay,
-            ema_eps=self.ema_eps,
-            checkpoint=self.checkpoint,
+            ema=self.ema,
             loss_costs=self.loss_cost,
+            num_vec_envs=self.num_vec_envs,
+            tau=self.tau,
+            seq_len=self.seq_len,
         )
