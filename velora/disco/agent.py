@@ -287,6 +287,26 @@ class PolicyAgent:
         nnx.update(self._ocm, params["ocm"])
         nnx.update(self._acm, params["acm"])
 
+    def soft_param_update(self, tau: float, new_params: nnx.State) -> None:
+        """
+        Performs a soft parameter update on the networks parameters.
+
+        Formula: `θ_target ← τ * θ_online + (1 - τ) * θ_target`
+
+        Parameters
+        ----------
+        tau : float
+            Soft update coefficient
+        new_params : nnx.State
+            New parameters to use for updating (`θ_target`)
+        """
+        new_params = jax.tree.map(
+            lambda old, new: tau * old + (1.0 - tau) * new,
+            self.get_params(),
+            new_params,
+        )
+        self.update_params(new_params)
+
 
 class DiscoAgent:
     """
