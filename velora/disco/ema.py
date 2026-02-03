@@ -14,12 +14,14 @@
 # ==============================================================================
 
 import functools
-from typing import Tuple
+from typing import Self, Tuple
 
 import chex
 import jax
 import jax.numpy as jnp
 from flax import struct
+
+from velora.disco.settings import EMASettings
 
 
 @struct.dataclass
@@ -30,16 +32,32 @@ class EMAState:
     Parameters
     ----------
     moment1 : jax.ArrayTree
-        The first set of moments
+        The first set of moments (mean estimate)
     moment2 : jax.ArrayTree
-        The second set of moments
+        The second set of moments (variance estimate)
     decay_product : jax.Array
-        The product of all decays from start of accumulation
+        Accumulated decay for bias correction
     """
 
     moment1: chex.ArrayTree
     moment2: chex.ArrayTree
     decay_product: chex.Array
+
+    @classmethod
+    def create(cls) -> Self:
+        """
+        Create initial EMA state.
+
+        Returns
+        -------
+        state : EMAState
+            Initial EMA state
+        """
+        return cls(
+            moment1=jnp.zeros(()),
+            moment2=jnp.zeros(()),
+            decay_product=jnp.ones(()),
+        )
 
 
 class MovingAverage:
@@ -48,63 +66,37 @@ class MovingAverage:
 
     Parameters
     ----------
-    x : jax.ArrayTree (optional)
-        An example array tree structure used to update the EMA state. When `None` automatically creates a scalar array. Default is `None`
-    decay : float (optional)
-        The learning rate (moment) decay. Default is `0.999`
-    eps : float (optional)
-        Epsilon used for normalization. Default is `1e-6`
+    config : EMASettings
+        Configuration settings for the EMA
     """
 
-    def __init__(
-        self,
-        x: chex.ArrayTree | None = None,
-        *,
-        decay: float = 0.999,
-        eps: float = 1e-6,
-    ) -> None:
-        self._x = jnp.zeros(()) if x is None else x
-        self._decay = decay
-        self._eps = eps
-
-        self._state = self._init_state()
-
-    @property
-    def state(self) -> EMAState:
-        """
-        Current EMA state.
-        """
-        return self._state
-
-    def _init_state(self) -> EMAState:
-        """
-        Initializes the EMA state.
-
-        Returns
-        -------
-        state : EMAState
-            A new EMA state object
-        """
-        return EMAState(
-            moment1=jnp.zeros(()),
-            moment2=jnp.zeros(()),
-            decay_product=jnp.ones([]),
-        )
+    def __init__(self, config: EMASettings) -> None:
+        self._decay = config.decay
+        self._eps = config.eps
+        self._root_eps = config.root_eps
 
     def update(
         self,
         x: chex.ArrayTree,
+        state: EMAState,
         pmean_axis_name: str | None = None,
-    ) -> None:
+    ) -> EMAState:
         """
-        Updates the EMA state.
+        Updates the EMA state and returns it.
 
         Parameters
         ----------
         x : jax.ArrayTree
             Data to use to update state
+        state : EMAState
+            Current EMA state
         pmean_axis_name : str (optional)
             The optional axis name for parallel mean computation across multiple devices. Default is `None`
+
+        Returns
+        -------
+        new_state : EMAState
+            The updated state
         """
         squared_tree = jax.tree.map(jnp.square, x)
 
@@ -133,22 +125,29 @@ class MovingAverage:
             return self._decay * moment + (1.0 - self._decay) * mean
 
         update_fn = functools.partial(_update, pmean_axis_name=pmean_axis_name)
-        moment1 = jax.tree.map(update_fn, self._state.moment1, x)
-        moment2 = jax.tree.map(update_fn, self._state.moment2, squared_tree)
+        moment1 = jax.tree.map(update_fn, state.moment1, x)
+        moment2 = jax.tree.map(update_fn, state.moment2, squared_tree)
 
-        self._state = EMAState(
+        return EMAState(
             moment1=moment1,
             moment2=moment2,
-            decay_product=self._state.decay_product * self._decay,
+            decay_product=state.decay_product * self._decay,
         )
 
-    def _compute_moments(self) -> Tuple[chex.ArrayTree, chex.ArrayTree]:
+    def _compute_moments(
+        self, state: EMAState
+    ) -> Tuple[chex.ArrayTree, chex.ArrayTree]:
         """
         Computes moments `(mean, variance)`, applying 0-debiasing like in the Adam optimizer.
 
         Accounts for the initial moments set to 0 and estimates the
         zero-centered debiased variance with negative values clipped to
         safeguard against numerical errors.
+
+        Parameters
+        ----------
+        state : EMAState
+            Current EMA state
 
         Returns
         -------
@@ -157,13 +156,13 @@ class MovingAverage:
         m2 : jax.ArrayTree
             The computed variance (moment 2)
         """
-        debias = 1.0 / (1 - self._state.decay_product)
+        debias = 1.0 / (1 - state.decay_product)
 
-        mean = jax.tree.map(lambda m1: m1 * debias, self._state.moment1)
+        mean = jax.tree.map(lambda m1: m1 * debias, state.moment1)
 
         variance = jax.tree.map(
             lambda m2, m: jnp.maximum(0.0, m2 * debias - jnp.square(m)),
-            self._state.moment2,
+            state.moment2,
             mean,
         )
 
@@ -172,8 +171,8 @@ class MovingAverage:
     def normalize(
         self,
         x: chex.ArrayTree,
+        state: EMAState,
         subtract_mean: bool = True,
-        root_eps: float = 1e-12,
     ) -> chex.Array:
         """
         Normalizes `x` by dividing by the second moment and subtracting its mean.
@@ -185,10 +184,10 @@ class MovingAverage:
         ----------
         x : jax.ArrayTree
             Data to normalize
-        subtract_mean : bool, optional
+        state : EMAState
+            Current EMA state
+        subtract_mean : bool (optional)
             A flag for mean subtraction. Default is `True`
-        root_eps : float, optional
-            Primary epsilon value. Default is `1e-12`
 
         Returns
         -------
@@ -197,23 +196,23 @@ class MovingAverage:
         """
 
         def _normalize(mean, var, val) -> chex.ArrayTree:
-            calc1 = jnp.sqrt(var + root_eps)
+            calc1 = jnp.sqrt(var + self._root_eps)
 
             if subtract_mean:
                 return (val - mean) / (calc1 + self._eps)
 
             return val / (calc1 + self._eps)
 
-        mean, variance = self._compute_moments()
+        mean, variance = self._compute_moments(state)
         return jax.tree.map(_normalize, mean, variance, x)
 
     def update_and_normalize(
         self,
         x: chex.ArrayTree,
+        state: EMAState,
         subtract_mean: bool = True,
-        root_eps: float = 1e-12,
         pmean_axis_name: str | None = None,
-    ) -> chex.Array:
+    ) -> Tuple[chex.Array, EMAState]:
         """
         Updates EMA state and then normalizes `x` using it.
 
@@ -221,10 +220,10 @@ class MovingAverage:
         ----------
         x : jax.ArrayTree
             Data to use to update EMA state and normalize
-        subtract_mean : bool, optional
+        state : EMAState
+            Current EMA state
+        subtract_mean : bool (optional)
             A flag for mean subtraction. Default is `True`
-        root_eps : float, optional
-            Primary epsilon value. Default is `1e-12`
         pmean_axis_name : str (optional)
             The optional axis name for parallel mean computation across multiple devices. Default is `None`
 
@@ -232,23 +231,8 @@ class MovingAverage:
         -------
         norm : jax.Array
             Normalized x
-        """
-        self.update(x, pmean_axis_name)
-        return self.normalize(x, subtract_mean, root_eps)
-
-    def reset(self) -> None:
-        """
-        Resets the EMA state to initial values.
-        """
-        self._state = self._init_state()
-
-    def load_state(self, new_state: EMAState) -> None:
-        """
-        Load a state from a checkpoint.
-
-        Parameters
-        ----------
         new_state : EMAState
-            A new EMA state
+            Updated state
         """
-        self._state = new_state
+        new_state = self.update(x, state, pmean_axis_name)
+        return self.normalize(x, state, subtract_mean), new_state
