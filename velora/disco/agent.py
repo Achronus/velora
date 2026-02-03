@@ -734,7 +734,7 @@ class DiscoValueAgent:
             Default is `None`
 
             - `batch_size (B)` the number of samples per timestep
-            - `n_units (HS)` the total number of hidden neurons
+            - `n_units (HS)` the total number of hidden neurons (`n_hidden + 1`)
 
         timespans : jax.Array (optional)
             Time intervals between observations `(T,)`. If `None`, uses uniform
@@ -747,7 +747,7 @@ class DiscoValueAgent:
         v : chex.Array
             State-value estimates with shape `(B, T, 1)` or `(B, 1)` if `T=1`
         h_state : chex.Array
-            Updated hidden state
+            Updated hidden state. Shape: `(B, HS)`
         """
         # Encode images -> (B, T, F)
         features = self.cnn(obs)

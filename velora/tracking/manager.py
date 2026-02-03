@@ -26,7 +26,7 @@ CheckpointState = Any  # Any flax.struct.dataclass instance
 
 class CheckpointManager:
     """
-    Handles checkpoint saving and loading for `AgentTrainerState` using Orbax.
+    Handles checkpoint saving and loading for Flax dataclasses using Orbax.
 
     Supports:
     - Automatic checkpoint rotation (`config.max`)
