@@ -183,6 +183,9 @@ def compute_policy_gradient_loss(
     loss : chex.Array
         Per-timestep policy gradient loss. Shape: `(B, T)`
     """
+    logits = logits[:, :-1]  # (B, T-1), # type: ignore
+    actions = actions[:, :-1]  # (B, T-1, 1), # type: ignore
+
     advantages = jnp.transpose(advantages)  # (B, T)
     actions = jnp.squeeze(actions, axis=-1)  # (B, T)
 
@@ -231,9 +234,9 @@ def compute_meta_reg_loss(
         targets.pi,
     ).mean()
 
-    l2_reg = reg_scale * (pi_reg + y_reg + z_reg)
-    kl_reg = kl_reg_coef * target_kl
-    return l2_reg + kl_reg
+    l2_loss = reg_scale * (pi_reg + y_reg + z_reg)
+    kl_loss = kl_reg_coef * target_kl
+    return l2_loss + kl_loss
 
 
 def compute_policy_loss(
