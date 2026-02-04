@@ -138,7 +138,6 @@ def compute_value_outputs(
     td_state: EMAState,
     gamma: float,
     td_lambda: float,
-    update_ema: bool = True,
 ) -> Tuple[ValueOutputs, EMAState, EMAState]:
     """
     Compute value function outputs from a trajectory of experience.
@@ -157,20 +156,20 @@ def compute_value_outputs(
         Discount factor
     td_lambda : float
         TD lambda parameter
-    update_ema : bool (optional)
-        Whether to update EMA statistics. Default is `True`
 
     Returns
     -------
     value_outs : ValueOutputs
         Value function outputs
     adv_ema : EMAState
-        Updated (if `update_ema=True`) or existing advantage EMA state
+        Updated advantage EMA state
     td_ema : EMAState
-        Updated (if `update_ema=True`) or existing TD EMA state
+        Updated TD EMA state
     """
     # Transpose to (T, B) for V-trace
     rollout = rollout.to_time_first()
+    rollout = rollout.squeeze()
+
     discounts = rollout.discounts * gamma
 
     # [:-1] = Drop last timestep
@@ -191,16 +190,12 @@ def compute_value_outputs(
     td = value_targets - rollout.values[:-1]  # type: ignore
 
     # Compute EMAs
-    if update_ema:
-        norm_adv, adv_state = ema_utils.update_and_normalize(advantages, adv_state)
-        norm_td, td_state = ema_utils.update_and_normalize(
-            td,
-            td_state,
-            subtract_mean=False,
-        )
-    else:
-        norm_adv = ema_utils.normalize(advantages, adv_state)
-        norm_td = ema_utils.normalize(td, td_state, subtract_mean=False)
+    norm_adv, adv_state = ema_utils.update_and_normalize(advantages, adv_state)
+    norm_td, td_state = ema_utils.update_and_normalize(
+        td,
+        td_state,
+        subtract_mean=False,
+    )
 
     value_outs = ValueOutputs(
         value=rollout.values,

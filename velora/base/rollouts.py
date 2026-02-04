@@ -80,6 +80,23 @@ class Rollout:
         """Batch size (`B`)."""
         return jnp.shape(self.actions)[0]
 
+    def squeeze(self) -> Self:
+        """
+        Removes the last dimension from `(actions, rewards, discounts, values)`
+        and returns a new instance of the rollout.
+
+        Returns
+        -------
+        rollout : Self
+            New instance with updates
+        """
+        return self.__replace__(
+            actions=self.actions.squeeze(),
+            rewards=self.rewards.squeeze(),
+            discounts=self.discounts.squeeze(),
+            values=self.values.squeeze(),
+        )
+
     def to_time_first(self) -> Self:
         """
         Transpose rollouts from batch-first to time-first format.
@@ -90,7 +107,7 @@ class Rollout:
 
         Returns
         -------
-        rollouts : RolloutStack
+        rollout : Rollout
             New instance with time-first arrays
         """
 
