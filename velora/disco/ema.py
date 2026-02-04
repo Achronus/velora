@@ -235,4 +235,4 @@ class MovingAverage:
             Updated state
         """
         new_state = self.update(x, state, pmean_axis_name)
-        return self.normalize(x, state, subtract_mean), new_state
+        return self.normalize(x, new_state, subtract_mean), new_state
