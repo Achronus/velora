@@ -386,6 +386,20 @@ class DiscoAgent:
             optax.adan(self.config.lr),
         )
 
+    @property
+    def hidden_sizes(self) -> Tuple[int, int]:
+        """
+        Get the agents hidden sizes.
+
+        Returns
+        -------
+        disco_h_size : int
+            Disco network hidden size
+        meta_h_size : int
+            Meta LNN hidden size
+        """
+        return (self._disco_net.hidden_size, self._meta_lnn.hidden_size)
+
     def _compile(
         self, jit_compile: bool
     ) -> Tuple[DiscoInputEncoder, DiscoNetwork, LNN, nnx.Linear]:

@@ -167,7 +167,13 @@ class RuleTrainerHiddenStates:
     meta: Tuple[HiddenState, ...]
 
     @classmethod
-    def create(cls, num_envs: int) -> Self:
+    def create(
+        cls,
+        num_envs: int,
+        batch_size: int,
+        disco_h_size: int,
+        meta_h_size: int,
+    ) -> Self:
         """
         Create initial hidden states for all environments.
 
@@ -175,15 +181,24 @@ class RuleTrainerHiddenStates:
         ----------
         num_envs : int
             Number of environments in the population
+        batch_size : int
+            Batch size (num_vec_envs)
+        disco_h_size : int
+            Disco network hidden size
+        meta_h_size : int
+            Meta LNN hidden size
 
         Returns
         -------
         states : RuleTrainerHiddenStates
-            Initialized hidden states (all `None`)
+            Initialized hidden states (all `0s`)
         """
+        disco_h = jnp.zeros((batch_size, disco_h_size))
+        meta_h = jnp.zeros((batch_size, meta_h_size))
+
         return cls(
-            disco=tuple(None for _ in range(num_envs)),
-            meta=tuple(None for _ in range(num_envs)),
+            disco=tuple(disco_h for _ in range(num_envs)),
+            meta=tuple(meta_h for _ in range(num_envs)),
         )
 
     def update(self, env_idx: int, disco_h: HiddenState, meta_h: HiddenState) -> Self:
@@ -614,6 +629,9 @@ class RuleTrainerState:
         cls,
         meta_opt_state: optax.OptState,
         num_envs: int,
+        batch_size: int,
+        disco_h_size: int,
+        meta_h_size: int,
     ) -> Self:
         """
         Create initial meta-training state.
@@ -624,6 +642,12 @@ class RuleTrainerState:
             Disco network optimizer state
         num_envs : int
             Number of environments
+        batch_size : int
+            Batch size (num_vec_envs)
+        disco_h_size : int
+            Disco network hidden size
+        meta_h_size : int
+            Meta LNN hidden size
 
         Returns
         -------
@@ -632,7 +656,12 @@ class RuleTrainerState:
         """
         return cls(
             meta_opt_state=meta_opt_state,
-            hidden=RuleTrainerHiddenStates.create(num_envs),
+            hidden=RuleTrainerHiddenStates.create(
+                num_envs,
+                batch_size,
+                disco_h_size,
+                meta_h_size,
+            ),
             meta_step=0,
         )
 
