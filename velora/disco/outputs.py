@@ -19,8 +19,10 @@ from typing import Dict, Self, Tuple
 import chex
 import jax
 import jax.numpy as jnp
+import optax
 from flax import struct
 
+from velora.disco.ema import EMAState
 from velora.disco.settings import LossCostSettings
 from velora.utils.transforms import squeeze_time
 
@@ -412,3 +414,55 @@ class AgentLosses:
         return {
             f"inner/{f.name}_loss": float(getattr(self, f.name)) for f in fields(self)
         }
+
+
+@struct.dataclass
+class AgentLossAux:
+    """
+    Dataclass for the `loss_fn` in `AgentTrainer`.
+
+    Parameters
+    ----------
+    value_outs : ValueOutputs
+        Value function outputs
+    adv_ema : EMAState
+        EMA state for advantage normalization
+    td_ema : EMAState
+        EMA state for TD normalization
+    """
+
+    value_outs: ValueOutputs
+    adv_ema: EMAState
+    td_ema: EMAState
+
+
+@struct.dataclass
+class MetaLossAux:
+    """
+    Dataclass for the `meta_loss_fn` in `RuleTrainer`.
+
+    Parameters
+    ----------
+    pg_loss : chex.Array
+        Policy gradient loss
+    entropy_loss : chex.Array
+        Entropy loss
+    reg_loss : chex.Array
+        Regularization loss
+    disco_h : chex.Array
+        Disco Network hidden state (`DiscoAgent`)
+    meta_h : chex.Array
+        Meta LNN hidden state (`DiscoAgent`)
+    p_params : optax.Params
+        Policy parameters
+    value_outs : ValueOutputs
+        Value function outputs
+    """
+
+    pg_loss: chex.Array
+    entropy_loss: chex.Array
+    reg_loss: chex.Array
+    disco_h: chex.Array
+    meta_h: chex.Array
+    p_params: optax.Params
+    value_outs: ValueOutputs
