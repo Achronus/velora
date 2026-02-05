@@ -372,7 +372,7 @@ class DiscoAgent:
         )
 
         self._meta_proj = nnx.Linear(
-            self._disco_net.hidden_size,
+            self._meta_lnn.hidden_size,
             self.encoder_config.output_dim,
             rngs=nnx.Rngs(proj_key),
         )
@@ -476,8 +476,7 @@ class DiscoAgent:
         )
 
         # Update Meta-LNN for next iteration using trajectory summary
-        summary = jnp.mean(embedding, axis=(0, 1))  # (B, T, E) -> (E,)
-        summary = jnp.expand_dims(summary, axis=0)  # (1, E)
+        summary = jnp.mean(embedding, axis=1)  # (B, T, E) -> (B, E)
         _, meta_h_state = self.meta_lnn(summary, h_state=meta_h_state)
 
         targets = DiscoAgentOutput(pi=preds.pi, y=preds.y, z=preds.z)
