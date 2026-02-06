@@ -450,7 +450,7 @@ class RuleTrainerSettings:
         current policy. Encourages stability by keeping targets close to the
         agent's current predictions. Default is `0.01`
     n_steps : int (optional)
-        Total number of meta-training steps. Default is `1_000_000`
+        Total number of meta-training steps. Used per environment. Default is `1_000_000`
     n_updates : int (optional)
         Number of agent updates to backpropagate through for meta-gradient
         computation (sliding window size). Default is `20`

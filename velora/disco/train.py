@@ -510,9 +510,10 @@ class RuleTrainer:
         for step in range(self.config.n_steps):
             meta_grads_list = []
 
+            # Iterate through each environment
             for idx, trainer in enumerate(self.trainers):
                 train_rollouts = trainer.collect_stack(self.config.n_updates)
-                valid_rollout = trainer.collect()
+                valid_rollout = trainer.collect(self.config.seq_len * 2)
 
                 # Compute meta_gradient for this agent
                 meta_grad, disco_h, meta_h = self._compute_meta_gradient(
@@ -529,7 +530,7 @@ class RuleTrainer:
                 # Update value function
                 _ = trainer.update_value(valid_rollout)
 
-            # Average meta-gradients across all agents
+            # Update meta-gradients across all environments
             avg_meta_grad = jax.tree.map(
                 lambda *grads: jnp.mean(jnp.stack(grads), axis=0),
                 *meta_grads_list,
@@ -614,7 +615,7 @@ class RuleTrainer:
                 rollout: Rollout,
             ) -> Tuple[
                 Tuple[optax.Params, chex.Array, chex.Array, optax.OptState],
-                DiscoAgentOutput,
+                Tuple[DiscoAgentOutput, chex.Array],
             ]:
                 """
                 Single inner loop update step.
@@ -636,8 +637,9 @@ class RuleTrainer:
                     - Updated Disco network hidden state
                     - Updated Meta LNN hidden state
                     - New policy optimizer state
-                targets : DiscoAgentOutput
-                    Disco agent predictions
+                targets : Tuple[DiscoAgentOutput, chex.Array]
+                    - Disco agent predictions
+                    - Policy target pi predictions
                 """
                 p_params, disco_h, meta_h, opt_state = carry
 
@@ -672,7 +674,7 @@ class RuleTrainer:
                 new_policy_params = optax.apply_updates(p_params, updates)
 
                 new_carry = (new_policy_params, disco_h, meta_h, new_opt_state)
-                return new_carry, targets
+                return new_carry, (targets, rollout.target_preds.pi)
 
             # Run inner loop
             init_carry = (
@@ -681,10 +683,12 @@ class RuleTrainer:
                 meta_h,
                 trainer.state.policy_opt_state,
             )
-            (final_p_params, final_d_h, final_m_h, _), all_targets = jax.lax.scan(
-                _inner_step,
-                init_carry,  # type: ignore
-                train_rollouts,  # type: ignore
+            (final_p_params, final_d_h, final_m_h, _), (all_targets, all_targets_pi) = (
+                jax.lax.scan(
+                    _inner_step,
+                    init_carry,  # type: ignore
+                    train_rollouts,  # type: ignore
+                )
             )
 
             # Compute value outputs on validation rollout
@@ -708,7 +712,7 @@ class RuleTrainer:
             )
             reg_loss = compute_meta_reg_loss(
                 jax.tree.map(lambda x: x[-1], all_targets),  # last targets
-                valid_rollout.target_preds.pi,
+                jax.tree.map(lambda x: x[-1], all_targets_pi),
                 self.config.reg_scale,
                 self.config.kl_reg,
             )
