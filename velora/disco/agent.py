@@ -26,6 +26,7 @@ import optax
 import orbax.checkpoint as ocp
 from flax import nnx
 
+from velora.base.outputs import ParamCount
 from velora.base.rollouts import Rollout
 from velora.disco.nn.cnn import ImageEncoder
 from velora.disco.nn.encoder import DiscoInputEncoder
@@ -40,6 +41,7 @@ from velora.disco.settings import (
 from velora.disco.state import PolicyAgentHiddenStates
 from velora.lnn.ncp import LNN
 from velora.utils.format import create_directory
+from velora.utils.nn import total_parameters
 from velora.utils.seed import get_rng_key_data, restore_rng_key
 from velora.utils.transforms import squeeze_time
 
@@ -132,6 +134,23 @@ class PolicyAgent:
         )
 
         self.cnn, self.ocm, self.acm = self._compile(jit_compile)
+
+    @property
+    def active_params(self) -> int:
+        """Get the agents active parameters."""
+        return (
+            self._cnn.active_params + self._ocm.active_params + self.acm.active_params
+        )
+
+    @property
+    def total_params(self) -> int:
+        """Get the agents total parameters."""
+        return self._cnn.total_params + self._ocm.total_params + self._acm.total_params
+
+    @property
+    def param_count(self) -> ParamCount:
+        """Get the agents parameter count."""
+        return ParamCount(active=self.active_params, total=self.total_params)
 
     def _compile(self, jit_compile: bool) -> Tuple[ImageEncoder, OCM, ACM]:
         """
@@ -399,6 +418,31 @@ class DiscoAgent:
             Meta LNN hidden size
         """
         return (self._disco_net.hidden_size, self._meta_lnn.hidden_size)
+
+    @property
+    def active_params(self) -> int:
+        """Get the agents active parameters."""
+        return (
+            self._encoder.active_params
+            + self._disco_net.active_params
+            + self._meta_lnn.active_params
+            + total_parameters(self._meta_proj)
+        )
+
+    @property
+    def total_params(self) -> int:
+        """Get the agents total parameters."""
+        return (
+            self._encoder.total_params
+            + self._disco_net.total_params
+            + self._meta_lnn.total_params
+            + total_parameters(self._meta_proj)
+        )
+
+    @property
+    def param_count(self) -> ParamCount:
+        """Get the agents parameter count."""
+        return ParamCount(active=self.active_params, total=self.total_params)
 
     def _compile(
         self, jit_compile: bool
@@ -699,6 +743,21 @@ class DiscoValueAgent:
         )
 
         self.cnn, self.net = self._compile(jit_compile)
+
+    @property
+    def active_params(self) -> int:
+        """Get the agents active parameters."""
+        return self._cnn.active_params + self._net.active_params
+
+    @property
+    def total_params(self) -> int:
+        """Get the agents total parameters."""
+        return self._cnn.total_params + self._net.total_params
+
+    @property
+    def param_count(self) -> ParamCount:
+        """Get the agents parameter count."""
+        return ParamCount(active=self.active_params, total=self.total_params)
 
     def _compile(self, jit_compile: bool) -> Tuple[ImageEncoder, LNN]:
         """

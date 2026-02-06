@@ -17,6 +17,8 @@ import chex
 import jax.numpy as jnp
 from flax import nnx
 
+from velora.utils.nn import active_parameters, total_parameters
+
 
 class ImageEncoder(nnx.Module):
     """
@@ -83,6 +85,33 @@ class ImageEncoder(nnx.Module):
             self.output_dim,
             rngs=rngs,
         )
+
+        self._total_params = total_parameters(self)
+        self._active_params = active_parameters(self)
+
+    @property
+    def total_params(self) -> int:
+        """
+        Gets the network's total parameter count.
+
+        Returns
+        -------
+        count : int
+            The total parameter count.
+        """
+        return self._total_params
+
+    @property
+    def active_params(self) -> int:
+        """
+        Gets the network's active parameter count.
+
+        Returns
+        -------
+        count : int
+            The active parameter count.
+        """
+        return self._active_params
 
     def __call__(self, x: chex.Array) -> chex.Array:
         """

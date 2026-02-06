@@ -458,9 +458,8 @@ class RuleTrainerSettings:
         Number of timesteps per trajectory (rollout size; `T`).
         Default is `29`
     num_vec_envs : int (optional)
-        Number of vectorized environments. Default is `8`
-    batch_size : int (optional)
-        Number of trajectories per training batch. Default is `96`
+        Number of vectorized environments. Acts as the rollout batch size.
+        Default is `8`
     tau : float (optional)
         Soft update coefficient for target network updates. Default is `0.9`
     """
@@ -485,7 +484,6 @@ class RuleTrainerSettings:
     seq_len: int = 29
 
     num_vec_envs: int = 8
-    batch_size: int = 96
     tau: float = 0.9
 
     def agent_trainer_config(self) -> AgentTrainerSettings:

@@ -23,6 +23,7 @@ from flax import nnx
 from velora.base.rollouts import Rollout
 from velora.disco.outputs import PolicyAgentOutput
 from velora.disco.settings import DiscoEncoderSettings
+from velora.utils.nn import total_parameters
 
 
 class DiscoInputEncoder(nnx.Module):
@@ -68,6 +69,32 @@ class DiscoInputEncoder(nnx.Module):
             self.config.scalar_embed_dim,
             rngs=rngs,
         )
+
+        self._total_params = total_parameters(self)
+
+    @property
+    def total_params(self) -> int:
+        """
+        Gets the network's total parameter count.
+
+        Returns
+        -------
+        count : int
+            The total parameter count.
+        """
+        return self._total_params
+
+    @property
+    def active_params(self) -> int:
+        """
+        Gets the network's active parameter count.
+
+        Returns
+        -------
+        count : int
+            The active parameter count.
+        """
+        return self._total_params
 
     def __call__(self, rollout: Rollout) -> Tuple[chex.Array, chex.Array]:
         """
