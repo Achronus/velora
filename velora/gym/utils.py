@@ -13,76 +13,7 @@
 # limitations under the License.
 # ==============================================================================
 
-
-from functools import partial
-from typing import Literal
-
 import gymnasium as gym
-from gymnasium.wrappers import AtariPreprocessing, FrameStackObservation
-from gymnasium.wrappers.vector import RecordEpisodeStatistics
-
-from velora.gym.wrappers import FrameStackReshape, JaxConversion
-
-VectorMode = Literal["sync", "async", "vector_entry_point"]
-
-
-def make_atari_env(
-    name: str,
-    num_envs: int,
-    vec_mode: VectorMode = "sync",
-    render_mode: str = "rgb_array",
-    **kwargs,
-) -> JaxConversion:
-    """
-    Creates a vectorized Atari environment using common
-    pre-processing techniques.
-
-    Applies wrappers -
-    - `gymnasium.wrappers.AtariPreprocessing`
-    - `gymnasium.wrappers.FrameStackObservation`
-    - `velora.gym.wrappers.FrameStackReshape`
-    - `gymnasium.wrappers.vector.RecordEpisodeStatistics`
-    - `velora.gym.wrappers.JaxConversion`
-
-    Parameters
-    ----------
-    name : str
-        Name of the environment
-    num_envs : int
-        The number of vectorized environments to make
-    vec_mode : Literal["sync", "async", "vector_entry_point"] (optional)
-        The type of vector environment to make. Default is `sync`
-    render_mode : str (optional)
-        The type of render mode for the environment.
-        Default is `rgb_array`
-    kwargs : Any (optional)
-        Additional arguments passed to `gym.make_vec()`
-
-    Returns
-    -------
-    envs : JaxConversion
-        A set of wrapped vectorized environments
-    """
-    preprocess = partial(
-        AtariPreprocessing,
-        noop_max=10,
-        frame_skip=4,
-        screen_size=84,  # (84, 84)
-        grayscale_obs=True,
-        grayscale_newaxis=True,  # (84, 84, 1)
-    )
-    framestack = partial(FrameStackObservation, stack_size=4)  # (84, 84, 4))
-
-    envs = gym.make_vec(
-        name,
-        num_envs=num_envs,
-        vectorization_mode=vec_mode,
-        render_mode=render_mode,
-        wrappers=[preprocess, framestack, FrameStackReshape],
-        frameskip=1,  # Handled by AtariPreprocessing
-        **kwargs,
-    )
-    return JaxConversion(RecordEpisodeStatistics(envs))
 
 
 def get_n_actions(env_name: str) -> int:

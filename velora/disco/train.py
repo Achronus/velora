@@ -45,7 +45,7 @@ from velora.disco.utils.loss import (
     compute_policy_gradient_loss,
     compute_policy_loss,
 )
-from velora.gym.utils import make_atari_env
+from velora.gym.envs import EnvGroup, EnvSet, MakeFn
 from velora.nn.optim import scale_by_adan_no_denom
 from velora.tracking.logger import MetricsLogger
 from velora.tracking.manager import CheckpointManager
@@ -76,6 +76,8 @@ class AgentTrainer:
         The Tensorboard metrics logger for metric tracking
     writer_name : str
         The name of the metrics logger writer to use
+    make_fn : MakeFn
+        Factory function to create the environment
     jit_compile : bool (optional)
         Flag to enable/disable JIT compilation. Default is `False`
     """
@@ -88,12 +90,13 @@ class AgentTrainer:
         key: chex.PRNGKey,
         logger: MetricsLogger,
         writer_name: str,
+        make_fn: MakeFn,
         jit_compile: bool = False,
     ) -> None:
         self.config = config
         self.env_name = env_name
 
-        self.envs = make_atari_env(self.env_name, self.config.num_vec_envs)
+        self.envs = make_fn(self.env_name, self.config.num_vec_envs)
 
         self.logger = logger
         self.writer_name = writer_name
@@ -433,8 +436,8 @@ class RuleTrainer:
 
     Parameters
     ----------
-    envs : List[str]
-        Environments to use for rule discovery
+    envs : EnvSet | EnvGroup
+        Environment set or group to use for rule discovery
     config : RuleTrainerSettings
         Configuration for meta-training
     seed : int (optional)
@@ -445,14 +448,19 @@ class RuleTrainer:
 
     def __init__(
         self,
-        envs: List[str],
+        envs: EnvSet | EnvGroup,
         *,
         config: RuleTrainerSettings,
         seed: int = 42,
         jit_compile: bool = False,
     ) -> None:
-        self.env_names = envs
-        self.num_envs = len(envs)
+        if isinstance(envs, EnvGroup):
+            envs = EnvSet(envs)
+
+        self._env_specs = envs.as_list()
+        self.env_names = [name for name, _ in self._env_specs]
+        self.num_envs = len(self._env_specs)
+
         self.config = config
         self.jit_compile = jit_compile
 
@@ -494,9 +502,10 @@ class RuleTrainer:
                 key=trainer_keys[i],
                 logger=self.logger,
                 writer_name=f"envs/{env_name}",
+                make_fn=make_fn,
                 jit_compile=self.jit_compile,
             )
-            for i, env_name in enumerate(self.env_names)
+            for i, (env_name, make_fn) in enumerate(self._env_specs)
         ]
 
         # Checkpointing
@@ -966,7 +975,7 @@ class RuleTrainer:
         trainer_idx : int
             Index of the trainer to reset
         """
-        env_name = self.env_names[trainer_idx]
+        env_name, make_fn = self._env_specs[trainer_idx]
 
         # Close existing trainer
         self.trainers[trainer_idx].close()
@@ -981,6 +990,7 @@ class RuleTrainer:
             key=new_key,
             logger=self.logger,
             writer_name=f"envs/{env_name}",
+            make_fn=make_fn,
             jit_compile=self.jit_compile,
         )
 
