@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Generic, List, Type, TypeVar
 
-from rich.console import RenderableType
+from rich.console import Group, RenderableType
 from rich.padding import Padding
 from rich.panel import Panel
 from rich.progress import (
@@ -37,7 +37,7 @@ from rich.table import Table
 from rich.text import Text
 
 from velora.cli.base.constant import VELORA_LOGO, Colour
-from velora.utils.format import number_to_short
+from velora.utils.format import field_to_title, number_to_short
 
 T = TypeVar("T")
 T2 = TypeVar("T2")
@@ -55,12 +55,12 @@ class Metric:
     value : str | int | float
         The metric value
     separator : str (optional)
-        Separator between label and value. Default is `:`
+        Separator between label and value. Default is `None`
     """
 
     label: str
     value: str | int | float
-    separator: str = ":"
+    separator: str = ""
 
     def format_value(self) -> str:
         """Format the value for display."""
@@ -90,7 +90,7 @@ class Divider:
     """
 
     style: str = "dim"
-    padding: tuple[int, int, int, int] = (1, 1, 0, 1)
+    padding: tuple[int, int, int, int] = (0, 1, 0, 1)
 
     def render(self) -> Padding:
         """Render the divider as a full-width rule with spacing."""
@@ -338,6 +338,9 @@ class MetricCard(Component):
         Hex colour for border and metric values. Default is `Colour.LAVENDER`
     height : int | None (optional)
         Fixed height for the card. Default is `None` (auto)
+    padding : Tuple[int, int, int, int] (optional)
+        Padding `(top, right, bottom, left)`.
+        Default is `(1, 1, 1, 0)`
     """
 
     def __init__(
@@ -346,11 +349,13 @@ class MetricCard(Component):
         metrics: List[Metric | Divider],
         colour: str = Colour.LAVENDER,
         height: int | None = None,
+        padding: tuple[int, int, int, int] = (1, 1, 1, 0),
     ) -> None:
         self.title = title
         self.metrics = metrics
         self.colour = colour
         self.height = height
+        self.padding = padding
 
     def get_content_height(self) -> int:
         """
@@ -361,10 +366,9 @@ class MetricCard(Component):
         height : int
             Content height in lines
         """
-        # Each metric row: 1 line content + 1 line top padding
-        rows = len(self.metrics) * 2
-        # Panel: 2 lines (top/bottom border) + 1 line bottom padding
-        return rows + 3
+        # Panel border (2) + vertical padding + content rows
+        top_pad, _, bottom_pad, _ = self.padding
+        return 2 + top_pad + bottom_pad + len(self.metrics)
 
     def render(self) -> Panel:
         from rich.console import Group
@@ -374,7 +378,7 @@ class MetricCard(Component):
 
         def _new_table() -> Table:
             t = Table.grid(
-                padding=(1, 1, 0, 1),
+                padding=(0, 1, 0, 1),
                 expand=True,
                 pad_edge=True,
                 collapse_padding=False,
@@ -405,7 +409,7 @@ class MetricCard(Component):
             Group(*renderables),
             title=f"[bold {self.colour}]{self.title}[/bold {self.colour}]",
             border_style=self.colour,
-            padding=(0, 1, 1, 0),
+            padding=self.padding,
             height=self.height,
         )
 
@@ -423,7 +427,7 @@ class ProgressCard(ProgressComponent):
     colour : str (optional)
         Hex colour for border, spinner, and label. Default is `Colour.TEAL`
     complete_colour : str (optional)
-        Hex colour for completion state. Default is `Colour.MINT`
+        Hex colour for completion state. Default is `Colour.TEAL`
     """
 
     def __init__(
@@ -431,7 +435,7 @@ class ProgressCard(ProgressComponent):
         description: str,
         total: int,
         colour: str = Colour.TEAL,
-        complete_colour: str = Colour.MINT,
+        complete_colour: str = Colour.TEAL,
     ) -> None:
         super().__init__(
             title="Training Progress",
@@ -442,11 +446,12 @@ class ProgressCard(ProgressComponent):
         )
 
     def _render_complete(self) -> Panel:
-        content = f"[bold {self.complete_colour}]✓ Training Complete[/bold {self.complete_colour}] [dim]({self.total:,} steps in {self._elapsed:.12}s)[/dim]"
+        total = number_to_short(self.total if self.total else 0)
+        content = f"[bold {self.complete_colour}]✓ Training Complete[/bold {self.complete_colour}] [dim]({total} steps in {self._elapsed:.2f}s)[/dim]"
         return Panel(
             content,
             border_style=self.complete_colour,
-            padding=(0, 1),
+            padding=(1, 1),
         )
 
 
@@ -544,49 +549,47 @@ class LiveMetricsCard(Generic[T, T2], Component):
         for key, value in kwargs.items():
             setattr(self.stats, key, value)
 
-    def _build_column(self, title: str, metrics: T | T2) -> Table:
-        """
-        Build a single column table.
-
-        Parameters
-        ----------
-        title : str
-            Title of the column
-        metrics : T | T2
-            A dataclass instance containing metrics
-        """
-        table = Table.grid(padding=(0, 1))
-        table.add_column(justify="right", style="bold white")
-        table.add_column(justify="left", style=self.colour)
-
+    def _build_side(self, title: str, items: list[tuple[str, float]]) -> Group:
+        """Build one side (Losses or Stats) with header, divider, and data."""
         # Header
-        table.add_row(f"[bold {self.colour}]{title}[/bold {self.colour}]", "")
+        header = Text(title, style=f"bold {self.colour}")
 
-        # Values
-        for name, value in vars(metrics).items():
-            if isinstance(value, float):
-                formatted = f"{value:.4f}" if abs(value) < 100 else f"{value:.2f}"
-            else:
-                formatted = str(value)
+        # Data table
+        data = Table.grid(expand=True, padding=(0, 2))
+        data.add_column(justify="left", style="bold white")
+        data.add_column(justify="right", style=self.colour)
 
-            table.add_row(f"{name}:", formatted)
+        for name, val in items:
+            data.add_row(f"{field_to_title(name)}", f"{val:.2f}")
 
-        return table
+        return Group(header, Rule(style="dim"), data)
 
     def render(self) -> Panel:
-        grid = Table.grid(padding=(0, 2))
-        grid.add_column(ratio=1)
-        grid.add_column(ratio=1)
+        loss_items = list(vars(self.losses).items())
+        stat_items = list(vars(self.stats).items())
 
-        losses_col = self._build_column("Losses", self.losses)
-        stats_col = self._build_column("Stats", self.stats)
-        grid.add_row(losses_col, stats_col)
+        losses_side = self._build_side("Losses", loss_items)
+        stats_side = self._build_side("Stats", stat_items)
+
+        # Outer table with vertical divider
+        outer = Table.grid(expand=True, padding=(0, 1))
+        outer.add_column(ratio=1)
+        outer.add_column(width=3, justify="center")
+        outer.add_column(ratio=1)
+
+        # Calculate row count for vertical divider
+        row_count = (
+            max(len(loss_items), len(stat_items)) + 2
+        )  # +2 for header and divider
+        divider = Text(("│\n" * row_count).strip(), style="dim")
+
+        outer.add_row(losses_side, divider, stats_side)
 
         return Panel(
-            grid,
+            outer,
             title=f"[bold {self.colour}]{self.title}[/bold {self.colour}]",
             border_style=self.colour,
-            padding=(0, 1),
+            padding=(1, 1),
         )
 
 

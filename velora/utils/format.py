@@ -18,6 +18,25 @@ from datetime import datetime
 from pathlib import Path
 
 
+def field_to_title(name: str) -> str:
+    """
+    Convert a dataclass field name to a title.
+
+    Splits on underscores and capitalizes each word.
+
+    Parameters
+    ----------
+    name : str
+        The field name to convert (e.g., "actor_loss")
+
+    Returns
+    -------
+    title : str
+        The formatted title (e.g., "Actor Loss")
+    """
+    return " ".join(word.capitalize() for word in name.split("_"))
+
+
 def number_to_short(value: int) -> str:
     """
     Converts a number into a human-readable format like `1M` or `1.25K`.

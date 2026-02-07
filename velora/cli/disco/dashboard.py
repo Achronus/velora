@@ -142,7 +142,7 @@ class DiscoConsoleDashboard(ConsoleDashboard):
             metrics=[
                 Metric("Total Steps", total_steps),
                 Divider(),
-                Metric("Parameters", "[dim](active/total)[/dim]", separator=""),
+                Metric("Parameters", "[dim](active/total)[/dim]"),
                 Metric("Policy", str(self.params.policy)),
                 Metric("Value", str(self.params.value)),
                 Metric("Disco", str(self.params.disco)),
