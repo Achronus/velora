@@ -1,0 +1,115 @@
+# Copyright 2025 Achronus
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ==============================================================================
+
+from dataclasses import dataclass
+from typing import Dict
+
+from velora.base.outputs import ParamCount
+
+
+@dataclass
+class DiscoLosses:
+    meta: float = 0.0
+    policy_gradient: float = 0.0
+    entropy: float = 0.0
+    regularization: float = 0.0
+
+
+@dataclass
+class DiscoStats:
+    gradient_norm: float = 0.0
+    avg_reward: float = 0.0
+    advantage: float = 0.0
+    advantage_norm: float = 0.0
+
+
+@dataclass
+class DiscoParamsSettings:
+    """
+    Parameter counts for DiscoRL agents.
+
+    Parameters
+    ----------
+    policy : ParamCount
+        Active and total parameters for the policy agent
+    value : ParamCount
+        Active and total parameters for the value agent
+    disco : ParamCount
+        Active and total parameters for the disco meta-network
+    """
+
+    policy: ParamCount
+    value: ParamCount
+    disco: ParamCount
+
+
+@dataclass
+class DiscoDashboardSettings:
+    """
+    Configuration settings for the `DiscoConsoleDashboard`.
+
+    Parameters
+    ----------
+    meta_steps : int
+        Number of meta-training steps per environment
+    n_updates : int
+        Number of inner loop agent updates per meta-step
+    seq_len : int
+        Trajectory sequence length (timesteps per rollout)
+    batch_size : int
+        Number of parallel vectorized environments
+    log_dir : str
+        Directory path for Tensorboard logs
+    cp_dir : str
+        Directory path for checkpoints
+    env_categories : Dict[str, int]
+        Mapping of environment category names to counts
+    params : DiscoParamsSettings
+        Parameter counts for each agent type
+    """
+
+    meta_steps: int
+    n_updates: int
+    seq_len: int
+    batch_size: int
+
+    log_dir: str
+    cp_dir: str
+
+    env_categories: Dict[str, int]
+
+    params: DiscoParamsSettings
+
+    def env_total(self) -> int:
+        """
+        Computes the total number of training environments.
+
+        Returns
+        -------
+        total : int
+            Environment training total
+        """
+        return sum(self.env_categories.values())
+
+    def total_steps(self) -> int:
+        """
+        Compute total training steps.
+
+        Returns
+        -------
+        total : int
+            Total training steps
+        """
+        return self.meta_steps * self.n_updates

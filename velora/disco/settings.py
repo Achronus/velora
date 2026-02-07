@@ -15,11 +15,12 @@
 
 import json
 from dataclasses import fields
-from typing import Self
+from typing import Dict, Self
 
 import jax.numpy as jnp
 from flax import struct
 
+from velora.cli.disco.settings import DiscoDashboardSettings, DiscoParamsSettings
 from velora.disco.distributions import CategoricalBins
 from velora.tracking.settings import CheckpointSettings, MetricLoggerSettings
 
@@ -503,4 +504,35 @@ class RuleTrainerSettings:
             num_vec_envs=self.num_vec_envs,
             tau=self.tau,
             seq_len=self.seq_len,
+        )
+
+    def console_config(
+        self,
+        envs: Dict[str, int],
+        params: DiscoParamsSettings,
+    ) -> DiscoDashboardSettings:
+        """
+        Sets the configuration for the `DiscoConsoleDashboard`.
+
+        Parameters
+        ----------
+        envs : Dict[str, int]
+            Mapping of environment category names to counts
+        params : DiscoParamsSettings
+            Parameter counts for each agent type
+
+        Returns
+        -------
+        config : DiscoDashboardSettings
+            Configuration for `DiscoConsoleDashboard`
+        """
+        return DiscoDashboardSettings(
+            meta_steps=self.n_steps,
+            n_updates=self.n_updates,
+            seq_len=self.seq_len,
+            batch_size=self.num_vec_envs,
+            log_dir=str(self.logger.dirpath),
+            cp_dir=str(self.checkpoint.dirpath),
+            env_categories=envs,
+            params=params,
         )
