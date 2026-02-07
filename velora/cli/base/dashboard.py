@@ -13,19 +13,18 @@
 # limitations under the License.
 # ==============================================================================
 
-from typing import List, Tuple
+from typing import List
 
 from rich.console import Console, Group
 from rich.live import Live
-from rich.panel import Panel
 
 from velora.cli.base.component import (
+    CompileCard,
     Component,
     LiveMetricsCard,
     ProgressCard,
     TitleCard,
 )
-from velora.cli.base.constant import Colour
 
 
 class ConsoleDashboard:
@@ -39,9 +38,11 @@ class ConsoleDashboard:
     body : List[Component]
         List of body components (cards, rows, etc.)
     progress : ProgressCard (optional)
-        Optional progress card. Displayed after `live_metrics`. Default is `None`
+        Optional progress card. Displayed after `body`/`compile`. Default is `None`
     live_metrics : LiveMetricsCard (optional)
-        Optional live metrics card. Displayed after `body`. Default is `None`
+        Optional live metrics card. Displayed after `body`/`progress`. Default is `None`
+    compile : CompileCard (optional)
+        Optional compile card. Displayed after `body`. Default is `None`
     """
 
     def __init__(
@@ -50,14 +51,75 @@ class ConsoleDashboard:
         body: List[Component],
         progress: ProgressCard | None = None,
         live_metrics: LiveMetricsCard | None = None,
+        compile: CompileCard | None = None,
     ) -> None:
         self.title = title
         self.body = body
         self.progress = progress
         self.live_metrics = live_metrics
+        self.compile = compile
+
+        self._is_compiling = False
+        self._is_training = False
 
         self.console = Console()
         self._live: Live | None = None
+
+    def start_compile(self) -> None:
+        """Start the display in compile mode."""
+        self._is_compiling = True
+
+        if self.compile:
+            self.compile.start()
+
+        self._live = Live(
+            self._build_display(),
+            console=self.console,
+            refresh_per_second=4,
+            transient=False,
+        )
+        self._live.start()
+
+    def finish_compile(self, elapsed: float) -> None:
+        """
+        Mark compilation complete and show elapsed time.
+
+        Parameters
+        ----------
+        elapsed : float
+            Time taken to compile
+        """
+        self._is_compiling = False
+
+        if self.compile:
+            self.compile.complete(elapsed)
+
+        self.refresh()
+
+    def start_training(self) -> None:
+        """Start in training mode."""
+        self._is_training = True
+
+        if self.progress:
+            self.progress.start()
+
+        self.refresh()
+
+    def finish_training(self, elapsed: float) -> None:
+        """
+        Mark training complete and show elapsed time.
+
+        Parameters
+        ----------
+        elapsed : float
+            Time taken to train
+        """
+        self._is_training = False
+
+        if self.progress:
+            self.progress.complete(elapsed)
+
+        self.refresh()
 
     def _build_display(self) -> Group:
         """Build the full console display."""
@@ -66,11 +128,15 @@ class ConsoleDashboard:
         for component in self.body:
             components.append(component.render())  # type: ignore
 
-        if self.live_metrics:
-            components.append(self.live_metrics.render())
+        if self.compile:
+            components.append(self.compile.render())
 
-        if self.progress:
-            components.append(self.progress.render())
+        if self._is_training:
+            if self.progress:
+                components.append(self.progress.render())
+
+            if self.live_metrics:
+                components.append(self.live_metrics.render())
 
         return Group(*components)
 
@@ -108,38 +174,6 @@ class ConsoleDashboard:
         """Stop the live display."""
         if self._live:
             self._live.stop()
-
-    def print_complete(
-        self,
-        message: str = "Training complete!",
-        details: List[Tuple[str, str]] | None = None,
-    ) -> None:
-        """
-        Print completion message.
-
-        Parameters
-        ----------
-        message : str
-            Completion message
-        details : List[Tuple[str, str]] (optional)
-            Optional list of `(label, value)` details to show. Default is `None`
-        """
-        content = f"[bold {Colour.MINT}]✓ {message}[/bold {Colour.MINT}]"
-
-        if details:
-            content += "\n"
-            for label, value in details:
-                content += f"\n{label}: [{Colour.TEAL}]{value}[/{Colour.TEAL}]"
-
-        self.console.print()
-        self.console.print(
-            Panel(
-                content,
-                title=f"[bold {Colour.MINT}]Complete[/bold {Colour.MINT}]",
-                border_style=Colour.MINT,
-                padding=(1, 2),
-            )
-        )
 
     def update_losses(self, **kwargs) -> None:
         """
