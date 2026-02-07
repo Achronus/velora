@@ -37,7 +37,7 @@ from rich.table import Table
 from rich.text import Text
 
 from velora.cli.base.constant import VELORA_LOGO, Colour
-from velora.utils.format import field_to_title, number_to_short
+from velora.utils.format import field_to_title, format_duration, number_to_short
 
 T = TypeVar("T")
 T2 = TypeVar("T2")
@@ -447,7 +447,8 @@ class ProgressCard(ProgressComponent):
 
     def _render_complete(self) -> Panel:
         total = number_to_short(self.total if self.total else 0)
-        content = f"[bold {self.complete_colour}]✓ Training Complete[/bold {self.complete_colour}] [dim]({total} steps in {self._elapsed:.2f}s)[/dim]"
+        elapsed = format_duration(self._elapsed) if self._elapsed else "0s"
+        content = f"[bold {self.complete_colour}]✓ Training Complete[/bold {self.complete_colour}] [dim]({total} steps in {elapsed})[/dim]"
         return Panel(
             content,
             border_style=self.complete_colour,
@@ -619,7 +620,8 @@ class CompileCard(ProgressComponent):
         )
 
     def _render_complete(self) -> Panel:
-        content = f"[bold {self.complete_colour}]✓ Compiled[/bold {self.complete_colour}] [dim]({self._elapsed:.2f}s)[/dim]"
+        elapsed = format_duration(self._elapsed) if self._elapsed else "0s"
+        content = f"[bold {self.complete_colour}]✓ Compiled[/bold {self.complete_colour}] [dim]({elapsed})[/dim]"
         return Panel(
             content,
             border_style=self.complete_colour,

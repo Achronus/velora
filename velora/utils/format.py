@@ -18,6 +18,37 @@ from datetime import datetime
 from pathlib import Path
 
 
+def format_duration(seconds: float) -> str:
+    """
+    Format seconds into a human-readable duration string.
+
+    Shows only relevant units:
+        - less than 60s: "45.23s"
+        - less than 1h: "5m 30s"
+        - greater than or equal to 1h: "2h 15m 30s"
+
+    Parameters
+    ----------
+    seconds : float
+        Duration in seconds
+
+    Returns
+    -------
+    duration : str
+        Formatted duration string
+    """
+    if seconds < 60:
+        return f"{seconds:.2f}s"
+
+    mins, secs = divmod(int(seconds), 60)
+    hrs, mins = divmod(mins, 60)
+
+    if hrs > 0:
+        return f"{hrs}h {mins}m {secs}s"
+
+    return f"{mins}m {secs}s"
+
+
 def field_to_title(name: str) -> str:
     """
     Convert a dataclass field name to a title.
