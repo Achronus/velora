@@ -13,7 +13,6 @@
 # limitations under the License.
 # ==============================================================================
 
-
 from flax import struct
 
 from velora.utils.format import number_to_short

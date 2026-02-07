@@ -16,7 +16,7 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List
+from typing import Dict, List
 
 from rich.console import RenderableType
 from rich.panel import Panel
@@ -184,15 +184,15 @@ class MetricCard(Component):
         Card title
     metrics : List[Metric | Separator]
         List of metrics and separators to display
-    colour : str
-        Hex colour for border and metric values
+    colour : str (optional)
+        Hex colour for border and metric values. Default is `Colour.LAVENDER`
     """
 
     def __init__(
         self,
         title: str,
         metrics: List[Metric | Separator],
-        colour: str,
+        colour: str = Colour.LAVENDER,
     ) -> None:
         self.title = title
         self.metrics = metrics
@@ -228,7 +228,7 @@ class ProgressCard(Component):
     total : int
         Total number of steps
     colour : str
-        Hex colour for border, spinner, and label. Default is `teal`
+        Hex colour for border, spinner, and label. Default is `Colour.TEAL`
     """
 
     def __init__(
@@ -285,7 +285,7 @@ class CardRow(Component):
 
     Parameters
     ----------
-    cards : List[ComponentBase]
+    cards : List[Component]
         List of cards (1-3) to display in a row
     """
 
@@ -305,3 +305,58 @@ class CardRow(Component):
         table.add_row(*rendered_cards)
 
         return table
+
+
+class LiveMetricsCard(Component):
+    """
+    Dynamic card displaying real-time training metrics.
+
+    Parameters
+    ----------
+    title : str (optional)
+        Card title. Default is `Live Metrics`
+    colour : str (optional)
+        Hex colour for border and values. Default is `Colour.TEAL`
+    """
+
+    def __init__(
+        self,
+        title: str = "Live Metrics",
+        colour: str = Colour.TEAL,
+    ) -> None:
+        self.title = title
+        self.colour = colour
+        self.metrics: Dict[str, float] = {}
+
+    def update(self, metrics: Dict[str, float]) -> None:
+        """
+        Update metric values.
+
+        Parameters
+        ----------
+        metrics : Dict[str, float]
+            Mapping of metric names to values
+        """
+        self.metrics.update(metrics)
+
+    def render(self) -> Panel:
+        table = Table.grid(padding=(0, 1))
+        table.add_column(justify="right", style="bold white")
+        table.add_column(justify="left", style=self.colour)
+
+        if not self.metrics:
+            table.add_row("[dim]Waiting for data...[/dim]", "")
+        else:
+            for name, value in self.metrics.items():
+                if isinstance(value, float):
+                    formatted = f"{value:.4f}" if abs(value) < 100 else f"{value:.2f}"
+                else:
+                    formatted = str(value)
+                table.add_row(f"{name}:", formatted)
+
+        return Panel(
+            table,
+            title=f"[bold {self.colour}]{self.title}[/bold {self.colour}]",
+            border_style=self.colour,
+            padding=(0, 1),
+        )
