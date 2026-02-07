@@ -139,7 +139,7 @@ class PolicyAgent:
     def active_params(self) -> int:
         """Get the agents active parameters."""
         return (
-            self._cnn.active_params + self._ocm.active_params + self.acm.active_params
+            self._cnn.active_params + self._ocm.active_params + self._acm.active_params
         )
 
     @property
