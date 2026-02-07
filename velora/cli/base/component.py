@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Generic, List, Type, TypeVar
 
 from rich.console import RenderableType
+from rich.padding import Padding
 from rich.panel import Panel
 from rich.progress import (
     BarColumn,
@@ -84,13 +85,19 @@ class Divider:
     ----------
     style : str (optional)
         Style of the divider. Default is `dim`
+    padding : tuple (optional)
+        Padding `(top, left, bottom, right)`. Default is `(1, 1, 0, 1)`
     """
 
     style: str = "dim"
+    padding: tuple[int, int, int, int] = (1, 1, 0, 1)
 
-    def render(self) -> Rule:
-        """Render the divider."""
-        return Rule(style=self.style)
+    def render(self) -> Padding:
+        """Render the divider as a full-width rule with spacing."""
+        return Padding(
+            Rule(style=self.style),
+            (self.padding[0], self.padding[1], self.padding[2], self.padding[3]),
+        )
 
 
 class Component(ABC):
@@ -360,25 +367,42 @@ class MetricCard(Component):
         return rows + 3
 
     def render(self) -> Panel:
-        table = Table.grid(
-            padding=(1, 1, 0, 1),
-            expand=True,
-            pad_edge=True,
-            collapse_padding=False,
-        )
-        table.add_column(justify="left", style="bold white")
-        table.add_column(justify="right", style=self.colour)
+        from rich.console import Group
+
+        renderables: List[RenderableType] = []
+        current_table: Table | None = None
+
+        def _new_table() -> Table:
+            t = Table.grid(
+                padding=(1, 1, 0, 1),
+                expand=True,
+                pad_edge=True,
+                collapse_padding=False,
+            )
+            t.add_column(justify="left", style="bold white")
+            t.add_column(justify="right", style=self.colour)
+            return t
 
         for metric in self.metrics:
             if isinstance(metric, Divider):
-                table.add_row(metric.render())
+                if current_table is not None:
+                    renderables.append(current_table)
+                    current_table = None
+
+                renderables.append(metric.render())
             else:
-                table.add_row(
+                if current_table is None:
+                    current_table = _new_table()
+
+                current_table.add_row(
                     f"{metric.label}{metric.separator}", metric.format_value()
                 )
 
+        if current_table is not None:
+            renderables.append(current_table)
+
         return Panel(
-            table,
+            Group(*renderables),
             title=f"[bold {self.colour}]{self.title}[/bold {self.colour}]",
             border_style=self.colour,
             padding=(0, 1, 1, 0),
