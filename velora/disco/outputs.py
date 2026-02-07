@@ -14,7 +14,7 @@
 # ==============================================================================
 
 from dataclasses import field, fields
-from typing import Dict, Self, Tuple
+from typing import Dict, Self, Sequence, Tuple
 
 import chex
 import jax
@@ -466,3 +466,61 @@ class MetaLossAux:
     meta_h: chex.Array
     p_params: optax.Params
     value_outs: ValueOutputs
+
+
+@struct.dataclass(frozen=True)
+class LossStatistics:
+    """
+    Loss statistics for meta-training.
+
+    Parameters
+    ----------
+    meta : float
+        Total meta loss
+    policy_gradient : float
+        Policy gradient loss
+    entropy : float
+        Entropy loss
+    regularization : float
+        Regularization loss
+    """
+
+    meta: float
+    policy_gradient: float
+    entropy: float
+    regularization: float
+
+    @classmethod
+    def from_losses(cls, losses: Sequence[Self]) -> Self:
+        """
+        Create averaged statistics from a sequence of losses.
+
+        Parameters
+        ----------
+        losses : Sequence[LossStatistics]
+            Sequence of loss statistics
+
+        Returns
+        -------
+        stats : LossStatistics
+            Averaged loss statistics
+        """
+        n = len(losses)
+
+        return cls(
+            meta=sum(loss.meta for loss in losses) / n,
+            policy_gradient=sum(loss.policy_gradient for loss in losses) / n,
+            entropy=sum(loss.entropy for loss in losses) / n,
+            regularization=sum(loss.regularization for loss in losses) / n,
+        )
+
+    def to_dict(self) -> Dict[str, float]:
+        """
+        Convert to dictionary.
+
+        Returns
+        -------
+        stats : Dict[str, float]
+            Loss statistics as a dictionary
+        """
+        return vars(self)

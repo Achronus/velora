@@ -429,13 +429,6 @@ class CollectState:
         return len(self.completed_returns)
 
     @property
-    def total_episode_reward(self) -> float:
-        if not self.completed_returns:
-            return 0.0
-
-        return sum(self.completed_returns)
-
-    @property
     def mean_episode_return(self) -> float:
         if not self.completed_returns:
             return 0.0

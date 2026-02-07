@@ -22,6 +22,7 @@ import jax.numpy as jnp
 import optax
 import orbax.checkpoint as ocp
 
+from velora.base.outputs import RewardStatistics
 from velora.base.rollouts import Rollout, RolloutStack
 from velora.cli.disco.dashboard import DiscoConsoleDashboard
 from velora.cli.disco.settings import DiscoParamsSettings
@@ -31,6 +32,7 @@ from velora.disco.outputs import (
     AgentLossAux,
     AgentLosses,
     DiscoAgentOutput,
+    LossStatistics,
     MetaLossAux,
     ValueOutputs,
 )
@@ -140,6 +142,9 @@ class AgentTrainer:
             self.value_optim.init(self.value_agent.get_params()),
             current_obs=current_obs,
         )
+
+        # Episode reward tracking
+        self._episode_rewards: Tuple[float, ...] = ()
 
     def _create_optim(self) -> optax.GradientTransformation:
         """
@@ -372,7 +377,9 @@ class AgentTrainer:
         self.state = self.state.update_hidden(hidden)
         self.state = self.state.update_obs(obs)
 
-        # Log episodic metrics
+        # Log episodic metrics and store rewards
+        self._episode_rewards = collect_state.completed_returns
+
         if metrics := collect_state.episode_metrics():
             self.log(metrics)
 
@@ -394,6 +401,17 @@ class AgentTrainer:
         """
         rollouts = [self.collect() for _ in range(n_rollouts)]
         return RolloutStack.from_list(rollouts)
+
+    def get_episode_rewards(self) -> Tuple[float, ...]:
+        """
+        Get episode rewards from the most recent collection.
+
+        Returns
+        -------
+        rewards : Tuple[float, ...]
+            Episode rewards from last `collect()` call
+        """
+        return self._episode_rewards
 
     def close(self) -> None:
         """Clean up resources."""
@@ -531,8 +549,12 @@ class RuleTrainer:
 
         2. Log metrics and checkpoints periodically
         """
+        self.console.start_training()
+
         for step in range(self.config.n_steps):
-            meta_grads_list = []
+            meta_grads_list: List[chex.ArrayTree] = []
+            all_rewards: List[float] = []
+            all_losses: List[LossStatistics] = []
 
             # Iterate through each environment
             for idx, trainer in enumerate(self.trainers):
@@ -540,13 +562,15 @@ class RuleTrainer:
                 valid_rollout = trainer.collect(self.config.seq_len * 2)
 
                 # Compute meta_gradient for this agent
-                meta_grad, disco_h, meta_h = self._compute_meta_gradient(
+                meta_grad, disco_h, meta_h, losses = self._compute_meta_gradient(
                     idx,
                     trainer,
                     train_rollouts,
                     valid_rollout,
                 )
                 meta_grads_list.append(meta_grad)
+                all_rewards.extend(trainer.get_episode_rewards())
+                all_losses.append(losses)
 
                 # Update hidden states
                 self.state = self.state.update_hidden(idx, disco_h, meta_h)  # type: ignore
@@ -561,23 +585,33 @@ class RuleTrainer:
             )
             self._apply_meta_update(avg_meta_grad)
 
+            # Compute reward statistics
+            reward_stats = RewardStatistics.from_rewards(all_rewards)
+            loss_stats = LossStatistics.from_losses(all_losses)
+
             # Log metrics
-            self.logger.log(
-                "meta",
-                step,
-                {
-                    "meta/grad_norm": float(optax.global_norm(avg_meta_grad)),
-                    "meta/step": step,
-                },
-            )
+            metrics = {
+                "meta/grad_norm": float(optax.global_norm(avg_meta_grad)),
+                "meta/avg_reward": reward_stats.avg_reward,
+                "meta/reward_std": reward_stats.reward_std,
+                "meta/reward_min": reward_stats.reward_min,
+                "meta/reward_max": reward_stats.reward_max,
+                "meta/step": step,
+            }
+            self.logger.log("meta", step, metrics)
+
+            self.console.update_stats(**reward_stats.to_dict())
+            self.console.update_losses(**loss_stats.to_dict())
 
             # Checkpoint periodically
             if step % self.config.checkpoint.freq == 0:
                 self.save_checkpoint()
 
+            self.console.update_progress()
+
         # Final cleanup
         self.close()
-        print("Training complete.")
+        self.console.finish_training()
 
     def _compute_meta_gradient(
         self,
@@ -585,7 +619,7 @@ class RuleTrainer:
         trainer: AgentTrainer,
         train_rollouts: RolloutStack,
         valid_rollout: Rollout,
-    ) -> Tuple[chex.ArrayTree, chex.ArrayTree, chex.ArrayTree]:
+    ) -> Tuple[chex.ArrayTree, chex.ArrayTree, chex.ArrayTree, LossStatistics]:
         """
         Compute meta-gradient for a single agent through the inner loop.
 
@@ -610,6 +644,8 @@ class RuleTrainer:
             Updated Disco network hidden state
         meta_h : chex.Array
             Updated Meta LNN hidden state
+        losses : LossStatistics
+            Trainer loss statistics
         """
         meta_params = self.meta_agent.get_params()
         policy_params = trainer.policy_agent.get_params()
@@ -773,7 +809,14 @@ class RuleTrainer:
             aux.value_outs,
         )
 
-        return meta_grad, aux.disco_h, aux.meta_h
+        losses = LossStatistics(
+            meta=float(meta_loss),
+            policy_gradient=float(aux.pg_loss),
+            entropy=float(aux.entropy_loss),
+            regularization=float(aux.reg_loss),
+        )
+
+        return meta_grad, aux.disco_h, aux.meta_h, losses
 
     def _log_meta_metrics(
         self,

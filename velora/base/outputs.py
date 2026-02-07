@@ -13,6 +13,9 @@
 # limitations under the License.
 # ==============================================================================
 
+from typing import Dict, Self, Sequence
+
+import jax.numpy as jnp
 from flax import struct
 
 from velora.utils.format import number_to_short
@@ -27,3 +30,63 @@ class ParamCount:
 
     def __str__(self) -> str:
         return f"{number_to_short(self.active)}/{number_to_short(self.total)}"
+
+
+@struct.dataclass(frozen=True)
+class RewardStatistics:
+    """
+    Reward statistics for completed episodes.
+
+    Parameters
+    ----------
+    avg_reward : float
+        Average reward
+    reward_std : float
+        Reward standard deviation
+    reward_min : float
+        Minimum reward
+    reward_max : float
+        Maximum reward
+    """
+
+    avg_reward: float = 0.0
+    reward_std: float = 0.0
+    reward_min: float = 0.0
+    reward_max: float = 0.0
+
+    @classmethod
+    def from_rewards(cls, rewards: Sequence[float]) -> Self:
+        """
+        Create statistics from a sequence of rewards.
+
+        Parameters
+        ----------
+        rewards : Sequence[float]
+            Sequence of reward values
+
+        Returns
+        -------
+        stats : RewardStatistics
+            Computed reward statistics
+        """
+        if not rewards:
+            return cls()
+
+        arr = jnp.array(rewards)
+        return cls(
+            avg_reward=float(jnp.mean(arr)),
+            reward_std=float(jnp.std(arr)),
+            reward_min=float(jnp.min(arr)),
+            reward_max=float(jnp.max(arr)),
+        )
+
+    def to_dict(self) -> Dict[str, float]:
+        """
+        Convert to dictionary.
+
+        Returns
+        -------
+        stats : Dict[str, float]
+            Reward statistics as a dictionary
+        """
+        return vars(self)

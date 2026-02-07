@@ -49,20 +49,20 @@ class DiscoStats:
 
     Parameters
     ----------
-    gradient_norm : float (optional)
-        Gradient normalization. Default is `0.0`
     avg_reward : float (optional)
         Average reward. Default is `0.0`
-    advantage : float (optional)
-        Advantage mean. Default is `0.0`
-    advantage_norm : float (optional)
-        Advantage normalization mean. Default is `0.0`
+    reward_std : float (optional)
+        Reward standard deviation. Default is `0.0`
+    reward_min : float (optional)
+        Minimum reward. Default is `0.0`
+    reward_max : float (optional)
+        Maximum reward. Default is `0.0`
     """
 
-    gradient_norm: float = 0.0
     avg_reward: float = 0.0
-    advantage: float = 0.0
-    advantage_norm: float = 0.0
+    reward_std: float = 0.0
+    reward_min: float = 0.0
+    reward_max: float = 0.0
 
 
 @dataclass
