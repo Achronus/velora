@@ -27,6 +27,7 @@ dependencies = [
     "gymnasium[classic-control,other]>=1.2.3",
     "jax>=0.8.0",
     "jax-ai-stack",
+    "miniworld>=2.1.0",
     "optax>=0.2.6",
     "rlax>=0.1.8",
     "safetensors>=0.7.0",
