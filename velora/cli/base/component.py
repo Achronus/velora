@@ -16,7 +16,7 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List
+from typing import Generic, List, Type, TypeVar
 
 from rich.console import RenderableType
 from rich.panel import Panel
@@ -36,6 +36,9 @@ from rich.text import Text
 
 from velora.cli.base.constant import VELORA_LOGO, Colour
 from velora.utils.format import number_to_short
+
+T = TypeVar("T")
+T2 = TypeVar("T2")
 
 
 @dataclass
@@ -310,55 +313,92 @@ class CardRow(Component):
         return table
 
 
-class LiveMetricsCard(Component):
+class LiveMetricsCard(Generic[T, T2], Component):
     """
-    Dynamic card displaying real-time training metrics.
+    Two-column live metrics card displaying real-time losses and stats.
 
     Parameters
     ----------
-    title : str (optional)
-        Card title. Default is `Live Metrics`
+    losses : Type[T]
+        Losses dataclass type
+    stats : Type[T2]
+        Statistics dataclass type
     colour : str (optional)
-        Hex colour for border and values. Default is `Colour.TEAL`
+        Hex colour for border and values. Default is `Colour.ROSE`
     """
 
     def __init__(
-        self,
-        title: str = "Live Metrics",
-        colour: str = Colour.TEAL,
+        self, losses: Type[T], stats: Type[T2], colour: str = Colour.ROSE
     ) -> None:
-        self.title = title
+        self.title = "Live Metrics"
         self.colour = colour
-        self.metrics: Dict[str, float] = {}
+        self.losses: T = losses()
+        self.stats: T2 = stats()
 
-    def update(self, metrics: Dict[str, float]) -> None:
+    def update_losses(self, **kwargs) -> None:
         """
-        Update metric values.
+        Update loss values.
 
         Parameters
         ----------
-        metrics : Dict[str, float]
-            Mapping of metric names to values
+        **kwargs : Dict[str, Any]
+            Keyword arguments for the loss dataclass
         """
-        self.metrics.update(metrics)
+        for key, value in kwargs.items():
+            setattr(self.losses, key, value)
 
-    def render(self) -> Panel:
+    def update_stats(self, **kwargs) -> None:
+        """
+        Update statistical values.
+
+        Parameters
+        ----------
+        **kwargs : Dict[str, Any]
+            Keyword arguments for the stats dataclass
+        """
+        for key, value in kwargs.items():
+            setattr(self.stats, key, value)
+
+    def _build_column(self, title: str, metrics: T | T2) -> Table:
+        """
+        Build a single column table.
+
+        Parameters
+        ----------
+        title : str
+            Title of the column
+        metrics : T | T2
+            A dataclass instance containing metrics
+        """
         table = Table.grid(padding=(0, 1))
         table.add_column(justify="right", style="bold white")
         table.add_column(justify="left", style=self.colour)
 
-        if not self.metrics:
-            table.add_row("[dim]Waiting for data...[/dim]", "")
-        else:
-            for name, value in self.metrics.items():
-                if isinstance(value, float):
-                    formatted = f"{value:.4f}" if abs(value) < 100 else f"{value:.2f}"
-                else:
-                    formatted = str(value)
-                table.add_row(f"{name}:", formatted)
+        # Header
+        table.add_row(f"[bold {self.colour}]{title}[/bold {self.colour}]", "")
+
+        # Values
+        for name, value in vars(metrics).items():
+            if isinstance(value, float):
+                formatted = f"{value:.4f}" if abs(value) < 100 else f"{value:.2f}"
+            else:
+                formatted = str(value)
+
+            table.add_row(f"{name}:", formatted)
+
+        return table
+
+    def render(self) -> Panel:
+        grid = Table.grid(padding=(0, 2))
+        grid.add_column(ratio=1)
+        grid.add_column(ratio=1)
+
+        losses_col = self._build_column("Losses", self.losses)
+        stats_col = self._build_column("Stats", self.stats)
+        grid.add_row(losses_col, stats_col)
 
         return Panel(
-            table,
+            grid,
             title=f"[bold {self.colour}]{self.title}[/bold {self.colour}]",
             border_style=self.colour,
             padding=(0, 1),

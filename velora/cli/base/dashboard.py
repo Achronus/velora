@@ -19,7 +19,12 @@ from rich.console import Console, Group
 from rich.live import Live
 from rich.panel import Panel
 
-from velora.cli.base.component import Component, ProgressCard, TitleCard
+from velora.cli.base.component import (
+    Component,
+    LiveMetricsCard,
+    ProgressCard,
+    TitleCard,
+)
 from velora.cli.base.constant import Colour
 
 
@@ -34,7 +39,9 @@ class ConsoleDashboard:
     body : List[Component]
         List of body components (cards, rows, etc.)
     progress : ProgressCard (optional)
-        Optional progress card. Default is `None`
+        Optional progress card. Displayed after `live_metrics`. Default is `None`
+    live_metrics : LiveMetricsCard (optional)
+        Optional live metrics card. Displayed after `body`. Default is `None`
     """
 
     def __init__(
@@ -42,10 +49,13 @@ class ConsoleDashboard:
         title: TitleCard,
         body: List[Component],
         progress: ProgressCard | None = None,
+        live_metrics: LiveMetricsCard | None = None,
     ) -> None:
         self.title = title
         self.body = body
         self.progress = progress
+        self.live_metrics = live_metrics
+
         self.console = Console()
         self._live: Live | None = None
 
@@ -55,6 +65,9 @@ class ConsoleDashboard:
 
         for component in self.body:
             components.append(component.render())  # type: ignore
+
+        if self.live_metrics:
+            components.append(self.live_metrics.render())
 
         if self.progress:
             components.append(self.progress.render())
@@ -127,3 +140,29 @@ class ConsoleDashboard:
                 padding=(1, 2),
             )
         )
+
+    def update_losses(self, **kwargs) -> None:
+        """
+        Update live loss metrics display.
+
+        Parameters
+        ----------
+        **kwargs : Dict[str, Any]
+            Keyword arguments for the loss dataclass
+        """
+        if self.live_metrics:
+            self.live_metrics.update_losses(**kwargs)
+            self.refresh()
+
+    def update_stats(self, **kwargs) -> None:
+        """
+        Update live statistic metrics display.
+
+        Parameters
+        ----------
+        **kwargs : Dict[str, Any]
+            Keyword arguments for the stats dataclass
+        """
+        if self.live_metrics:
+            self.live_metrics.update_stats(**kwargs)
+            self.refresh()
