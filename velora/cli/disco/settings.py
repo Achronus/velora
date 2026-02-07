@@ -21,6 +21,21 @@ from velora.base.outputs import ParamCount
 
 @dataclass
 class DiscoLosses:
+    """
+    Dataclass for DiscoRL training losses.
+
+    Parameters
+    ----------
+    meta : float (optional)
+        Meta training loss. Default is `0.0`
+    policy_gradient : float (optional)
+        Policy gradient loss. Default is `0.0`
+    entropy : float (optional)
+        Entropy loss. Default is `0.0`
+    regularization : float (optional)
+        Regularization loss. Default is `0.0`
+    """
+
     meta: float = 0.0
     policy_gradient: float = 0.0
     entropy: float = 0.0
@@ -29,6 +44,21 @@ class DiscoLosses:
 
 @dataclass
 class DiscoStats:
+    """
+    Dataclass for DiscoRL training statistics.
+
+    Parameters
+    ----------
+    gradient_norm : float (optional)
+        Gradient normalization. Default is `0.0`
+    avg_reward : float (optional)
+        Average reward. Default is `0.0`
+    advantage : float (optional)
+        Advantage mean. Default is `0.0`
+    advantage_norm : float (optional)
+        Advantage normalization mean. Default is `0.0`
+    """
+
     gradient_norm: float = 0.0
     avg_reward: float = 0.0
     advantage: float = 0.0

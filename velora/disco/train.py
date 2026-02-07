@@ -23,6 +23,8 @@ import optax
 import orbax.checkpoint as ocp
 
 from velora.base.rollouts import Rollout, RolloutStack
+from velora.cli.disco.dashboard import DiscoConsoleDashboard
+from velora.cli.disco.settings import DiscoParamsSettings
 from velora.disco.agent import DiscoAgent, DiscoValueAgent, PolicyAgent
 from velora.disco.ema import MovingAverage
 from velora.disco.outputs import (
@@ -95,30 +97,30 @@ class AgentTrainer:
         self.writer_name = writer_name
         self.jit_compile = jit_compile
 
-        action_space: gym.spaces.Discrete = self.envs.single_action_space  # type: ignore
-        obs_space: gym.spaces.Box = self.envs.single_observation_space  # type: ignore
+        self.action_space: gym.spaces.Discrete = self.envs.single_action_space  # type: ignore
+        self.obs_space: gym.spaces.Box = self.envs.single_observation_space  # type: ignore
 
-        self.n_actions = action_space.n.item()
+        self.n_actions = self.action_space.n.item()
         self.key, agent_key, target_key, value_key = jax.random.split(key, 4)
 
         self.policy_agent = PolicyAgent(
-            obs_space,
-            action_space,
+            self.obs_space,
+            self.action_space,
             config=self.config.agent,
             key=agent_key,
             jit_compile=self.jit_compile,
         )
 
         self.target_agent = PolicyAgent(
-            obs_space,
-            action_space,
+            self.obs_space,
+            self.action_space,
             config=self.config.agent,
             key=target_key,
             jit_compile=self.jit_compile,
         )
 
         self.value_agent = DiscoValueAgent(
-            obs_space,
+            self.obs_space,
             self.config.agent.n_hidden,
             config=self.config.value,
             key=value_key,
@@ -139,9 +141,6 @@ class AgentTrainer:
             current_obs=current_obs,
         )
 
-        # Warm policy networks and buffer
-        self._warm(obs_space)
-
     def _create_optim(self) -> optax.GradientTransformation:
         """
         Create optimizer chain for agent and value network training.
@@ -160,20 +159,17 @@ class AgentTrainer:
             optax.scale(-self.config.agent.lr),
         )
 
-    def _warm(self, obs_space: gym.spaces.Box) -> None:
+    def warm(self) -> None:
         """
-        Performs an initial forward pass through the agent networks:
-            1. Materialize parameters before optimizer init
-            2. JIT compile
+        Performs an initial forward pass through the agent networks.
 
-        Parameters
-        ----------
-        obs_space : gym.spaces.Box
-            The environment observation space
+        Includes -
+            1. Materializing parameters before optimizer init
+            2. JIT compile
         """
         dummy_obs = jnp.zeros(
-            (self.config.num_vec_envs, *obs_space.shape),
-            dtype=obs_space.dtype,
+            (self.config.num_vec_envs, *self.obs_space.shape),
+            dtype=self.obs_space.dtype,
         )
         _ = self.policy_agent(dummy_obs)
         _ = self.target_agent(dummy_obs)
@@ -442,8 +438,6 @@ class RuleTrainer:
         self.config = config
         self.jit_compile = jit_compile
 
-        self.current_env_idx = 0
-
         # Init logger
         self.logger = MetricsLogger(self.config.logger)
         self.logger.add_writer("meta")
@@ -489,6 +483,39 @@ class RuleTrainer:
 
         # Checkpointing
         self.cp_manager = CheckpointManager(self.config.checkpoint)
+
+        # Init console dashboard
+        self.console = DiscoConsoleDashboard(
+            self.config.console_config(
+                envs={},
+                params=DiscoParamsSettings(
+                    policy=self.trainers[0].policy_agent.param_count,
+                    value=self.trainers[0].value_agent.param_count,
+                    disco=self.meta_agent.param_count,
+                ),
+            )
+        )
+
+        # Compile
+        if self.jit_compile:
+            self.console.start_compile()
+            self.warm()
+            self.console.finish_compile()
+
+    def warm(self) -> None:
+        """
+        Performs an initial forward pass through all agent networks and trainers.
+
+        Includes -
+            1. Materializing parameters before optimizer init
+            2. JIT compile
+        """
+        dummy_rollout = self.trainers[0].collect()
+
+        _ = self.meta_agent(dummy_rollout)
+
+        for trainer in self.trainers:
+            trainer.warm()
 
     def train(self) -> None:
         """

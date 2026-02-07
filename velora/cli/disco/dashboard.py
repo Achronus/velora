@@ -128,6 +128,15 @@ class DiscoConsoleDashboard(ConsoleDashboard):
         """
         total_steps = number_to_short(self.config.total_steps())
 
+        active_params = number_to_short(
+            self.params.policy.active
+            + self.params.value.active
+            + self.params.disco.active
+        )
+        total_params = number_to_short(
+            self.params.policy.total + self.params.value.total + self.params.disco.total
+        )
+
         return MetricCard(
             title="Agent Stats",
             metrics=[
@@ -137,6 +146,8 @@ class DiscoConsoleDashboard(ConsoleDashboard):
                 Metric("Policy", str(self.params.policy)),
                 Metric("Value", str(self.params.value)),
                 Metric("Disco", str(self.params.disco)),
+                Divider(),
+                Metric("Total Params", f"{active_params}/{total_params}"),
             ],
             colour=Colour.LAVENDER,
         )
