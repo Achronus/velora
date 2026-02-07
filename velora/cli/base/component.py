@@ -85,7 +85,7 @@ class Divider:
         Style of the divider. Default is `dim`
     """
 
-    style: str = ""
+    style: str = "dim"
 
     def render(self) -> Rule:
         """Render the divider."""
@@ -95,10 +95,23 @@ class Divider:
 class Component(ABC):
     """Base for console components."""
 
+    height: int | None = None
+
     @abstractmethod
     def render(self) -> RenderableType:
         """Render the component."""
         pass
+
+    def get_content_height(self) -> int:
+        """
+        Calculate the natural height of the component.
+
+        Returns
+        -------
+        height : int
+            Content height in lines. Default is `0`
+        """
+        return 0
 
 
 class ProgressComponent(Component, ABC):
@@ -244,7 +257,7 @@ class TitleCard(Component):
         self.logo = VELORA_LOGO.format(colour=Colour.SKY)
 
     def render(self) -> Panel:
-        subtitle_line = f"\n[dim]─── [bold {self.subtitle_colour}]{self.subtitle}[/bold {self.subtitle_colour}] ───[/dim]"
+        subtitle_line = f"\n[dim]───[/dim] [bold {self.subtitle_colour}]{self.subtitle}[/bold {self.subtitle_colour}] [dim]───[/dim]"
 
         content = Text.from_markup(self.logo + subtitle_line)
         content.justify = "center"
@@ -266,16 +279,19 @@ class LiveMonitoringCard(Component):
         Directory for Tensorboard logs
     checkpoint_dir : Path | str
         Directory for checkpoints
+    colour : str (optional)
+        Border and command/directory colour. Default is `Colour.AMBER`
     """
 
     def __init__(
         self,
         log_dir: Path | str,
         checkpoint_dir: Path | str,
+        colour: str = Colour.AMBER,
     ) -> None:
         self.log_dir = Path(log_dir)
         self.checkpoint_dir = Path(checkpoint_dir)
-        self.border_colour = Colour.AMBER
+        self.colour = colour
 
     def render(self) -> Panel:
         content = Table.grid(padding=(0, 2))
@@ -285,20 +301,20 @@ class LiveMonitoringCard(Component):
             "[bold white]📊 Tensorboard[/bold white] [dim](run in separate terminal):[/dim]",
         )
         content.add_row(
-            f"   [{Colour.PERIWINKLE}]`tensorboard --logdir={self.log_dir}`[/{Colour.PERIWINKLE}]",
+            f"   [{self.colour}]`tensorboard --logdir={self.log_dir}`[/{self.colour}]",
         )
         content.add_row("")
         content.add_row(
             "[bold white]📁 Checkpoints[/bold white] [dim](saved to):[/dim]",
         )
         content.add_row(
-            f"   [{Colour.PERIWINKLE}]`{self.checkpoint_dir}`[/{Colour.PERIWINKLE}]",
+            f"   [{self.colour}]`{self.checkpoint_dir}`[/{self.colour}]",
         )
 
         return Panel(
             content,
-            title=f"[bold {self.border_colour}]Live Monitoring[/bold {self.border_colour}]",
-            border_style=self.border_colour,
+            title=f"[bold {self.colour}]Live Monitoring[/bold {self.colour}]",
+            border_style=self.colour,
             padding=(1, 2),
         )
 
@@ -315,6 +331,8 @@ class MetricCard(Component):
         List of metrics and separators to display
     colour : str (optional)
         Hex colour for border and metric values. Default is `Colour.LAVENDER`
+    height : int | None (optional)
+        Fixed height for the card. Default is `None` (auto)
     """
 
     def __init__(
@@ -322,15 +340,36 @@ class MetricCard(Component):
         title: str,
         metrics: List[Metric | Divider],
         colour: str = Colour.LAVENDER,
+        height: int | None = None,
     ) -> None:
         self.title = title
         self.metrics = metrics
         self.colour = colour
+        self.height = height
+
+    def get_content_height(self) -> int:
+        """
+        Calculate the natural height of the card.
+
+        Returns
+        -------
+        height : int
+            Content height in lines
+        """
+        # Each metric row: 1 line content + 1 line top padding
+        rows = len(self.metrics) * 2
+        # Panel: 2 lines (top/bottom border) + 1 line bottom padding
+        return rows + 3
 
     def render(self) -> Panel:
-        table = Table.grid(padding=(0, 1))
-        table.add_column(justify="right", style="bold white")
-        table.add_column(justify="left", style=self.colour)
+        table = Table.grid(
+            padding=(1, 1, 0, 1),
+            expand=True,
+            pad_edge=True,
+            collapse_padding=False,
+        )
+        table.add_column(justify="left", style="bold white")
+        table.add_column(justify="right", style=self.colour)
 
         for metric in self.metrics:
             if isinstance(metric, Divider):
@@ -344,7 +383,8 @@ class MetricCard(Component):
             table,
             title=f"[bold {self.colour}]{self.title}[/bold {self.colour}]",
             border_style=self.colour,
-            padding=(0, 1),
+            padding=(0, 1, 1, 0),
+            height=self.height,
         )
 
 
@@ -396,19 +436,39 @@ class CardRow(Component):
     ----------
     cards : List[Component]
         List of cards (1-3) to display in a row
+    match_height : bool (optional)
+        Whether to match heights of all cards to the tallest. Default is `True`
     """
 
-    def __init__(self, cards: List[Component]) -> None:
+    def __init__(
+        self,
+        cards: List[Component],
+        match_height: bool = True,
+    ) -> None:
         if not 1 <= len(cards) <= 3:
             raise ValueError(f"'cards={len(cards)}' must be 1-3 cards")
 
         self.cards = cards
+        self.match_height = match_height
+
+    def _sync_heights(self) -> None:
+        """Set all cards to the height of the tallest card."""
+        heights = [card.get_content_height() for card in self.cards]
+
+        if heights:
+            max_height = max(heights)
+
+            for card in self.cards:
+                card.height = max_height
 
     def render(self) -> Table:
-        table = Table.grid(expand=True)
+        if self.match_height:
+            self._sync_heights()
+
+        table = Table.grid(expand=True, padding=(0, 1))
 
         for _ in self.cards:
-            table.add_column(ratio=1)
+            table.add_column(ratio=1, vertical="top")
 
         rendered_cards = [card.render() for card in self.cards]
         table.add_row(*rendered_cards)
@@ -538,5 +598,5 @@ class CompileCard(ProgressComponent):
         return Panel(
             content,
             border_style=self.complete_colour,
-            padding=(0, 1),
+            padding=(1, 1),
         )

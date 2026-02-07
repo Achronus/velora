@@ -43,6 +43,8 @@ class ConsoleDashboard:
         Optional live metrics card. Displayed after `body`/`progress`. Default is `None`
     compile : CompileCard (optional)
         Optional compile card. Displayed after `body`. Default is `None`
+    width : int (optional)
+        Maximum width of the dashboard. Default is `120`
     """
 
     def __init__(
@@ -52,6 +54,7 @@ class ConsoleDashboard:
         progress: ProgressCard | None = None,
         live_metrics: LiveMetricsCard | None = None,
         compile: CompileCard | None = None,
+        width: int = 120,
     ) -> None:
         self.title = title
         self.body = body
@@ -62,7 +65,7 @@ class ConsoleDashboard:
         self._is_compiling = False
         self._is_training = False
 
-        self.console = Console()
+        self.console = Console(width=width)
         self._live: Live | None = None
 
     def start_compile(self) -> None:

@@ -15,14 +15,11 @@
 
 from enum import StrEnum
 
-VELORA_LOGO = """
-[bold {colour}]
-__     __   _
+VELORA_LOGO = """[bold {colour}]
 \\ \\   / /__| | ___  _ __ __ _
  \\ \\ / / _ \\ |/ _ \\| '__/ _` |
   \\ V /  __/ | (_) | | | (_| |
-   \\_/ \\___|_|\\___/|_|  \\__,_|
-[/bold {colour}]
+   \\_/ \\___|_|\\___/|_|  \\__,_|[/bold {colour}]
 """
 
 
