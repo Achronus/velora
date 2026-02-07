@@ -36,3 +36,6 @@ class Colour(StrEnum):
     MINT = "#98c379"
     ROSE = "#e0a3c2"
     TEAL = "#7ec8c8"
+    CORAL = "#f5a97f"
+    SLATE = "#b4bdc9"
+    CRIMSON = "#f5a3a3"

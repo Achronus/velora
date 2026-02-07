@@ -101,6 +101,131 @@ class Component(ABC):
         pass
 
 
+class ProgressComponent(Component, ABC):
+    """
+    Base for progress-based components with completion states.
+
+    Parameters
+    ----------
+    title : str
+        Panel title displayed during progress
+    description : str
+        Progress bar description text
+    colour : str
+        Hex colour for border, spinner, and label
+    complete_colour : str
+        Hex colour for completion state
+    total : int (optional)
+        Total steps for determinate progress, or `None` for indeterminate. Default is `None`
+    """
+
+    def __init__(
+        self,
+        title: str,
+        description: str,
+        colour: str,
+        complete_colour: str,
+        total: int | None = None,
+    ) -> None:
+        self.title = title
+        self.description = description
+        self.colour = colour
+        self.complete_colour = complete_colour
+        self.total = total
+
+        self._is_complete = False
+        self._elapsed: float | None = None
+
+        self.progress = self._create_progress()
+        self.task_id: TaskID | None = None
+
+    def _create_progress(self) -> Progress:
+        """
+        Create the progress bar.
+
+        Returns
+        -------
+        bar : Progress
+            An auto-updating progress bar
+        """
+        columns = [
+            SpinnerColumn(style=self.colour),
+            TextColumn(f"[bold {self.colour}]{{task.description}}"),
+            BarColumn(bar_width=40),
+            MofNCompleteColumn(),
+            TextColumn("•"),
+            TimeElapsedColumn(),
+            TextColumn("•"),
+            TimeRemainingColumn(),
+        ]
+        return Progress(*columns, expand=True)
+
+    def start(self) -> None:
+        """Start the progress tracker."""
+        self.task_id = self.progress.add_task(
+            self.description,
+            total=self.total,
+        )
+
+    def update(self, advance: int = 1) -> None:
+        """
+        Advance the progress bar.
+
+        Parameters
+        ----------
+        advance : int (optional)
+            Advancement progress count. Default is `1`
+        """
+        if self.task_id is not None:
+            self.progress.update(self.task_id, advance=advance)
+
+    def complete(self, elapsed: float) -> None:
+        """
+        Mark as complete.
+
+        Parameters
+        ----------
+        elapsed : float
+            Time taken to complete
+        """
+        self._is_complete = True
+        self._elapsed = elapsed
+
+    @abstractmethod
+    def _render_complete(self) -> Panel:
+        """
+        Render the completion state.
+
+        Returns
+        -------
+        panel : Panel
+            Completion panel
+        """
+        pass
+
+    def _render_in_progress(self) -> Panel:
+        """
+        Render the in-progress state.
+
+        Returns
+        -------
+        panel : Panel
+            In progress panel
+        """
+        return Panel(
+            self.progress,
+            title=f"[bold {self.colour}]{self.title}[/bold {self.colour}]",
+            border_style=self.colour,
+            padding=(1, 2),
+        )
+
+    def render(self) -> Panel:
+        if self._is_complete:
+            return self._render_complete()
+
+        return self._render_in_progress()
+
+
 class TitleCard(Component):
     """
     Title card with Velora logo and dynamic subtitle.
@@ -223,7 +348,7 @@ class MetricCard(Component):
         )
 
 
-class ProgressCard(Component):
+class ProgressCard(ProgressComponent):
     """
     Training progress bar card.
 
@@ -233,8 +358,10 @@ class ProgressCard(Component):
         Progress bar caption
     total : int
         Total number of steps
-    colour : str
+    colour : str (optional)
         Hex colour for border, spinner, and label. Default is `Colour.TEAL`
+    complete_colour : str (optional)
+        Hex colour for completion state. Default is `Colour.MINT`
     """
 
     def __init__(
@@ -242,46 +369,22 @@ class ProgressCard(Component):
         description: str,
         total: int,
         colour: str = Colour.TEAL,
+        complete_colour: str = Colour.MINT,
     ) -> None:
-        self.description = description
-        self.total = total
-        self.colour = colour
-
-        self.progress = Progress(
-            SpinnerColumn(style=colour),
-            TextColumn(f"[bold {colour}]{{task.description}}"),
-            BarColumn(bar_width=40),
-            MofNCompleteColumn(),
-            TextColumn("•"),
-            TimeElapsedColumn(),
-            TextColumn("•"),
-            TimeRemainingColumn(),
-            expand=True,
+        super().__init__(
+            title="Training Progress",
+            description=description,
+            colour=colour,
+            complete_colour=complete_colour,
+            total=total,
         )
-        self.task_id: TaskID | None = None
 
-    def start(self) -> None:
-        """Start the progress tracker."""
-        self.task_id = self.progress.add_task(self.description, total=self.total)
-
-    def update(self, advance: int = 1) -> None:
-        """
-        Advance the progress bar.
-
-        Parameters
-        ----------
-        advance : int (optional)
-            Advancement progress count. Default is `1`
-        """
-        if self.task_id is not None:
-            self.progress.update(self.task_id, advance=advance)
-
-    def render(self) -> Panel:
+    def _render_complete(self) -> Panel:
+        content = f"[bold {self.complete_colour}]✓ Training Complete[/bold {self.complete_colour}] [dim]({self.total:,} steps in {self._elapsed:.12}s)[/dim]"
         return Panel(
-            self.progress,
-            title=f"[bold {self.colour}]Training Progress[/bold {self.colour}]",
-            border_style=self.colour,
-            padding=(1, 2),
+            content,
+            border_style=self.complete_colour,
+            padding=(0, 1),
         )
 
 
@@ -401,5 +504,39 @@ class LiveMetricsCard(Generic[T, T2], Component):
             grid,
             title=f"[bold {self.colour}]{self.title}[/bold {self.colour}]",
             border_style=self.colour,
+            padding=(0, 1),
+        )
+
+
+class CompileCard(ProgressComponent):
+    """
+    Compile progress card with spinner that transitions to complete state.
+
+    Parameters
+    ----------
+    colour : str (optional)
+        Card progress colour. Default is `Colour.SLATE`
+    complete_colour : str (optional)
+        Card completion colour. Default is `Colour.CRIMSON`
+    """
+
+    def __init__(
+        self,
+        colour: str = Colour.SLATE,
+        complete_colour: str = Colour.CRIMSON,
+    ) -> None:
+        super().__init__(
+            title="Compilation",
+            description="Compiling",
+            colour=colour,
+            complete_colour=complete_colour,
+            total=None,
+        )
+
+    def _render_complete(self) -> Panel:
+        content = f"[bold {self.complete_colour}]✓ Compiled[/bold {self.complete_colour}] [dim]({self._elapsed:.2f}s)[/dim]"
+        return Panel(
+            content,
+            border_style=self.complete_colour,
             padding=(0, 1),
         )
