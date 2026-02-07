@@ -30,6 +30,7 @@ from rich.progress import (
     TimeElapsedColumn,
     TimeRemainingColumn,
 )
+from rich.rule import Rule
 from rich.table import Table
 from rich.text import Text
 
@@ -48,10 +49,13 @@ class Metric:
         The name of the metric
     value : str | int | float
         The metric value
+    separator : str (optional)
+        Separator between label and value. Default is `:`
     """
 
     label: str
     value: str | int | float
+    separator: str = ":"
 
     def format_value(self) -> str:
         """Format the value for display."""
@@ -68,24 +72,21 @@ class Metric:
 
 
 @dataclass
-class Separator:
+class Divider:
     """
-    Text separator.
+    Horizontal divider.
 
     Parameters
     ----------
-    colour : str (optional)
-        Colour of the separator. Default is `dim`
-    size : int (optional)
-        Length of the separator. Default is `20`
+    style : str (optional)
+        Style of the divider. Default is `dim`
     """
 
-    size: int = 20
-    colour: str = ""
+    style: str = ""
 
-    @property
-    def value(self) -> str:
-        return f"[dim {self.colour}]{'-' * self.size}[/dim]"
+    def render(self) -> Rule:
+        """Render the divider."""
+        return Rule(style=self.style)
 
 
 class Component(ABC):
@@ -156,14 +157,14 @@ class LiveMonitoringCard(Component):
             "[bold white]📊 Tensorboard[/bold white] [dim](run in separate terminal):[/dim]",
         )
         content.add_row(
-            f"   [{Colour.MINT}]`tensorboard --logdir={self.log_dir}`[/{Colour.MINT}]",
+            f"   [{Colour.PERIWINKLE}]`tensorboard --logdir={self.log_dir}`[/{Colour.PERIWINKLE}]",
         )
         content.add_row("")
         content.add_row(
             "[bold white]📁 Checkpoints[/bold white] [dim](saved to):[/dim]",
         )
         content.add_row(
-            f"   [{Colour.MINT}]`{self.checkpoint_dir}`[/{Colour.MINT}]",
+            f"   [{Colour.PERIWINKLE}]`{self.checkpoint_dir}`[/{Colour.PERIWINKLE}]",
         )
 
         return Panel(
@@ -191,7 +192,7 @@ class MetricCard(Component):
     def __init__(
         self,
         title: str,
-        metrics: List[Metric | Separator],
+        metrics: List[Metric | Divider],
         colour: str = Colour.LAVENDER,
     ) -> None:
         self.title = title
@@ -204,10 +205,12 @@ class MetricCard(Component):
         table.add_column(justify="left", style=self.colour)
 
         for metric in self.metrics:
-            if isinstance(metric, Separator):
-                table.add_row(metric.value)
+            if isinstance(metric, Divider):
+                table.add_row(metric.render())
             else:
-                table.add_row(f"{metric.label}:", metric.format_value())
+                table.add_row(
+                    f"{metric.label}{metric.separator}", metric.format_value()
+                )
 
         return Panel(
             table,
