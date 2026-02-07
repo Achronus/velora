@@ -83,19 +83,12 @@ class ConsoleDashboard:
         )
         self._live.start()
 
-    def finish_compile(self, elapsed: float) -> None:
-        """
-        Mark compilation complete and show elapsed time.
-
-        Parameters
-        ----------
-        elapsed : float
-            Time taken to compile
-        """
+    def finish_compile(self) -> None:
+        """Mark compilation complete."""
         self._is_compiling = False
 
         if self.compile:
-            self.compile.complete(elapsed)
+            self.compile.complete()
 
         self.refresh()
 
@@ -108,19 +101,12 @@ class ConsoleDashboard:
 
         self.refresh()
 
-    def finish_training(self, elapsed: float) -> None:
-        """
-        Mark training complete and show elapsed time.
-
-        Parameters
-        ----------
-        elapsed : float
-            Time taken to train
-        """
+    def finish_training(self) -> None:
+        """Mark training complete."""
         self._is_training = False
 
         if self.progress:
-            self.progress.complete(elapsed)
+            self.progress.complete()
 
         self.refresh()
 

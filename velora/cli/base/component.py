@@ -13,6 +13,7 @@
 # limitations under the License.
 # ==============================================================================
 
+import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
@@ -148,6 +149,7 @@ class ProgressComponent(Component, ABC):
 
         self._is_complete = False
         self._elapsed: float | None = None
+        self._start_time: float | None = None
 
         self.progress = self._create_progress()
         self.task_id: TaskID | None = None
@@ -175,6 +177,7 @@ class ProgressComponent(Component, ABC):
 
     def start(self) -> None:
         """Start the progress tracker."""
+        self._start_time = time.perf_counter()
         self.task_id = self.progress.add_task(
             self.description,
             total=self.total,
@@ -192,17 +195,12 @@ class ProgressComponent(Component, ABC):
         if self.task_id is not None:
             self.progress.update(self.task_id, advance=advance)
 
-    def complete(self, elapsed: float) -> None:
-        """
-        Mark as complete.
-
-        Parameters
-        ----------
-        elapsed : float
-            Time taken to complete
-        """
+    def complete(self) -> None:
+        """Mark as complete."""
         self._is_complete = True
-        self._elapsed = elapsed
+
+        if self._start_time is not None:
+            self._elapsed = time.perf_counter() - self._start_time
 
     @abstractmethod
     def _render_complete(self) -> Panel:
