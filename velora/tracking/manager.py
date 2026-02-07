@@ -36,19 +36,12 @@ class CheckpointManager:
 
     Parameters
     ----------
-    name : str
-        Name of the sub-directory in `config.dirpath`
     config : CheckpointSettings
         Configuration settings for the manager
     """
 
-    def __init__(
-        self,
-        name: str,
-        *,
-        config: CheckpointSettings,
-    ) -> None:
-        self.cp_dir = Path(config.dirpath, name).resolve()
+    def __init__(self, config: CheckpointSettings) -> None:
+        self.cp_dir = config.dirpath
         self.config = config
 
         self.cp_dir.mkdir(parents=True, exist_ok=True)

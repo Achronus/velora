@@ -488,10 +488,7 @@ class RuleTrainer:
         ]
 
         # Checkpointing
-        self.cp_manager = CheckpointManager(
-            "rule_trainer",
-            config=self.config.checkpoint,
-        )
+        self.cp_manager = CheckpointManager(self.config.checkpoint)
 
     def train(self) -> None:
         """

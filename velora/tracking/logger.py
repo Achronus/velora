@@ -14,13 +14,11 @@
 # ==============================================================================
 
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
 from typing import Dict
 
 from tensorboardX import SummaryWriter
 
 from velora.tracking.settings import MetricLoggerSettings
-from velora.utils.format import create_directory
 
 
 class MetricsLogger:
@@ -40,7 +38,7 @@ class MetricsLogger:
 
     Examples
     --------
-    >>> logger = MetricsLogger("logs", "disco")
+    >>> logger = MetricsLogger(MetricLoggerSettings())
     >>> logger.add_writer("meta")
     >>> logger.add_writer("envs/Pong")
     >>> logger.add_writer("envs/Breakout")
@@ -52,11 +50,9 @@ class MetricsLogger:
     def __init__(self, config: MetricLoggerSettings) -> None:
         self.config = config
 
-        self.root_dir = self._create_log_dir(
-            self.config.base_dir,
-            self.config.experiment_name,
-            self.config.timestamp,
-        )
+        self.root_dir = self.config.dirpath
+        self.root_dir.mkdir(parents=True, exist_ok=True)
+
         self.writers: Dict[str, SummaryWriter] = {}
         self.executor = ThreadPoolExecutor(max_workers=1)
 
@@ -106,34 +102,6 @@ class MetricsLogger:
             )
 
         self.executor.submit(self._write, writer_name, step, metrics)
-
-    @staticmethod
-    def _create_log_dir(
-        base_dir: str | Path = "logs",
-        experiment_name: str = "disco",
-        timestamp: bool = True,
-    ) -> Path:
-        """
-        Creates the experiment log directory.
-
-        Parameters
-        ----------
-        base_dir : str | Path (optional)
-            Root directory for all experiments. Default is `logs`
-        experiment_name : str (optional)
-            Name of experiment. Default is `disco`
-        timestamp : bool (optional)
-            Whether to append timestamps to experiment directory.
-            Uses timestamp format: `ddmmyy_hhmmss`. Default is `True`
-
-        Returns
-        -------
-        log_dir : Path
-            Path to experiment log directory. E.g., `logs/disco_250126_174222/`
-        """
-        log_dir = create_directory(base_dir, experiment_name, timestamp)
-        log_dir.mkdir(parents=True, exist_ok=True)
-        return log_dir
 
     def _write(self, writer_name: str, step: int, metrics: dict) -> None:
         """

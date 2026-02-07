@@ -17,6 +17,8 @@ from pathlib import Path
 
 from flax import struct
 
+from velora.utils.format import create_directory
+
 
 @struct.dataclass(frozen=True)
 class CheckpointSettings:
@@ -25,18 +27,26 @@ class CheckpointSettings:
 
     Parameters
     ----------
-    dirpath : Path | str (optional)
+    base_dir : Path | str (optional)
         Directory for saving agent states and checkpoints.
         Default is `checkpoints`
+    name : str (optional)
+        Name of the checkpoint sub-directory in `base_dir`. Default is `rule_trainer`
     freq : int (optional)
         Checkpoint save frequency between timesteps. Default is `100_000`
     max : int (optional)
         Maximum number of checkpoints to store. Default is `100`
     """
 
-    dirpath: Path | str = "checkpoints"
+    base_dir: Path | str = "checkpoints"
+    name: str = "rule_trainer"
     freq: int = 100_000
     max: int = 100
+
+    @property
+    def dirpath(self) -> Path:
+        """Get directory path. Format: `./[base_dir]/[name]`."""
+        return Path(self.base_dir, self.name).resolve()
 
 
 @struct.dataclass(frozen=True)
@@ -49,8 +59,8 @@ class MetricLoggerSettings:
 
     Parameters
     ----------
-    base_dir : Path (optional)
-        Root directory for Tensorboard experiment logs. Default is `./logs`
+    base_dir : Path | str (optional)
+        Root directory for Tensorboard experiment logs. Default is `logs`
     experiment_name : str (optional)
         Sub-directory name for Tensorboard experiment logs.
         Get's combined with `base_dir`. Default is `disco`.
@@ -59,6 +69,15 @@ class MetricLoggerSettings:
         Uses timestamp format: `ddmmyy_hhmmss`. Default is `True`
     """
 
-    base_dir: Path = Path("logs")
+    base_dir: Path | str = "logs"
     experiment_name: str = "disco"
     timestamp: bool = True
+
+    @property
+    def dirpath(self) -> Path:
+        """
+        Get directory path. Format:
+        - `timestamp=True` - `./[base_dir]/[experiment_name]_[timestamp]`
+        - `timestamp=False` - `./[base_dir]/[experiment_name]`
+        """
+        return create_directory(self.base_dir, self.experiment_name, self.timestamp)
