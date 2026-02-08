@@ -17,12 +17,7 @@ from dataclasses import dataclass, field
 from importlib.util import find_spec
 from typing import Callable, Dict, Iterator, List, Tuple, Union
 
-from velora.gym.make import (
-    make_atari_env,
-    make_craftium_env,
-    make_dmlab_env,
-    make_procgen_env,
-)
+from velora.gym.make import make_atari_env, make_dmlab_env, make_procgen_env
 from velora.gym.wrappers import JaxConversion
 
 MakeFn = Callable[..., JaxConversion]
@@ -349,40 +344,6 @@ class DMLabEnvs(EnvGroup):
         return env
 
 
-@dataclass
-class CraftiumEnvs(EnvGroup):
-    """
-    [Craftium](https://craftium.readthedocs.io/en/latest/) - Minecraft-like voxel world environments.
-
-    6 Luanti-based (formerly Minetest) 3D environments.
-    """
-
-    prefix: str = "Craftium"
-    category: str = "Craftium"
-    version: str = "v0"
-    required_packages: List[str] = field(default_factory=lambda: ["craftium"])
-    envs: List[str] = field(
-        default_factory=lambda: [
-            "ChopTree",
-            "Room",
-            "SmallRoom",
-            "Speleo",
-            "SpidersAttack",
-            "OpenWorld",
-        ]
-    )
-
-    @property
-    def make_fn(self) -> MakeFn:
-        """Factory function for creating Craftium environments."""
-        return make_craftium_env
-
-    def get_name(self, env: str, version: str | None = None) -> str:
-        """Get full name: Craftium-{env}-v0"""
-        ver = version if version is not None else self.version
-        return f"{self.prefix}-{env}-{ver}"
-
-
 class EnvSet:
     """
     A collection of environment groups for training across multiple suites.
@@ -480,6 +441,5 @@ class EnvSet:
 ATARI = AtariEnvs()
 PROCGEN = ProcgenEnvs()
 DMLAB = DMLabEnvs()
-CRAFTIUM = CraftiumEnvs()
 
-DISCRETE_123 = EnvSet(ATARI, PROCGEN, DMLAB, CRAFTIUM)
+DISCRETE_103 = EnvSet(ATARI, PROCGEN, DMLAB)
