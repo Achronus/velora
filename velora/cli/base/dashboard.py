@@ -17,7 +17,6 @@ from typing import List
 
 from rich.console import Console, Group
 from rich.live import Live
-from rich.table import Table
 
 from velora.cli.base.component import (
     Component,
@@ -86,26 +85,11 @@ class ConsoleDashboard:
     def _build_training_display(self) -> Group:
         """Build the training section display."""
         components = []
+        if self.setup and self.setup._is_complete:
+            components.append(self.setup.render())
 
-        # If both complete, show them on the same row
-        if (
-            self.setup
-            and self.setup._is_complete
-            and self.training
-            and self.training._is_complete
-        ):
-            row = Table.grid(expand=True, padding=(0, 1))
-            row.add_column(ratio=1)
-            row.add_column(ratio=1)
-            row.add_row(self.setup.render(), self.training.render())
-            components.append(row)
-        else:
-            # Show setup complete above progress if applicable
-            if self.setup and self.setup._is_complete:
-                components.append(self.setup.render())
-
-            if self.training:
-                components.append(self.training.render())
+        if self.training:
+            components.append(self.training.render())
 
         if self.live_metrics:
             components.append(self.live_metrics.render())
