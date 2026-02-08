@@ -28,8 +28,7 @@ from flax import nnx
 
 from velora.base.outputs import ParamCount
 from velora.base.rollouts import Rollout
-from velora.disco.nn.cnn import ImageEncoder
-from velora.disco.nn.encoder import DiscoInputEncoder
+from velora.disco.nn.encoder import DiscoInputEncoder, ImageEncoder
 from velora.disco.nn.meta import DiscoNetwork
 from velora.disco.nn.policy import ACM, OCM
 from velora.disco.outputs import DiscoAgentOutput, PolicyAgentOutput
@@ -53,7 +52,7 @@ class PolicyAgent:
     Combines DiscoRL techniques with Liquid Neural Networks (LNNs).
 
     Architecture:
-        1. CNN Encoder - extracts visual features from image observations
+        1. Input Encoder - extracts visual features from image observations
         2. Observation-Conditional Model (OCM) - processes encoded features
            to produce policy logits (π) and observation-conditioned
            predictions (y)
@@ -102,20 +101,20 @@ class PolicyAgent:
 
         self.n_actions = int(self.act_spec.n)
 
-        key_cnn, key_ocm, key_acm, key_actions = jax.random.split(self.key, 4)
+        key_encoder, key_ocm, key_acm, key_actions = jax.random.split(self.key, 4)
         self.key_actions = key_actions
 
         # Categorical bins for Q-values
         self.categorical_bins = config.categorical_bins()
 
-        self._cnn = ImageEncoder(
+        self._encoder = ImageEncoder(
             obs_spec.shape[-1],
             config.n_hidden,
-            key=key_cnn,
+            key=key_encoder,
         )
 
         self._ocm = OCM(
-            self._cnn.output_dim,
+            self._encoder.output_dim,
             config.n_hidden,
             config.prediction_size,
             self.n_actions,
@@ -133,19 +132,23 @@ class PolicyAgent:
             sparsity=config.sparsity,
         )
 
-        self.cnn, self.ocm, self.acm = self._compile(jit_compile)
+        self.encoder, self.ocm, self.acm = self._compile(jit_compile)
 
     @property
     def active_params(self) -> int:
         """Get the agents active parameters."""
         return (
-            self._cnn.active_params + self._ocm.active_params + self._acm.active_params
+            self._encoder.active_params
+            + self._ocm.active_params
+            + self._acm.active_params
         )
 
     @property
     def total_params(self) -> int:
         """Get the agents total parameters."""
-        return self._cnn.total_params + self._ocm.total_params + self._acm.total_params
+        return (
+            self._encoder.total_params + self._ocm.total_params + self._acm.total_params
+        )
 
     @property
     def param_count(self) -> ParamCount:
@@ -163,17 +166,17 @@ class PolicyAgent:
 
         Returns
         -------
-        cnn : ImageEncoder
-            CNN encoder (possibly JIT-wrapped)
+        encoder : ImageEncoder
+            Input encoder (possibly JIT-wrapped)
         ocm : OCM
             Observation-Conditional Model (possibly JIT-wrapped)
         acm : ACM
             Action-Conditional Model (possibly JIT-wrapped)
         """
         if jit_compile:
-            return nnx.jit(self._cnn), nnx.jit(self._ocm), nnx.jit(self._acm)  # type: ignore
+            return nnx.jit(self._encoder), nnx.jit(self._ocm), nnx.jit(self._acm)  # type: ignore
 
-        return self._cnn, self._ocm, self._acm
+        return self._encoder, self._ocm, self._acm
 
     def __call__(
         self,
@@ -227,7 +230,7 @@ class PolicyAgent:
         """
 
         # Process images
-        encoded = self.cnn(obs)  # (B, T, F)
+        encoded = self.encoder(obs)  # (B, T, F)
 
         # OCM forward - process observations and produce embeddings
         ocm_preds, ocm_h_state = self.ocm(
@@ -283,11 +286,11 @@ class PolicyAgent:
         Returns
         -------
         params : nnx.State
-            Combined parameter states from `(cnn, ocm, acm)`
+            Combined parameter states from `(encoder, ocm, acm)`
         """
         return nnx.State(
             {
-                "cnn": nnx.state(self._cnn, nnx.Param),
+                "encoder": nnx.state(self._encoder, nnx.Param),
                 "ocm": nnx.state(self._ocm, nnx.Param),
                 "acm": nnx.state(self._acm, nnx.Param),
             }
@@ -302,7 +305,7 @@ class PolicyAgent:
         params : nnx.State
             Parameter states to apply
         """
-        nnx.update(self._cnn, params["cnn"])
+        nnx.update(self._encoder, params["encoder"])
         nnx.update(self._ocm, params["ocm"])
         nnx.update(self._acm, params["acm"])
 
@@ -334,7 +337,7 @@ class DiscoAgent:
     Combines DiscoRL techniques with Liquid Neural Networks (LNNs).
 
     Architecture:
-        - Encoder - converts buffer samples into embeddings for the Disco network
+        - Input Encoder - converts buffer samples into embeddings for the Disco network
         - Disco Network - processes embeddings backwards through time to produce learned targets `(π̂, ŷ, ẑ)` for training the policy agent
         - Meta LNN - captures learning dynamics across the agent's lifetime, providing conditioning signals that modulate target generation
         - Meta Projection - projects meta conditioning to match encoder output to inject lifetime context into target generation
@@ -685,7 +688,7 @@ class DiscoValueAgent:
     discovery.
 
     Architecture:
-        1. CNN Encoder - extracts visual features from image observations
+        1. Input Encoder - extracts visual features from image observations
         2. LNN - processes encoded features to produce
            state value estimates
 
@@ -725,33 +728,33 @@ class DiscoValueAgent:
         self.config = config
         self.key = key
 
-        key_cnn, key_value = jax.random.split(self.key, 2)
+        key_encoder, key_value = jax.random.split(self.key, 2)
 
-        self._cnn = ImageEncoder(
+        self._encoder = ImageEncoder(
             obs_spec.shape[-1],
             n_hidden,
-            key=key_cnn,
+            key=key_encoder,
         )
 
         self._net = LNN(
-            self._cnn.output_dim,
+            self._encoder.output_dim,
             n_hidden,
             out_features=1,
             key=key_value,
             sparsity=sparsity,
         )
 
-        self.cnn, self.net = self._compile(jit_compile)
+        self.encoder, self.net = self._compile(jit_compile)
 
     @property
     def active_params(self) -> int:
         """Get the agents active parameters."""
-        return self._cnn.active_params + self._net.active_params
+        return self._encoder.active_params + self._net.active_params
 
     @property
     def total_params(self) -> int:
         """Get the agents total parameters."""
-        return self._cnn.total_params + self._net.total_params
+        return self._encoder.total_params + self._net.total_params
 
     @property
     def param_count(self) -> ParamCount:
@@ -769,15 +772,15 @@ class DiscoValueAgent:
 
         Returns
         -------
-        cnn : ImageEncoder
-            CNN encoder (possibly JIT-wrapped)
+        encoder : ImageEncoder
+            Input encoder (possibly JIT-wrapped)
         net : LNN
             Value network (possibly JIT-wrapped)
         """
         if jit_compile:
-            return nnx.jit(self._cnn), nnx.jit(self._net)  # type: ignore
+            return nnx.jit(self._encoder), nnx.jit(self._net)  # type: ignore
 
-        return self._cnn, self._net
+        return self._encoder, self._net
 
     def __call__(
         self,
@@ -821,7 +824,7 @@ class DiscoValueAgent:
             Updated hidden state. Shape: `(B, HS)`
         """
         # Encode images -> (B, T, F)
-        features = self.cnn(obs)
+        features = self.encoder(obs)
 
         # Compute state-value -> (B, T, 1)
         v, h_state = self.net(
@@ -841,11 +844,11 @@ class DiscoValueAgent:
         Returns
         -------
         params : nnx.State
-            Combined parameter states from `(cnn, net)`
+            Combined parameter states from `(encoder, net)`
         """
         return nnx.State(
             {
-                "cnn": nnx.state(self._cnn, nnx.Param),
+                "encoder": nnx.state(self._encoder, nnx.Param),
                 "net": nnx.state(self._net, nnx.Param),
             }
         )
@@ -859,5 +862,5 @@ class DiscoValueAgent:
         params : nnx.State
             Parameter states to apply
         """
-        nnx.update(self._cnn, params["cnn"])
+        nnx.update(self._encoder, params["encoder"])
         nnx.update(self._net, params["net"])
