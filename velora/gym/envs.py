@@ -21,7 +21,6 @@ from velora.gym.make import (
     make_atari_env,
     make_craftium_env,
     make_dmlab_env,
-    make_miniworld_env,
     make_procgen_env,
 )
 from velora.gym.wrappers import JaxConversion
@@ -351,50 +350,6 @@ class DMLabEnvs(EnvGroup):
 
 
 @dataclass
-class MiniWorldEnvs(EnvGroup):
-    """
-    [MiniWorld](https://miniworld.farama.org/).
-
-    14 simple 3D environments for navigation and interaction.
-    """
-
-    prefix: str = "MiniWorld"
-    category: str = "MiniWorld"
-    version: str = "v0"
-    required_packages: List[str] = field(
-        default_factory=lambda: ["gymnasium", "miniworld"]
-    )
-    envs: List[str] = field(
-        default_factory=lambda: [
-            "CollectHealth",
-            "FourRooms",
-            "Hallway",
-            "Maze",
-            "OneRoom",
-            "PickupObjects",
-            "PutNext",
-            "RoomObjects",
-            "Sidewalk",
-            "Sign",
-            "ThreeRooms",
-            "TMaze",
-            "WallGap",
-            "YMaze",
-        ]
-    )
-
-    @property
-    def make_fn(self) -> MakeFn:
-        """Factory function for creating MiniWorld environments."""
-        return make_miniworld_env
-
-    def get_name(self, env: str, version: str | None = None) -> str:
-        """Get full name: MiniWorld-{env}-v0"""
-        ver = version if version is not None else self.version
-        return f"{self.prefix}-{env}-{ver}"
-
-
-@dataclass
 class CraftiumEnvs(EnvGroup):
     """
     [Craftium](https://craftium.readthedocs.io/en/latest/) - Minecraft-like voxel world environments.
@@ -525,7 +480,6 @@ class EnvSet:
 ATARI = AtariEnvs()
 PROCGEN = ProcgenEnvs()
 DMLAB = DMLabEnvs()
-MINIWORLD = MiniWorldEnvs()
 CRAFTIUM = CraftiumEnvs()
 
-DISCRETE_123 = EnvSet(ATARI, PROCGEN, DMLAB, MINIWORLD, CRAFTIUM)
+DISCRETE_123 = EnvSet(ATARI, PROCGEN, DMLAB, CRAFTIUM)

@@ -248,68 +248,6 @@ def make_dmlab_env(
     return JaxConversion(RecordEpisodeStatistics(envs))
 
 
-def make_miniworld_env(
-    name: str,
-    num_envs: int,
-    vec_mode: VectorMode = "sync",
-    render_mode: str = "rgb_array",
-    view: str = "agent",
-    **kwargs,
-) -> JaxConversion:
-    """
-    Creates a vectorized [Miniworld](https://miniworld.farama.org/) environment.
-
-    Miniworld environments output RGB images from a 3D perspective.
-
-    Applies wrappers -
-    - `gymnasium.wrappers.vector.RecordEpisodeStatistics`
-    - `velora.gym.wrappers.JaxConversion`
-
-    Parameters
-    ----------
-    name : str
-        Name of the environment (e.g., "MiniWorld-Maze-v0")
-    num_envs : int
-        The number of vectorized environments to make
-    vec_mode : Literal["sync", "async", "vector_entry_point"] (optional)
-        The type of vector environment to make. Default is `sync`
-    render_mode : str (optional)
-        The type of render mode for the environment.
-        Default is `rgb_array`
-    view : str (optional)
-        The view mode ("agent" or "top"). Default is `agent`
-    kwargs : Any (optional)
-        Additional arguments passed to `gym.make_vec()`
-
-    Returns
-    -------
-    envs : JaxConversion
-        A set of wrapped vectorized environments
-
-    Raises
-    ------
-    MissingPackageError
-        If miniworld is not installed
-    """
-    try:
-        import miniworld  # noqa: F401 - registers environments
-    except ImportError as e:
-        raise MissingPackageError(
-            "MiniWorld environments require 'miniworld'. "
-            "Install with: pip install miniworld"
-        ) from e
-
-    envs = gym.make_vec(
-        name,
-        num_envs=num_envs,
-        vectorization_mode=vec_mode,
-        render_mode=render_mode,
-        view=view,
-        **kwargs,
-    )
-    return JaxConversion(RecordEpisodeStatistics(envs))
-
-
 def make_craftium_env(
     name: str,
     num_envs: int,
