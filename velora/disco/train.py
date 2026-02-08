@@ -566,9 +566,6 @@ class RuleTrainer:
         trainer_keys : List[chex.PRNGKey]
             List of trainer random number generated keys
         """
-        dummy_rollout = self.trainers[0].collect()
-
-        _ = self.meta_agent(dummy_rollout)
         self.console.update_setup()
 
         # Create remaining trainers with progress updates
@@ -584,6 +581,9 @@ class RuleTrainer:
             )
             self.trainers.append(trainer)
             self.console.update_setup()
+
+        dummy_rollout = self.trainers[0].collect()
+        _ = self.meta_agent(dummy_rollout)
 
         # Warm all trainers
         for trainer in self.trainers:
