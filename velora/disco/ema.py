@@ -21,7 +21,7 @@ import jax
 import jax.numpy as jnp
 from flax import struct
 
-from velora.disco.settings import EMASettings
+from velora.disco.config.settings import EMASettings
 
 
 @struct.dataclass

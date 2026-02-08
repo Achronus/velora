@@ -29,6 +29,8 @@ from velora.base.rollouts import Rollout, RolloutStack
 from velora.cli.disco.dashboard import DiscoConsoleDashboard
 from velora.cli.disco.settings import DiscoParamsSettings
 from velora.disco.agent import DiscoAgent, DiscoValueAgent, PolicyAgent
+from velora.disco.config.settings import AgentTrainerSettings, RuleTrainerSettings
+from velora.disco.config.state import AgentTrainerState, CollectState, RuleTrainerState
 from velora.disco.ema import MovingAverage
 from velora.disco.outputs import (
     AgentLossAux,
@@ -38,8 +40,6 @@ from velora.disco.outputs import (
     MetaLossAux,
     ValueOutputs,
 )
-from velora.disco.settings import AgentTrainerSettings, RuleTrainerSettings
-from velora.disco.state import AgentTrainerState, CollectState, RuleTrainerState
 from velora.disco.utils.compute import compute_value_outputs
 from velora.disco.utils.loss import (
     compute_entropy_loss,

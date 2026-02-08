@@ -22,8 +22,8 @@ import jax.numpy as jnp
 import rlax
 
 if TYPE_CHECKING:
+    from velora.disco.config.settings import LossCostSettings
     from velora.disco.outputs import AgentLosses, DiscoAgentOutput
-    from velora.disco.settings import LossCostSettings
 
 
 def compute_kl_loss(

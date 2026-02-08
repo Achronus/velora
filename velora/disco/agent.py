@@ -28,16 +28,16 @@ from flax import nnx
 
 from velora.base.outputs import ParamCount
 from velora.base.rollouts import Rollout
-from velora.disco.nn.encoder import DiscoInputEncoder, ImageEncoder
-from velora.disco.nn.meta import DiscoNetwork
-from velora.disco.nn.policy import ACM, OCM
-from velora.disco.outputs import DiscoAgentOutput, PolicyAgentOutput
-from velora.disco.settings import (
+from velora.disco.config.settings import (
     DiscoAgentSettings,
     DiscoValueSettings,
     PolicyAgentSettings,
 )
-from velora.disco.state import PolicyAgentHiddenStates
+from velora.disco.config.state import PolicyAgentHiddenStates
+from velora.disco.nn.encoder import DiscoInputEncoder, ImageEncoder
+from velora.disco.nn.meta import DiscoNetwork
+from velora.disco.nn.policy import ACM, OCM
+from velora.disco.outputs import DiscoAgentOutput, PolicyAgentOutput
 from velora.lnn.ncp import LNN
 from velora.utils.format import create_directory
 from velora.utils.nn import total_parameters

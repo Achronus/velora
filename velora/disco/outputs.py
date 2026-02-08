@@ -22,8 +22,8 @@ import jax.numpy as jnp
 import optax
 from flax import struct
 
+from velora.disco.config.settings import LossCostSettings
 from velora.disco.ema import EMAState
-from velora.disco.settings import LossCostSettings
 from velora.utils.transforms import squeeze_time
 
 
