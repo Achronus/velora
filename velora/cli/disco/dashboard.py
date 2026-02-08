@@ -15,6 +15,8 @@
 
 from typing import List
 
+import jax
+
 from velora.cli.base.component import (
     CardRow,
     Divider,
@@ -69,26 +71,28 @@ class DiscoConsoleDashboard(ConsoleDashboard):
             LiveMonitoringCard(self.config.log_dir, self.config.cp_dir),
             CardRow(
                 [
-                    self._training_step_card(),
+                    self._training_card(),
                     self._environments_card(),
-                    self._disco_card(),
+                    self._agent_card(),
                 ]
             ),
         ]
 
-    def _training_step_card(self) -> MetricCard:
+    def _training_card(self) -> MetricCard:
         """
-        Create a training steps metric card.
+        Create a training details metric card.
 
         Returns
         -------
         card : MetricCard
-            Training steps card
+            Training details card
         """
         return MetricCard(
-            title="Training Steps",
+            title="Training Details",
             metrics=[
-                Metric("Steps Per Env", self.config.meta_steps),
+                Metric("Device Type", jax.default_backend().upper()),
+                Divider(),
+                Metric("Steps per Env", self.config.meta_steps),
                 Metric("Agent Updates", self.config.n_updates),
                 Metric("Trajectory Size", self.config.seq_len),
                 Metric("Batch Size", self.config.batch_size),
@@ -117,14 +121,14 @@ class DiscoConsoleDashboard(ConsoleDashboard):
             Colour.MINT,
         )
 
-    def _disco_card(self) -> MetricCard:
+    def _agent_card(self) -> MetricCard:
         """
-        Create a DiscoRL metric card.
+        Create an agent details card unique to DiscoRL.
 
         Returns
         -------
         card : MetricCard
-            DiscoRL card
+            Agent details card
         """
         total_steps = number_to_short(self.config.total_steps())
 
@@ -138,11 +142,11 @@ class DiscoConsoleDashboard(ConsoleDashboard):
         )
 
         return MetricCard(
-            title="Agent Stats",
+            title="Agent Details",
             metrics=[
                 Metric("Total Steps", total_steps),
                 Divider(),
-                Metric("Parameters", "[dim](active/total)[/dim]"),
+                Metric("Params per Agent", "[dim](active/total)[/dim]"),
                 Metric("Policy", str(self.params.policy)),
                 Metric("Value", str(self.params.value)),
                 Metric("Disco", str(self.params.disco)),

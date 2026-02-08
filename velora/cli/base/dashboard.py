@@ -38,8 +38,8 @@ class ConsoleDashboard:
         The title card component
     body : List[Component]
         List of body components (cards, rows, etc.)
-    progress : ProgressCard (optional)
-        Optional progress card. Displayed after `body`/`setup`. Default is `None`
+    training : ProgressCard (optional)
+        Optional training progress card. Displayed after `body`/`setup`. Default is `None`
     live_metrics : LiveMetricsCard (optional)
         Optional live metrics card. Displayed after `body`/`progress`. Default is `None`
     setup : SetupCard (optional)
@@ -52,14 +52,14 @@ class ConsoleDashboard:
         self,
         title: TitleCard,
         body: List[Component],
-        progress: ProgressCard | None = None,
+        training: ProgressCard | None = None,
         live_metrics: LiveMetricsCard | None = None,
         setup: SetupCard | None = None,
         width: int = 120,
     ) -> None:
         self.title = title
         self.body = body
-        self.progress = progress
+        self.training = training
         self.live_metrics = live_metrics
         self.setup = setup
 
@@ -91,21 +91,21 @@ class ConsoleDashboard:
         if (
             self.setup
             and self.setup._is_complete
-            and self.progress
-            and self.progress._is_complete
+            and self.training
+            and self.training._is_complete
         ):
             row = Table.grid(expand=True, padding=(0, 1))
             row.add_column(ratio=1)
             row.add_column(ratio=1)
-            row.add_row(self.setup.render(), self.progress.render())
+            row.add_row(self.setup.render(), self.training.render())
             components.append(row)
         else:
             # Show setup complete above progress if applicable
             if self.setup and self.setup._is_complete:
                 components.append(self.setup.render())
 
-            if self.progress:
-                components.append(self.progress.render())
+            if self.training:
+                components.append(self.training.render())
 
         if self.live_metrics:
             components.append(self.live_metrics.render())
@@ -171,8 +171,8 @@ class ConsoleDashboard:
         """Start in training mode."""
         self._is_training = True
 
-        if self.progress:
-            self.progress.start()
+        if self.training:
+            self.training.start()
 
         if self._live:
             self._live.stop()
@@ -189,8 +189,8 @@ class ConsoleDashboard:
         """Mark training complete."""
         self._is_training = False
 
-        if self.progress:
-            self.progress.complete()
+        if self.training:
+            self.training.complete()
 
         self._refresh_training()
 
@@ -198,22 +198,6 @@ class ConsoleDashboard:
         """Refresh the training display."""
         if self._live:
             self._live.update(self._build_training_display())
-
-    def start(self) -> None:
-        """Start the live display (training mode without compile)."""
-        self._is_training = True
-        self._print_static()
-
-        if self.progress:
-            self.progress.start()
-
-        self._live = Live(
-            self._build_training_display(),
-            console=self.console,
-            refresh_per_second=4,
-            transient=False,
-        )
-        self._live.start()
 
     def update_progress(self, advance: int = 1) -> None:
         """
@@ -224,8 +208,8 @@ class ConsoleDashboard:
         advance : int (optional)
             Advancement progress count. Default is `1`
         """
-        if self.progress:
-            self.progress.update(advance)
+        if self.training:
+            self.training.update(advance)
 
     def stop(self) -> None:
         """Stop the live display."""

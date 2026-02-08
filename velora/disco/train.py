@@ -493,20 +493,7 @@ class RuleTrainer:
             self.config.num_vec_envs,
             *self.meta_agent.hidden_sizes,
         )
-
-        # Init first agent for config
-        env_name, make_fn = self._env_specs[0]
-        self.trainers = [
-            AgentTrainer(
-                env_name,
-                self.config.agent_trainer_config(),
-                key=trainer_keys[0],
-                logger=self.logger,
-                writer_name=f"envs/{env_name}",
-                make_fn=make_fn,
-                jit_compile=self.jit_compile,
-            )
-        ]
+        self.trainers: List[AgentTrainer] = []
 
         # Checkpointing
         self.cp_manager = CheckpointManager(self.config.checkpoint)
@@ -515,18 +502,48 @@ class RuleTrainer:
         self.console = DiscoConsoleDashboard(
             self.config.console_config(
                 envs=envs.env_categories(),
-                params=DiscoParamsSettings(
-                    policy=self.trainers[0].policy_agent.param_count,
-                    value=self.trainers[0].value_agent.param_count,
-                    disco=self.meta_agent.param_count,
-                ),
+                params=self._dummy_params(trainer_keys[0]),
             )
         )
 
         # Initial setup
         self.console.start_setup(2 * self.num_envs)
-        self.setup(trainer_keys[1:])
+        self.setup(trainer_keys)
         self.console.finish_setup()
+
+    def _dummy_params(self, rng_key: chex.PRNGKey) -> DiscoParamsSettings:
+        """
+        Initializes a dummy set of agents to get their parameter counts.
+
+        Returns
+        -------
+        param_counts : DiscoParamsSettings
+            Parameter counts for all agents
+        """
+        config = self.config.agent_trainer_config()
+        env_name, make_fn = self._env_specs[0]
+        envs = make_fn(env_name, self.config.num_vec_envs)
+
+        policy = PolicyAgent(
+            envs.single_observation_space,  # type: ignore
+            envs.single_action_space,  # type: ignore
+            config=config.agent,
+            key=rng_key,
+        )
+
+        value = DiscoValueAgent(
+            envs.single_observation_space,  # type: ignore
+            config.agent.n_hidden,
+            config=config.value,
+            key=rng_key,
+            sparsity=config.agent.sparsity,
+        )
+
+        return DiscoParamsSettings(
+            policy=policy.param_count,
+            value=value.param_count,
+            disco=self.meta_agent.param_count,
+        )
 
     def setup(self, trainer_keys: List[chex.PRNGKey]) -> None:
         """
@@ -549,7 +566,7 @@ class RuleTrainer:
         self.console.update_setup()
 
         # Create remaining trainers with progress updates
-        for i, (env_name, make_fn) in enumerate(self._env_specs[1:]):
+        for i, (env_name, make_fn) in enumerate(self._env_specs):
             trainer = AgentTrainer(
                 env_name,
                 self.config.agent_trainer_config(),
