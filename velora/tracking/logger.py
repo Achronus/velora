@@ -119,8 +119,11 @@ class MetricsLogger:
             Mapping of metric names to scalar values
         """
         writer = self.writers[writer_name]
+
         for k, v in metrics.items():
             writer.add_scalar(k, float(v), step)
+
+        self.flush()
 
     def close(self) -> None:
         """
@@ -133,3 +136,8 @@ class MetricsLogger:
 
         for writer in self.writers.values():
             writer.close()
+
+    def flush(self) -> None:
+        """Flush all writers to disk for live TensorBoard monitoring."""
+        for writer in self.writers.values():
+            writer.flush()
