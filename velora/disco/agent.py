@@ -77,7 +77,7 @@ class PolicyAgent:
         A single observation space of the vectorized Gymnasium environment
     act_spec : gym.spaces.Discrete
         A single action space of the vectorized Gymnasium environment
-    config : AgentSettings
+    config : PolicyAgentSettings
         Configuration for the policy agent
     key : jax.random.PRNGKey
         Random number generator key

@@ -32,13 +32,16 @@ class PolicyAgentSettings:
 
     Parameters
     ----------
-    n_hidden : int
-        Number of decision nodes for policy networks (inter + command nodes)
-    prediction_size : int
-        Size of the observation/action-conditioned prediction vectors (y, z)
-    q_size : int
+    n_hidden : int (optional)
+        Number of decision nodes for policy networks (inter + command nodes).
+        Default is `64`
+    prediction_size : int (optional)
+        Size of the observation/action-conditioned prediction vectors (y, z).
+        Must match `DiscoAgent` size. Default is `128`
+    q_size : int (optional)
         Size of action-value prediction head. Controls the number of discrete bins
-        for distributional Q-values (`n_atoms`)
+        for distributional Q-values (`n_atoms`).
+        Must match `DiscoAgent` size. Default is `101`
     lr : float (optional)
         Learning rate for the agent's optimizer. Default is `0.0003`
     max_grad_norm : float (optional)
@@ -58,9 +61,9 @@ class PolicyAgentSettings:
             - Where `0.9` neurons are very sparse
     """
 
-    n_hidden: int
-    prediction_size: int
-    q_size: int
+    n_hidden: int = 64
+    prediction_size: int = 128
+    q_size: int = 101
 
     lr: float = 3e-4
     max_grad_norm: float = 1.0
@@ -191,12 +194,15 @@ class DiscoAgentSettings:
 
     Parameters
     ----------
-    n_hidden : int
-        Number of decision nodes for networks (inter + command nodes)
-    prediction_size : int
-        Size of the observation/action-conditioned prediction vectors (y, z)
-    q_size : int
-        Size of action-value prediction head
+    n_hidden : int (optional)
+        Number of decision nodes for networks (inter + command nodes).
+        Default is `128`
+    prediction_size : int (optional)
+        Size of the observation/action-conditioned prediction vectors (y, z).
+        Must match `PolicyAgent` size. Default is `128`
+    q_size : int (optional)
+        Size of action-value prediction head.
+        Must match `PolicyAgent` size. Default is `101`
     lr : float (optional)
         Learning rate for the agent's optimizer. Default is `0.0003`
     max_grad_norm : float (optional)
@@ -214,27 +220,27 @@ class DiscoAgentSettings:
 
     obs_embed_dim : int (optional)
         Manual embedding dimension for state-conditional predictions (y).
-        Only used when `dynamic_embed_dims=False`. Default is `32`
+        Only used when `dynamic_embed_dims=False`. Default is `64`
     action_embed_dim : int (optional)
         Manual embedding dimension for action-conditional inputs (z, q, pi).
-        Only used when `dynamic_embed_dims=False`. Default is `32`
+        Only used when `dynamic_embed_dims=False`. Default is `64`
     scalar_embed_dim : int (optional)
         Manual embedding dimension for scalars (rewards, discounts).
-        Only used when `dynamic_embed_dims=False`. Default is `8`
+        Only used when `dynamic_embed_dims=False`. Default is `16`
     """
 
-    n_hidden: int
-    prediction_size: int
-    q_size: int
+    n_hidden: int = 128
+    prediction_size: int = 128
+    q_size: int = 101
 
     lr: float = 3e-4
     max_grad_norm: float = 1.0
     sparsity: float = 0.5
 
     dynamic_embed_dims: bool = True
-    obs_embed_dim: int = 32
-    action_embed_dim: int = 32
-    scalar_embed_dim: int = 8
+    obs_embed_dim: int = 64
+    action_embed_dim: int = 64
+    scalar_embed_dim: int = 16
 
     def encoder_config(self) -> DiscoEncoderSettings:
         """
@@ -378,7 +384,7 @@ class AgentTrainerSettings:
 
     Parameters
     ----------
-    agent : AgentSettings
+    agent : PolicyAgentSettings
         Configuration for `PolicyAgent` architecture
     value : DiscoValueSettings
         Configuration for the Disco value function
@@ -415,10 +421,10 @@ class RuleTrainerSettings:
 
     Parameters
     ----------
-    agent : AgentSettings
-        Configuration for `PolicyAgent` architecture
-    disco_agent : DiscoAgentSettings
-        Configuration for `DiscoAgent` architecture
+    agent : PolicyAgentSettings (optional)
+        Configuration for `PolicyAgent` architecture. Default is `PolicyAgentSettings()`
+    disco_agent : DiscoAgentSettings (optional)
+        Configuration for `DiscoAgent` architecture. Default is `DiscoAgentSettings()`
     disco_value : DiscoValueSettings (optional)
         Configuration for meta-value function used in meta-gradient computation.
         Default is `DiscoValueSettings()`
@@ -449,7 +455,7 @@ class RuleTrainerSettings:
         Total number of meta-training steps. Used per environment. Default is `1_000_000`
     n_updates : int (optional)
         Number of agent updates to backpropagate through for meta-gradient
-        computation (sliding window size). Default is `20`
+        computation (sliding window size). Default is `15`
     seq_len : int (optional)
         Number of timesteps per trajectory (rollout size; `T`).
         Default is `29`
@@ -460,8 +466,8 @@ class RuleTrainerSettings:
         Soft update coefficient for target network updates. Default is `0.9`
     """
 
-    agent: PolicyAgentSettings
-    disco_agent: DiscoAgentSettings
+    agent: PolicyAgentSettings = PolicyAgentSettings()
+    disco_agent: DiscoAgentSettings = DiscoAgentSettings()
     disco_value: DiscoValueSettings = DiscoValueSettings()
     ema: EMASettings = EMASettings()
 
@@ -476,7 +482,7 @@ class RuleTrainerSettings:
     kl_reg: float = 1e-2
 
     n_steps: int = 1_000_000
-    n_updates: int = 20
+    n_updates: int = 15
     seq_len: int = 29
 
     num_vec_envs: int = 8
