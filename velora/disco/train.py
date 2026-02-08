@@ -454,6 +454,8 @@ class RuleTrainer:
         seed: int = 42,
         jit_compile: bool = False,
     ) -> None:
+        config.verify_params()
+
         if isinstance(envs, EnvGroup):
             envs = EnvSet(envs)
 

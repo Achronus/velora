@@ -488,6 +488,28 @@ class RuleTrainerSettings:
     num_vec_envs: int = 8
     tau: float = 0.9
 
+    def verify_params(self) -> None:
+        """
+        Verifies policy agent and disco agent parameters are identical where needed.
+
+        Raises
+        ------
+        invalid : ValueError
+            When `PolicyAgentSettings` and `DiscoAgentSettings` have mismatches of: `prediction_size` or `q_size`.
+        """
+        pred_valid = self.agent.prediction_size == self.disco_agent.prediction_size
+        q_valid = self.agent.q_size == self.disco_agent.q_size
+
+        if not pred_valid:
+            raise ValueError(
+                f"'agent.prediction_size' and 'disco_agent.prediction_size' must match. Got: (agent={self.agent.prediction_size}, disco={self.disco_agent.prediction_size})"
+            )
+
+        if not q_valid:
+            raise ValueError(
+                f"'agent.q_size' and 'disco_agent.q_size' must match. Got: (agent={self.agent.q_size}, disco={self.disco_agent.q_size})"
+            )
+
     def agent_trainer_config(self) -> AgentTrainerSettings:
         """
         Sets the configuration for the `AgentTrainer`.
