@@ -37,7 +37,12 @@ from rich.table import Table
 from rich.text import Text
 
 from velora.cli.base.constant import VELORA_LOGO, Colour
-from velora.utils.format import field_to_title, format_duration, number_to_short
+from velora.utils.format import (
+    field_to_title,
+    format_duration,
+    format_path,
+    number_to_short,
+)
 
 T = TypeVar("T")
 T2 = TypeVar("T2")
@@ -308,8 +313,8 @@ class LiveMonitoringCard(Component):
         checkpoint_dir: Path | str,
         colour: str = Colour.AMBER,
     ) -> None:
-        self.log_dir = Path(log_dir)
-        self.checkpoint_dir = Path(checkpoint_dir)
+        self.log_dir = format_path(log_dir, as_str=True)
+        self.checkpoint_dir = format_path(checkpoint_dir, as_str=True)
         self.colour = colour
 
     def render(self) -> Panel:
@@ -442,6 +447,8 @@ class ProgressCard(ProgressComponent):
         Hex colour for border, spinner, and label. Default is `Colour.TEAL`
     complete_colour : str (optional)
         Hex colour for completion state. Default is `Colour.TEAL`
+    complete_path : str (optional)
+        Optional checkpoint completion path. Default is `None`
     """
 
     def __init__(
@@ -450,7 +457,13 @@ class ProgressCard(ProgressComponent):
         total: int,
         colour: str = Colour.TEAL,
         complete_colour: str = Colour.TEAL,
+        complete_path: str | None = None,
     ) -> None:
+        path_formatted = (
+            format_path(complete_path, as_str=True) if complete_path else None
+        )
+        self.complete_path = path_formatted
+
         super().__init__(
             title="Training Progress",
             description=description,
@@ -462,7 +475,22 @@ class ProgressCard(ProgressComponent):
     def _render_complete(self) -> Panel:
         total = number_to_short(self.total if self.total else 0)
         elapsed = format_duration(self._elapsed) if self._elapsed else "0s"
-        content = f"[bold {self.complete_colour}]✓ Training Complete[/bold {self.complete_colour}] [dim]({total} steps in {elapsed})[/dim]"
+
+        content = Table.grid(padding=(0, 2))
+        content.add_column(justify="left")
+
+        if self.complete_path:
+            title = f"[bold {self.complete_colour}]✓[/bold {self.complete_colour}] [bold white]Training Complete[/bold white] [dim]({total} steps in {elapsed}. Final checkpoint saved to):[/dim]"
+        else:
+            title = f"[bold {self.complete_colour}]✓ Training Complete[/bold {self.complete_colour}] [dim]({total} steps in {elapsed})[/dim]"
+
+        content.add_row(title)
+
+        if self.complete_path:
+            content.add_row(
+                f"   [{self.colour}]`{self.complete_path}`[/{self.colour}]",
+            )
+
         return Panel(
             content,
             border_style=self.complete_colour,

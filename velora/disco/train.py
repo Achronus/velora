@@ -13,6 +13,8 @@
 # limitations under the License.
 # ==============================================================================
 
+import shutil
+from pathlib import Path
 from typing import Dict, List, Tuple
 
 import chex
@@ -499,12 +501,14 @@ class RuleTrainer:
 
         # Checkpointing
         self.cp_manager = CheckpointManager(self.config.checkpoint)
+        self.rule_path = Path(self.cp_manager.cp_dir, "final_disco").resolve()
 
         # Console dashboard
         self.console = DiscoConsoleDashboard(
             self.config.console_config(
                 envs=envs.env_categories(),
                 params=self._dummy_params(trainer_keys[0]),
+                complete_path=str(self.rule_path),
             )
         )
 
@@ -663,6 +667,9 @@ class RuleTrainer:
             self.console.update_progress()
 
         # Final cleanup
+        self.save_checkpoint(force=True)
+        self.save_rule()
+
         self.close()
         self.console.finish_training()
 
@@ -1047,3 +1054,23 @@ class RuleTrainer:
 
         for trainer in self.trainers:
             trainer.close()
+
+    def save_rule(self) -> Path:
+        """
+        Export the discovered update rule as a standalone `DiscoAgent`.
+
+        Saves the meta-agent's parameters and configuration so the rule
+        can be loaded independently with `DiscoAgent.load()` for use
+        in new environments and architectures.
+
+        Returns
+        -------
+        path : Path
+            Path where the rule was saved
+        """
+        root_dir, sub_dir = self.rule_path.parent, self.rule_path.name
+
+        if self.rule_path.exists():
+            shutil.rmtree(self.rule_path)
+
+        return self.meta_agent.save(root_dir, sub_dir, timestamp=False)

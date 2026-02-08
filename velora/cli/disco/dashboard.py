@@ -52,7 +52,11 @@ class DiscoConsoleDashboard(ConsoleDashboard):
         # Create cards
         title = TitleCard("DiscoRL: Rule Training")
         body = self._body()
-        progress = ProgressCard("Meta-training", total=config.total_steps())
+        progress = ProgressCard(
+            "Meta-training",
+            total=config.total_steps(),
+            complete_path=self.config.complete_path,
+        )
         live_metrics = LiveMetricsCard(DiscoLosses, DiscoStats)
         setup = SetupCard()
 

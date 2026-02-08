@@ -108,6 +108,8 @@ class DiscoDashboardSettings:
         Mapping of environment category names to counts
     params : DiscoParamsSettings
         Parameter counts for each agent type
+    complete_path : str
+        Checkpoint completion path
     """
 
     meta_steps: int
@@ -121,6 +123,7 @@ class DiscoDashboardSettings:
     env_categories: Dict[str, int]
 
     params: DiscoParamsSettings
+    complete_path: str
 
     def env_total(self) -> int:
         """

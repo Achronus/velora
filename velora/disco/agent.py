@@ -593,9 +593,9 @@ class DiscoAgent:
     def save(
         self,
         root_path: Path | str = "checkpoints/models",
-        model_name: str = "disco",
+        model_dir: str = "disco",
         timestamp: bool = True,
-    ) -> None:
+    ) -> Path:
         """
         Saves the agent's network parameters and configuration to disk.
 
@@ -607,15 +607,20 @@ class DiscoAgent:
         ----------
         root_path : Path | str (optional)
             Directory path for saving. Default is `checkpoints/models`
-        model_name : str (optional)
+        model_dir : str (optional)
             The folder name to save the agents state. Gets merged with `root_path`.
             Default is `disco`
         timestamp : bool (optional)
             Whether to append timestamps to experiment directory.
             Uses timestamp format: `ddmmyy_hhmmss`. Default is `True`
+
+        Returns
+        -------
+        path : Path
+            Path where the rule was saved
         """
-        model_dir = create_directory(root_path, model_name, timestamp)
-        model_dir.mkdir(parents=True, exist_ok=True)
+        dirpath = create_directory(root_path, model_dir, timestamp)
+        dirpath.mkdir(parents=True, exist_ok=True)
 
         cp = ocp.StandardCheckpointer()
 
@@ -624,10 +629,11 @@ class DiscoAgent:
         config_json = self.config.to_json(key=key_data)
 
         # Save params and config
-        cp.save(model_dir / "params", self.get_params())
-        (model_dir / "config.json").write_text(config_json)
+        cp.save(dirpath / "params", self.get_params())
+        (dirpath / "config.json").write_text(config_json)
 
         cp.wait_until_finished()
+        return dirpath
 
     @classmethod
     def load(

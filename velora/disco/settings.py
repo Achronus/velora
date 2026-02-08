@@ -533,6 +533,7 @@ class RuleTrainerSettings:
         self,
         envs: Dict[str, int],
         params: DiscoParamsSettings,
+        complete_path: str,
     ) -> DiscoDashboardSettings:
         """
         Sets the configuration for the `DiscoConsoleDashboard`.
@@ -543,6 +544,8 @@ class RuleTrainerSettings:
             Mapping of environment category names to counts
         params : DiscoParamsSettings
             Parameter counts for each agent type
+        complete_path : str
+            Checkpoint completion path
 
         Returns
         -------
@@ -558,4 +561,5 @@ class RuleTrainerSettings:
             cp_dir=str(self.checkpoint.dirpath),
             env_categories=envs,
             params=params,
+            complete_path=complete_path,
         )

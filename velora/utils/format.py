@@ -123,3 +123,27 @@ def create_directory(
     ts = datetime.now().strftime("%d%m%y_%H%M%S")
     name = f"{folder_name}_{ts}" if timestamp else folder_name
     return Path(root_dir, name).resolve()
+
+
+def format_path(path: Path | str, *, as_str: bool = False) -> Path | str:
+    """
+    Formats a path by stripping it's current working directory.
+
+    Parameters
+    ----------
+    path : Path | str
+        Path to format
+    as_str : bool (optional)
+        Whether to return the path as a string. Default is `False`
+
+    Returns
+    -------
+    path : Path | str
+        Updated path object or returned as a string
+    """
+    path_formatted = Path(path).resolve().relative_to(Path.cwd())
+
+    if as_str:
+        return f"./{path_formatted.as_posix()}"
+
+    return path_formatted
