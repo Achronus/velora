@@ -194,6 +194,15 @@ class ACM(BaseCfC):
             Time elapsed since previous timestep.
             For fixed intervals set to `None`. For varying timesteps shape
             should be `(T,)`
+
+        Returns
+        -------
+        x : chex.Array
+            Preprocessed input with shape `(B*A, T, F+A)`
+        h_state : chex.Array
+            Hidden state with shape `(B*A, H)`
+        timespans : chex.Array
+            Time intervals with shape `(T,)`
         """
         x, _, timespans = super()._preprocess(x, h_state, timespans)
 

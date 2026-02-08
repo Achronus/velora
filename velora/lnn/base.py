@@ -333,6 +333,15 @@ class BaseCfC(nnx.Module):
             Time elapsed since previous timestep.
             For fixed intervals set to `None`. For varying timesteps shape
             should be `(T,)`
+
+        Returns
+        -------
+        x : chex.Array
+            Preprocessed input with shape `(B, T, F)`
+        h_state : chex.Array
+            Hidden state with shape `(B, H)`
+        timespans : chex.Array
+            Time intervals with shape `(T,)`
         """
         if x.ndim == 2:
             x = jnp.expand_dims(x, axis=1)
