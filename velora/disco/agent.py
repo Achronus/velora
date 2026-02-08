@@ -375,9 +375,8 @@ class DiscoAgent:
         self._disco_net = DiscoNetwork(
             self.encoder_config.output_dim,
             self.config.n_hidden,
-            self.config.n_actions,
             self.config.prediction_size,
-            self.config.action_embed_dim,
+            self.encoder_config.action_embed_dim,
             key=disco_key,
             sparsity=self.config.sparsity,
         )

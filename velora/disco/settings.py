@@ -93,10 +93,11 @@ class DiscoEncoderSettings:
     Embedding dimensions can be set manually or computed dynamically based on
     `prediction_size` using the `create()` method.
 
+    The encoder derives `n_actions` from input shapes at runtime, enabling
+    action-agnostic encoding that works across different action spaces.
+
     Parameters
     ----------
-    n_actions : int
-        Number of discrete actions in the action space
     prediction_size : int
         Size of the observation/action-conditioned prediction vectors (y, z).
     q_size : int
@@ -112,7 +113,6 @@ class DiscoEncoderSettings:
         Default is `8`
     """
 
-    n_actions: int
     prediction_size: int
     q_size: int
 
@@ -121,7 +121,7 @@ class DiscoEncoderSettings:
     scalar_embed_dim: int = 16
 
     @classmethod
-    def create(cls, n_actions: int, prediction_size: int, q_size: int) -> Self:
+    def create(cls, prediction_size: int, q_size: int) -> Self:
         """
         Creates a new settings object using dynamic computation of embedding dimensions based on `prediction_size`.
 
@@ -132,8 +132,6 @@ class DiscoEncoderSettings:
 
         Parameters
         ----------
-        n_actions : int
-            Number of discrete actions in the action space
         prediction_size : int
             Size of the observation/action-conditioned prediction vectors (y, z).
         q_size : int
@@ -145,7 +143,6 @@ class DiscoEncoderSettings:
             New settings with computed embedding dimensions
         """
         return cls(
-            n_actions=n_actions,
             prediction_size=prediction_size,
             q_size=q_size,
             obs_embed_dim=prediction_size // 2,
@@ -189,6 +186,9 @@ class DiscoAgentSettings:
     """
     Dataclass for `DiscoAgent` settings.
 
+    The agent derives `n_actions` from input shapes at runtime, enabling
+    action-agnostic target generation that works across different action spaces.
+
     Parameters
     ----------
     n_hidden : int
@@ -197,8 +197,6 @@ class DiscoAgentSettings:
         Size of the observation/action-conditioned prediction vectors (y, z)
     q_size : int
         Size of action-value prediction head
-    n_actions : int
-        Number of discrete actions in the action space
     lr : float (optional)
         Learning rate for the agent's optimizer. Default is `0.0003`
     max_grad_norm : float (optional)
@@ -228,7 +226,6 @@ class DiscoAgentSettings:
     n_hidden: int
     prediction_size: int
     q_size: int
-    n_actions: int
 
     lr: float = 3e-4
     max_grad_norm: float = 1.0
@@ -253,13 +250,11 @@ class DiscoAgentSettings:
         """
         if self.dynamic_embed_dims:
             return DiscoEncoderSettings.create(
-                self.n_actions,
                 self.prediction_size,
                 self.q_size,
             )
 
         return DiscoEncoderSettings(
-            n_actions=self.n_actions,
             prediction_size=self.prediction_size,
             q_size=self.q_size,
             obs_embed_dim=self.obs_embed_dim,

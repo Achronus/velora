@@ -35,6 +35,9 @@ class DiscoInputEncoder(nnx.Module):
         - Action-conditional `(z, q, pi)` → Shared Linear projection across actions
         - Scalars `(rewards, discounts)` → Linear projection
 
+    The encoder derives `n_actions` from input shapes at runtime, enabling
+    action-agnostic encoding that works across different action spaces.
+
     Parameters
     ----------
     config : DiscoEncoderSettings
@@ -47,7 +50,6 @@ class DiscoInputEncoder(nnx.Module):
         self.config = config
 
         self.out_features = self.config.output_dim
-        self.n_actions = self.config.n_actions
 
         # (B, T, Y) -> (B, T, E_y)
         self.state_encoder = nnx.Linear(
@@ -196,6 +198,8 @@ class DiscoInputEncoder(nnx.Module):
 
         Concatenates `(z, q, pi, target_z, target_q, target_pi, one_hot_action)` for each action, then projects them through a shared Linear layer.
 
+        Derives `n_actions` from input shapes at runtime.
+
         Parameters
         ----------
         preds : PolicyAgentOutput
@@ -217,13 +221,16 @@ class DiscoInputEncoder(nnx.Module):
         action_emb_a : chex.Array
             Embedding for action taken. Shape: `(B, T, C)`
         """
+        # Derive n_actions from input shape (z has shape (B, T, A, Z))
+        n_actions = jnp.shape(preds.z)[2]
+
         # Policy probabilities per action: (B, T, A) -> (B, T, A, 1)
         pi_probs = jnp.expand_dims(self._encode(preds.pi), axis=-1)
         pi_target_probs = jnp.expand_dims(self._encode(targets.pi), axis=-1)
 
         # One-hot encode actions taken: (B, T) -> (B, T, A) -> (B, T, A, 1)
         actions = jnp.squeeze(actions, axis=-1)  # (B, T)
-        one_hot_actions = jax.nn.one_hot(actions, self.n_actions)
+        one_hot_actions = jax.nn.one_hot(actions, n_actions)
         one_hot_actions = jnp.expand_dims(one_hot_actions, axis=-1)
 
         # Merge action-conditional features: (B, T, A, 2*(Z+Q+1)+1)

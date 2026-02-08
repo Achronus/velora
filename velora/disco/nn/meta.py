@@ -28,14 +28,16 @@ from velora.lnn.wiring import NCPWiringBuilder
 
 class DiscoNetwork(BaseCfC):
     """
-    Meta-network that produces learned targets (π̂, ŷ, ẑ) for the update rule. Uses practices from the DiscoRL paper.
+    Meta-network that produces learned targets `(π̂, ŷ, ẑ)` for the update rule. Uses practices from the DiscoRL paper.
 
-    Uses a Liquid Neural Network (LNN) architecture with 3 output heads and a linear action gate:
+    Uses a Liquid Neural Network (LNN) architecture with action-agnostic outputs:
 
         1. Policy targets: `π̂,(s, a)`
         2. Observation-conditioned targets: `ŷ(s)`
         3. Action-conditioned targets: `ẑ(s, a)`
-        4. Action gate: modulates `π̂,` with per-action embeddings
+
+    The network derives `n_actions` from input shapes at runtime, allowing the same
+    trained weights to work across environments with different action spaces.
 
     Parameters
     ----------
@@ -43,10 +45,8 @@ class DiscoNetwork(BaseCfC):
         Number of input nodes (flattened agent output + env signals)
     n_neurons : int
         Number of decision nodes (inter + command nodes)
-    n_actions : int
-        Size of the policy targets `π̂,`
     prediction_size : int
-        Size of the target vectors `(ŷ, ẑ)`
+        Size of the target vectors `(ŷ, ẑ)` and policy hidden representation
     action_embed_dim : int
         Dimension of per-action embeddings from encoder
     key : chex.PRNGKey
@@ -67,14 +67,12 @@ class DiscoNetwork(BaseCfC):
         self,
         n_inputs: int,
         n_neurons: int,
-        n_actions: int,
         prediction_size: int,
         action_embed_dim: int,
         *,
         key: chex.PRNGKey,
         sparsity: float = 0.5,
     ) -> None:
-        self.n_actions = n_actions
         self.pred_size = prediction_size
         self.action_embed_dim = action_embed_dim
 
@@ -85,8 +83,8 @@ class DiscoNetwork(BaseCfC):
             sparsity=sparsity,
         )
 
-        self.action_gate = nnx.Linear(
-            self.action_embed_dim,
+        self.policy_proj = nnx.Linear(
+            self.pred_size + self.action_embed_dim,
             1,
             rngs=self.rngs,
         )
@@ -101,7 +99,7 @@ class DiscoNetwork(BaseCfC):
             )
             .add_output_heads(
                 DiscoHeadSpec,
-                pi=self.n_actions,
+                pi=self.pred_size,
                 y=self.pred_size,
                 z=self.pred_size,
             )
@@ -132,7 +130,7 @@ class DiscoNetwork(BaseCfC):
 
             - `batch_size (B)`: the number of samples per timestep
             - `seq_length (T)`: the number of sequences (e.g., trajectories)
-            - `n_actions (A)`: the number of discrete actions
+            - `n_actions (A)`: the number of discrete actions (derived at runtime)
             - `action_embed_dim (C)`: the action embedding dimension
         h_state : chex.Array (optional)
             Initial hidden state with shape `(B, H)`
@@ -147,7 +145,7 @@ class DiscoNetwork(BaseCfC):
 
         Returns
         -------
-        target_preds : TargetPredictions
+        target_preds : DiscoPredictions
             Network predictions for the command layer (`embedding`) and each head `(π̂, ŷ, ẑ)`
         h_state : chex.Array
             Final hidden state with shape `(B, H)`
@@ -155,42 +153,53 @@ class DiscoNetwork(BaseCfC):
         x, h_state, timespans = self._preprocess(obs, h_state, timespans)
         h_state, preds = self._scan(x, h_state, timespans, reverse=True)
 
-        # 4 outputs -> (embedding, π̂, ŷ, ẑ)
-        embedding, pi_raw, y, z = self._postprocess(preds)
+        # 4 outputs -> (embedding, pi_hidden, ŷ, ẑ)
+        embedding, pi_hidden, y, z = self._postprocess(preds)
 
-        # Modulate pi with action embeddings
-        pi = self._modulate_pi(pi_raw, action_emb)
+        # Generate per-action policy targets using action embeddings
+        # n_actions is derived from action_emb shape
+        pi = self._compute_policy_targets(pi_hidden, action_emb)
 
         return DiscoPredictions(embedding=embedding, pi=pi, y=y, z=z), h_state
 
-    def _modulate_pi(
+    def _compute_policy_targets(
         self,
-        pi_raw: chex.Array,
+        pi_hidden: chex.Array,
         action_emb: chex.Array,
     ) -> chex.Array:
         """
-        Modulate policy targets with per-action embeddings.
+        Compute per-action policy targets from hidden representation and action embeddings.
 
-        Applies a learned gate derived from action embeddings to adjust the raw policy targets on a per-action basis.
+        Uses a conv1d-style approach where the same learned weights are applied
+        independently to each action, making the output dimension dynamic based
+        on the number of actions in the environment.
 
         Parameters
         ----------
-        pi_raw : chex.Array
-            Raw policy targets from pi_head. Shape: `(B, T, A)`
+        pi_hidden : chex.Array
+            Policy hidden representation from network. Shape: `(B, T, H)`
         action_emb : chex.Array
-            Per-action embeddings. Shape: `(B, T, A, C)`
+            Per-action embeddings from encoder. Shape: `(B, T, A, C)`
 
         Returns
         -------
         pi : chex.Array
-            Modulated policy targets. Shape: `(B, T, A)`
+            Per-action policy targets. Shape: `(B, T, A)`
         """
-        # Compute per-action gate
-        # (B, T, A, C) -> (B, T, A, 1) -> (B, T, A)
-        gate = self.action_gate(action_emb)  # type: ignore
-        gate = jnp.squeeze(gate, axis=-1)
-        gate = nnx.sigmoid(gate)
+        # Get n_actions from action_emb shape (dynamic)
+        n_actions = jnp.shape(action_emb)[2]
 
-        # Modulate raw targets
-        pi = pi_raw * gate
+        # Broadcast pi_hidden to match action dimension
+        # (B, T, H) -> (B, T, 1, H) -> (B, T, A, H)
+        pi_expanded = jnp.expand_dims(pi_hidden, axis=2)
+        pi_broadcast = jnp.repeat(pi_expanded, n_actions, axis=2)
+
+        # Concatenate with action embeddings: (B, T, A, H + C)
+        combined = jnp.concatenate([pi_broadcast, action_emb], axis=-1)
+
+        # Apply shared linear projection per-action (conv1d with kernel=1)
+        # (B, T, A, H + C) -> (B, T, A, 1) -> (B, T, A)
+        pi = self.policy_proj(combined)  # type: ignore
+        pi = jnp.squeeze(pi, axis=-1)
+
         return pi
