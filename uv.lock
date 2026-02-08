@@ -1504,20 +1504,6 @@ wheels = [
 ]
 
 [[package]]
-name = "miniworld"
-version = "2.1.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "gymnasium" },
-    { name = "numpy" },
-    { name = "pyglet" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/f2/30/dc75cec7825ec9bce7a0f74adbdff8ebf1b4fb20f05867e8e22b05ba95f2/miniworld-2.1.0.tar.gz", hash = "sha256:68f7dca89d250629fbfd41085888532a9802f832a5a780f86e1e8f29c9055b52", size = 38656786, upload-time = "2025-01-12T11:39:37.012Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/67/06/aeaccd9a7d9de81aa4eb724d8d6bd3575118aa3b2e45a445b02273ed24b0/miniworld-2.1.0-py3-none-any.whl", hash = "sha256:40d7d241f7e0067d9280af38520269fca119bd65fca7f3fea373f39412b6e98f", size = 39431189, upload-time = "2025-01-12T11:39:29.107Z" },
-]
-
-[[package]]
 name = "mistune"
 version = "3.2.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2247,15 +2233,6 @@ wheels = [
 ]
 
 [[package]]
-name = "pyglet"
-version = "1.5.31"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/f7/c0/59130a7edbcc8f84e35870b00a712538ca05415ff02d17181277b8ef8f05/pyglet-1.5.31.zip", hash = "sha256:a5e422b4c27b0fc99e92103bf493109cca5c18143583b868b3b4631a98ae9417", size = 6900712, upload-time = "2024-12-24T07:10:58.022Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/e2/43/46aa0ab49f2f5145d201780c7595cf0c305fb4fb5d00d6639792a3d0e770/pyglet-1.5.31-py3-none-any.whl", hash = "sha256:f68413564bbec380e4815898fef0fb7a4a494dc3f8718bfbf28ce2a802634c88", size = 1143660, upload-time = "2024-12-24T07:10:50.769Z" },
-]
-
-[[package]]
 name = "pygments"
 version = "2.19.2"
 source = { registry = "https://pypi.org/simple" }
@@ -2949,7 +2926,6 @@ dependencies = [
     { name = "gymnasium", extra = ["classic-control", "other"] },
     { name = "jax" },
     { name = "jax-ai-stack" },
-    { name = "miniworld" },
     { name = "optax" },
     { name = "rlax" },
     { name = "safetensors" },
@@ -2979,7 +2955,6 @@ requires-dist = [
     { name = "gymnasium", extras = ["classic-control", "other"], specifier = ">=1.2.3" },
     { name = "jax", specifier = ">=0.8.0" },
     { name = "jax-ai-stack" },
-    { name = "miniworld", specifier = ">=2.1.0" },
     { name = "optax", specifier = ">=0.2.6" },
     { name = "rlax", specifier = ">=0.1.8" },
     { name = "safetensors", specifier = ">=0.7.0" },
