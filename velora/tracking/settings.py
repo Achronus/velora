@@ -67,11 +67,24 @@ class MetricLoggerSettings:
     timestamp : bool (optional)
         Whether to append timestamps to experiment directory.
         Uses timestamp format: `ddmmyy_hhmmss`. Default is `True`
+    _dirpath : Path (optional)
+        Cached directory path. Computed automatically on creation.
+        Default is `None`
     """
 
     base_dir: Path | str = "logs"
     experiment_name: str = "disco"
     timestamp: bool = True
+
+    _dirpath: Path | None = struct.field(pytree_node=False, default=None)
+
+    def __post_init__(self):
+        if self._dirpath is None:
+            object.__setattr__(
+                self,
+                "_dirpath",
+                create_directory(self.base_dir, self.experiment_name, self.timestamp),
+            )
 
     @property
     def dirpath(self) -> Path:
@@ -80,4 +93,4 @@ class MetricLoggerSettings:
         - `timestamp=True` - `./[base_dir]/[experiment_name]_[timestamp]`
         - `timestamp=False` - `./[base_dir]/[experiment_name]`
         """
-        return create_directory(self.base_dir, self.experiment_name, self.timestamp)
+        return self._dirpath  # type: ignore
