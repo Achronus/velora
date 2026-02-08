@@ -17,13 +17,13 @@ from typing import List
 
 from velora.cli.base.component import (
     CardRow,
-    CompileCard,
     Divider,
     LiveMetricsCard,
     LiveMonitoringCard,
     Metric,
     MetricCard,
     ProgressCard,
+    SetupCard,
     TitleCard,
 )
 from velora.cli.base.constant import Colour
@@ -50,11 +50,11 @@ class DiscoConsoleDashboard(ConsoleDashboard):
         # Create cards
         title = TitleCard("DiscoRL: Rule Training")
         body = self._body()
-        progress = ProgressCard("Meta-training", total=config.meta_steps)
+        progress = ProgressCard("Meta-training", total=config.total_steps())
         live_metrics = LiveMetricsCard(DiscoLosses, DiscoStats)
-        compile = CompileCard()
+        setup = SetupCard()
 
-        super().__init__(title, body, progress, live_metrics, compile)
+        super().__init__(title, body, progress, live_metrics, setup)
 
     def _body(self) -> List:
         """

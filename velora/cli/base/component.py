@@ -190,6 +190,20 @@ class ProgressComponent(Component, ABC):
             total=self.total,
         )
 
+    def set_total(self, total: int) -> None:
+        """
+        Set or update the total step count.
+
+        Parameters
+        ----------
+        total : int
+            Total steps for determinate progress
+        """
+        self.total = total
+
+        if self.task_id is not None:
+            self.progress.update(self.task_id, total=total)
+
     def update(self, advance: int = 1) -> None:
         """
         Advance the progress bar.
@@ -594,26 +608,28 @@ class LiveMetricsCard(Generic[T, T2], Component):
         )
 
 
-class CompileCard(ProgressComponent):
+class SetupCard(ProgressComponent):
     """
-    Compile progress card with spinner that transitions to complete state.
+    Setup progress card with spinner that transitions to complete state.
+
+    Covers environment creation, JIT compilation, and other initialization tasks.
 
     Parameters
     ----------
     colour : str (optional)
         Card progress colour. Default is `Colour.SLATE`
     complete_colour : str (optional)
-        Card completion colour. Default is `Colour.CRIMSON`
+        Card completion colour. Default is `Colour.SLATE`
     """
 
     def __init__(
         self,
         colour: str = Colour.SLATE,
-        complete_colour: str = Colour.CRIMSON,
+        complete_colour: str = Colour.SLATE,
     ) -> None:
         super().__init__(
-            title="Compilation",
-            description="Compiling",
+            title="Setup",
+            description="Setting up",
             colour=colour,
             complete_colour=complete_colour,
             total=None,
@@ -621,7 +637,7 @@ class CompileCard(ProgressComponent):
 
     def _render_complete(self) -> Panel:
         elapsed = format_duration(self._elapsed) if self._elapsed else "0s"
-        content = f"[bold {self.complete_colour}]✓ Compiled[/bold {self.complete_colour}] [dim]({elapsed})[/dim]"
+        content = f"[bold {self.complete_colour}]✓ Setup Complete[/bold {self.complete_colour}] [dim]({elapsed})[/dim]"
         return Panel(
             content,
             border_style=self.complete_colour,

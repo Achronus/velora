@@ -20,10 +20,10 @@ from rich.live import Live
 from rich.table import Table
 
 from velora.cli.base.component import (
-    CompileCard,
     Component,
     LiveMetricsCard,
     ProgressCard,
+    SetupCard,
     TitleCard,
 )
 
@@ -39,11 +39,11 @@ class ConsoleDashboard:
     body : List[Component]
         List of body components (cards, rows, etc.)
     progress : ProgressCard (optional)
-        Optional progress card. Displayed after `body`/`compile`. Default is `None`
+        Optional progress card. Displayed after `body`/`setup`. Default is `None`
     live_metrics : LiveMetricsCard (optional)
         Optional live metrics card. Displayed after `body`/`progress`. Default is `None`
-    compile : CompileCard (optional)
-        Optional compile card. Displayed after `body`. Default is `None`
+    setup : SetupCard (optional)
+        Optional setup card. Displayed after `body`. Default is `None`
     width : int (optional)
         Maximum width of the dashboard. Default is `120`
     """
@@ -54,16 +54,16 @@ class ConsoleDashboard:
         body: List[Component],
         progress: ProgressCard | None = None,
         live_metrics: LiveMetricsCard | None = None,
-        compile: CompileCard | None = None,
+        setup: SetupCard | None = None,
         width: int = 120,
     ) -> None:
         self.title = title
         self.body = body
         self.progress = progress
         self.live_metrics = live_metrics
-        self.compile = compile
+        self.setup = setup
 
-        self._is_compiling = False
+        self._is_setting_up = False
         self._is_training = False
 
         self.console = Console(width=width)
@@ -76,10 +76,10 @@ class ConsoleDashboard:
         for component in self.body:
             self.console.print(component.render())
 
-    def _build_compile_display(self) -> Group:
-        """Build the compile section display."""
-        if self.compile:
-            return Group(self.compile.render())
+    def _build_setup_display(self) -> Group:
+        """Build the setup section display."""
+        if self.setup:
+            return Group(self.setup.render())
 
         return Group()
 
@@ -89,20 +89,20 @@ class ConsoleDashboard:
 
         # If both complete, show them on the same row
         if (
-            self.compile
-            and self.compile._is_complete
+            self.setup
+            and self.setup._is_complete
             and self.progress
             and self.progress._is_complete
         ):
             row = Table.grid(expand=True, padding=(0, 1))
             row.add_column(ratio=1)
             row.add_column(ratio=1)
-            row.add_row(self.compile.render(), self.progress.render())
+            row.add_row(self.setup.render(), self.progress.render())
             components.append(row)
         else:
-            # Show compile complete above progress if applicable
-            if self.compile and self.compile._is_complete:
-                components.append(self.compile.render())
+            # Show setup complete above progress if applicable
+            if self.setup and self.setup._is_complete:
+                components.append(self.setup.render())
 
             if self.progress:
                 components.append(self.progress.render())
@@ -112,35 +112,60 @@ class ConsoleDashboard:
 
         return Group(*components)
 
-    def start_compile(self) -> None:
-        """Start the display in compile mode."""
-        self._is_compiling = True
+    def start_setup(self, total: int | None = None) -> None:
+        """
+        Start the display in setup mode.
+
+        Parameters
+        ----------
+        total : int (optional)
+            Total number of setup steps (e.g., environments to create).
+            If provided, shows determinate progress `x/N`
+        """
+        self._is_setting_up = True
         self._print_static()
 
-        if self.compile:
-            self.compile.start()
+        if self.setup:
+            if total is not None:
+                self.setup.set_total(total)
+
+            self.setup.start()
 
         self._live = Live(
-            self._build_compile_display(),
+            self._build_setup_display(),
             console=self.console,
             refresh_per_second=4,
             transient=True,
         )
         self._live.start()
 
-    def finish_compile(self) -> None:
-        """Mark compilation complete."""
-        self._is_compiling = False
+    def update_setup(self, advance: int = 1) -> None:
+        """
+        Update setup progress.
 
-        if self.compile:
-            self.compile.complete()
+        Parameters
+        ----------
+        advance : int (optional)
+            Number of steps to advance. Default is `1`
+        """
+        if self.setup:
+            self.setup.update(advance)
 
-        self._refresh_compile()
+        self._refresh_setup()
 
-    def _refresh_compile(self) -> None:
-        """Refresh the compile display."""
+    def finish_setup(self) -> None:
+        """Mark setup complete."""
+        self._is_setting_up = False
+
+        if self.setup:
+            self.setup.complete()
+
+        self._refresh_setup()
+
+    def _refresh_setup(self) -> None:
+        """Refresh the setup display."""
         if self._live:
-            self._live.update(self._build_compile_display())
+            self._live.update(self._build_setup_display())
 
     def start_training(self) -> None:
         """Start in training mode."""

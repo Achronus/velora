@@ -142,4 +142,4 @@ class DiscoDashboardSettings:
         total : int
             Total training steps
         """
-        return self.meta_steps * self.n_updates
+        return self.meta_steps * self.env_total()

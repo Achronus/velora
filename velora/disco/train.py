@@ -494,27 +494,27 @@ class RuleTrainer:
             *self.meta_agent.hidden_sizes,
         )
 
-        # Init agent trainers
+        # Init first agent for config
+        env_name, make_fn = self._env_specs[0]
         self.trainers = [
             AgentTrainer(
                 env_name,
                 self.config.agent_trainer_config(),
-                key=trainer_keys[i],
+                key=trainer_keys[0],
                 logger=self.logger,
                 writer_name=f"envs/{env_name}",
                 make_fn=make_fn,
                 jit_compile=self.jit_compile,
             )
-            for i, (env_name, make_fn) in enumerate(self._env_specs)
         ]
 
         # Checkpointing
         self.cp_manager = CheckpointManager(self.config.checkpoint)
 
-        # Init console dashboard
+        # Console dashboard
         self.console = DiscoConsoleDashboard(
             self.config.console_config(
-                envs={},
+                envs=envs.env_categories(),
                 params=DiscoParamsSettings(
                     policy=self.trainers[0].policy_agent.param_count,
                     value=self.trainers[0].value_agent.param_count,
@@ -523,26 +523,49 @@ class RuleTrainer:
             )
         )
 
-        # Compile
-        if self.jit_compile:
-            self.console.start_compile()
-            self.warm()
-            self.console.finish_compile()
+        # Initial setup
+        self.console.start_setup(2 * self.num_envs)
+        self.setup(trainer_keys[1:])
+        self.console.finish_setup()
 
-    def warm(self) -> None:
+    def setup(self, trainer_keys: List[chex.PRNGKey]) -> None:
         """
-        Performs an initial forward pass through all agent networks and trainers.
+        Performs an initial forward pass through all agent networks and trainers
+        and setups up environments.
 
         Includes -
             1. Materializing parameters before optimizer init
             2. JIT compile
+            3. Creates environments
+
+        Parameters
+        ----------
+        trainer_keys : List[chex.PRNGKey]
+            List of trainer random number generated keys
         """
         dummy_rollout = self.trainers[0].collect()
 
         _ = self.meta_agent(dummy_rollout)
+        self.console.update_setup()
 
+        # Create remaining trainers with progress updates
+        for i, (env_name, make_fn) in enumerate(self._env_specs[1:]):
+            trainer = AgentTrainer(
+                env_name,
+                self.config.agent_trainer_config(),
+                key=trainer_keys[i],
+                logger=self.logger,
+                writer_name=f"envs/{env_name}",
+                make_fn=make_fn,
+                jit_compile=self.jit_compile,
+            )
+            self.trainers.append(trainer)
+            self.console.update_setup()
+
+        # Warm all trainers
         for trainer in self.trainers:
             trainer.warm()
+            self.console.update_setup()
 
     def train(self) -> None:
         """
@@ -586,6 +609,8 @@ class RuleTrainer:
 
                 # Update value function
                 _ = trainer.update_value(valid_rollout)
+
+                self.console.update_progress()
 
             # Update meta-gradients across all environments
             avg_meta_grad = jax.tree.map(
