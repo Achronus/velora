@@ -21,9 +21,9 @@ import jax.numpy as jnp
 import optax
 from flax import struct
 
-from velora.base.rollouts import Rollout
 from velora.disco.ema import EMAState
 from velora.disco.outputs import PolicyAgentOutput
+from velora.disco.rollouts import Rollout
 
 HiddenState = chex.Array | None
 

@@ -13,14 +13,16 @@
 # limitations under the License.
 # ==============================================================================
 
-from typing import List, Self
+from typing import TYPE_CHECKING, List, Self
 
 import chex
 import jax
 import jax.numpy as jnp
 from flax import struct
 
-from velora.disco.outputs import PolicyAgentOutput
+if TYPE_CHECKING:
+    from velora.disco.outputs import PolicyAgentOutput
+
 from velora.utils.structs import get_fields_by_index
 from velora.utils.transforms import to_time_first
 
@@ -67,8 +69,8 @@ class Rollout:
     rewards: chex.Array
     discounts: chex.Array
     values: chex.Array
-    preds: PolicyAgentOutput
-    target_preds: PolicyAgentOutput
+    preds: "PolicyAgentOutput"
+    target_preds: "PolicyAgentOutput"
 
     @property
     def seq_len(self) -> int:
@@ -170,8 +172,8 @@ class RolloutStack:
     rewards: chex.Array
     discounts: chex.Array
     values: chex.Array
-    preds: PolicyAgentOutput
-    target_preds: PolicyAgentOutput
+    preds: "PolicyAgentOutput"
+    target_preds: "PolicyAgentOutput"
 
     @property
     def n_rollouts(self) -> int:
@@ -217,7 +219,7 @@ class RolloutStack:
             Stacked rollouts
         """
 
-        def stack_fields(items: List[PolicyAgentOutput]) -> PolicyAgentOutput:
+        def stack_fields(items: List["PolicyAgentOutput"]) -> "PolicyAgentOutput":
             """Stack fields along new leading dimension."""
             return jax.tree.map(lambda *xs: jnp.stack(xs, axis=0), *items)
 

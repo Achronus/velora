@@ -27,7 +27,6 @@ import orbax.checkpoint as ocp
 from flax import nnx
 
 from velora.base.outputs import ParamCount
-from velora.base.rollouts import Rollout
 from velora.disco.config.settings import (
     DiscoAgentSettings,
     DiscoValueSettings,
@@ -38,6 +37,7 @@ from velora.disco.nn.encoder import DiscoInputEncoder, ImageEncoder
 from velora.disco.nn.meta import DiscoNetwork
 from velora.disco.nn.policy import ACM, OCM
 from velora.disco.outputs import DiscoAgentOutput, PolicyAgentOutput
+from velora.disco.rollouts import Rollout
 from velora.lnn.ncp import LNN
 from velora.utils.format import create_directory
 from velora.utils.nn import total_parameters

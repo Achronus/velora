@@ -21,9 +21,9 @@ import jax
 import jax.numpy as jnp
 import rlax
 
-from velora.base.rollouts import Rollout
 from velora.disco.ema import EMAState, MovingAverage
 from velora.disco.outputs import ValueOutputs
+from velora.disco.rollouts import Rollout
 
 
 def compute_importance_weights(

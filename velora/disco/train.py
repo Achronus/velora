@@ -25,7 +25,6 @@ import optax
 import orbax.checkpoint as ocp
 
 from velora.base.outputs import RewardStatistics
-from velora.base.rollouts import Rollout, RolloutStack
 from velora.cli.disco.dashboard import DiscoConsoleDashboard
 from velora.cli.disco.settings import DiscoParamsSettings
 from velora.disco.agent import DiscoAgent, DiscoValueAgent, PolicyAgent
@@ -40,6 +39,7 @@ from velora.disco.outputs import (
     MetaLossAux,
     ValueOutputs,
 )
+from velora.disco.rollouts import Rollout, RolloutStack
 from velora.disco.utils.compute import compute_value_outputs
 from velora.disco.utils.loss import (
     compute_entropy_loss,

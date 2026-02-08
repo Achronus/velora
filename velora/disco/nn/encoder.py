@@ -21,9 +21,9 @@ import jax
 import jax.numpy as jnp
 from flax import nnx
 
-from velora.base.rollouts import Rollout
 from velora.disco.config.settings import DiscoEncoderSettings
 from velora.disco.outputs import PolicyAgentOutput
+from velora.disco.rollouts import Rollout
 from velora.utils.nn import active_parameters, total_parameters
 
 
