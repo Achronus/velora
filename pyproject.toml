@@ -30,6 +30,7 @@ dependencies = [
     "optax>=0.2.6",
     "rlax>=0.1.8",
     "safetensors>=0.7.0",
+    "tensorboard>=2.20.0",
     "tensorboardx>=2.6.4",
 ]
 
