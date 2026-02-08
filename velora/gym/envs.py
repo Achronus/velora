@@ -15,7 +15,7 @@
 
 from dataclasses import dataclass, field
 from importlib.util import find_spec
-from typing import Callable, Dict, Iterator, List, Tuple, Union
+from typing import Callable, Dict, Iterator, List, Self, Tuple, Union
 
 from velora.gym.make import make_atari_env, make_dmlab_env, make_procgen_env
 from velora.gym.wrappers import JaxConversion
@@ -426,9 +426,9 @@ class EnvSet:
         """Total number of environments."""
         return self.n_envs
 
-    def __add__(self, other: "EnvSet") -> "EnvSet":
+    def __add__(self, other: Self) -> Self:
         """Combine two EnvSets."""
-        return EnvSet(*self._groups, *other._groups)
+        return type(self)(*self._groups, *other._groups)
 
     def __repr__(self) -> str:
         group_info = ", ".join(
