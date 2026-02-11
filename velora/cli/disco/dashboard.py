@@ -92,14 +92,16 @@ class DiscoConsoleDashboard(ConsoleDashboard):
             Training details card
         """
         return MetricCard(
-            title="Training Details",
+            title="Key Details",
             metrics=[
                 Metric("Device Type", jax.default_backend().upper()),
                 Divider(),
-                Metric("Steps per Env", self.config.meta_steps),
-                Metric("Agent Updates", self.config.n_updates),
+                Metric("Meta Steps", self.config.meta_steps),
+                Metric("Inner Updates", self.config.n_updates),
                 Metric("Trajectory Size", self.config.seq_len),
                 Metric("Batch Size", self.config.batch_size),
+                Divider(),
+                Metric("Update Freq (Steps)", self.config.env_total()),
             ],
             colour=Colour.PERIWINKLE,
         )
@@ -113,11 +115,11 @@ class DiscoConsoleDashboard(ConsoleDashboard):
         card : MetricCard
             Environments card
         """
-        metrics: List[Metric | Divider] = [
-            Metric(cat, count) for cat, count in self.env_categories.items()
+        metrics = [
+            Metric("Total", self.config.env_total()),
+            Divider(),
+            *[Metric(cat, count) for cat, count in self.env_categories.items()],
         ]
-        metrics.append(Divider())
-        metrics.append(Metric("Total", self.config.env_total()))
 
         return MetricCard(
             "Environments",
@@ -148,7 +150,7 @@ class DiscoConsoleDashboard(ConsoleDashboard):
         return MetricCard(
             title="Agent Details",
             metrics=[
-                Metric("Total Steps", total_steps),
+                Metric("Total Training Steps", total_steps),
                 Divider(),
                 Metric("Params per Agent", "[dim](active/total)[/dim]"),
                 Metric("Policy", str(self.params.policy)),

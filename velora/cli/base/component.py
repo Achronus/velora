@@ -603,7 +603,7 @@ class LiveMetricsCard(Generic[T, T2], Component):
         data.add_column(justify="right", style=self.colour)
 
         for name, val in items:
-            data.add_row(f"{field_to_title(name)}", f"{val:.2f}")
+            data.add_row(f"{field_to_title(name)}", f"{val:.8f}")
 
         return Group(header, Rule(style="dim"), data)
 
