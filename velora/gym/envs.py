@@ -235,16 +235,16 @@ class AtariEnvs(EnvGroup):
 @dataclass
 class ProcgenEnvs(EnvGroup):
     """
-    [Procgen Benchmark](https://github.com/openai/procgen).
+    [Procgen Benchmark (Gymnasium variant)](https://github.com/Achronus/procgen-gymnasium).
 
     16 procedurally generated game environments.
     """
 
-    prefix: str = "procgen:procgen"
+    prefix: str = "procgen_gym/procgen"
     category: str = "Procgen"
     version: str = "v0"
     required_packages: List[str] = field(
-        default_factory=lambda: ["gymnasium", "procgen"]
+        default_factory=lambda: ["gymnasium", "procgen_gym"]
     )
     envs: List[str] = field(
         default_factory=lambda: [
@@ -273,7 +273,7 @@ class ProcgenEnvs(EnvGroup):
         return make_procgen_env
 
     def get_name(self, env: str, version: str | None = None) -> str:
-        """Get full name: procgen:procgen-{env}-v0"""
+        """Get full name: procgen_gym/procgen-{env}-v0"""
         ver = version if version is not None else self.version
         return f"{self.prefix}-{env}-{ver}"
 

@@ -106,7 +106,7 @@ def make_procgen_env(
     **kwargs,
 ) -> JaxConversion:
     """
-    Creates a vectorized [Procgen](https://github.com/openai/procgen) environment.
+    Creates a vectorized [Procgen](https://github.com/Achronus/procgen-gymnasium) environment.
 
     Procgen environments output 64x64 RGB images by default.
 
@@ -117,7 +117,7 @@ def make_procgen_env(
     Parameters
     ----------
     name : str
-        Name of the environment (e.g., "procgen:procgen-coinrun-v0")
+        Name of the environment (e.g., "procgen_gym/procgen-coinrun-v0")
     num_envs : int
         The number of vectorized environments to make
     vec_mode : Literal["sync", "async", "vector_entry_point"] (optional)
@@ -146,12 +146,11 @@ def make_procgen_env(
         If procgen is not installed
     """
     try:
-        import procgen  # noqa: F401 - registers environments
+        import procgen_gym
     except ImportError as e:
         raise MissingPackageError(
-            "Procgen environments require 'procgen'. "
-            "Install with: pip install procgen\n"
-            "Note: Procgen only supports Python 3.7-3.10 and is in maintenance mode."
+            "Procgen environments require 'procgen_gym'. "
+            "Install with: pip install procgen_gym"
         ) from e
 
     envs = gym.make_vec(
