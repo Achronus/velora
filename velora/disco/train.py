@@ -445,7 +445,8 @@ class RuleTrainer:
     seed : int (optional)
         Random number generator seed. Default is `42`
     jit_compile : bool (optional)
-        Flag to enable/disable JIT compilation. Default is `False`
+        Flag to enable/disable JIT compilation. Recommended `True` to reduce training
+        speed. Default is `True`
     """
 
     def __init__(
@@ -454,7 +455,7 @@ class RuleTrainer:
         *,
         config: RuleTrainerSettings,
         seed: int = 42,
-        jit_compile: bool = False,
+        jit_compile: bool = True,
     ) -> None:
         config.verify_params()
 
