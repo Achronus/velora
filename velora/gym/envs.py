@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from importlib.util import find_spec
 from typing import Callable, Dict, Iterator, List, Self, Tuple, Union
 
+from velora.gym.error import MissingPackageError
 from velora.gym.make import make_atari_env, make_dmlab_env, make_procgen_env
 from velora.gym.wrappers import JaxConversion
 
@@ -429,6 +430,28 @@ class EnvSet:
     def __add__(self, other: Self) -> Self:
         """Combine two EnvSets."""
         return type(self)(*self._groups, *other._groups)
+
+    def verify_packages(self) -> None:
+        """
+        Verify all required packages are installed for every environment group.
+
+        Raises
+        ------
+        error : MissingPackageError
+            If any group has missing required packages
+        """
+        missing = {}
+        for group in self._groups:
+            status = group.check()
+            not_installed = [pkg for pkg, ok in status.items() if not ok]
+            if not_installed:
+                missing[group.category] = not_installed
+
+        if missing:
+            lines = [f"  {cat}: {', '.join(pkgs)}" for cat, pkgs in missing.items()]
+            raise MissingPackageError(
+                "Missing required packages for environment groups:\n" + "\n".join(lines)
+            )
 
     def __repr__(self) -> str:
         group_info = ", ".join(
