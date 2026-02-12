@@ -13,6 +13,7 @@
 # limitations under the License.
 # ==============================================================================
 
+import os
 from typing import List
 
 from rich.console import Console, Group
@@ -68,8 +69,26 @@ class ConsoleDashboard:
         self.console = Console(width=width)
         self._live: Live | None = None
 
+    def _check_terminal_width(self) -> None:
+        """Block until terminal is wide enough for the dashboard."""
+        while True:
+            try:
+                term_width = os.get_terminal_size().columns
+            except OSError:
+                return
+
+            if term_width >= self.console.width:
+                return
+
+            input(
+                f"\nTerminal width ({term_width}) is below the "
+                f"recommended minimum ({self.console.width}). "
+                "Please resize your terminal and press Enter to continue."
+            )
+
     def _print_static(self) -> None:
         """Print static components (title and body)."""
+        self._check_terminal_width()
         self.console.print(self.title.render())
 
         for component in self.body:

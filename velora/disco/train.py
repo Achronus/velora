@@ -457,10 +457,11 @@ class RuleTrainer:
         seed: int = 42,
         jit_compile: bool = True,
     ) -> None:
-        config.verify_params()
-
         if isinstance(envs, EnvGroup):
             envs = EnvSet(envs)
+
+        config.verify_params()
+        envs.verify_packages()
 
         self._env_specs = envs.as_list()
         self.env_names = [name for name, _ in self._env_specs]
