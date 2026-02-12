@@ -3,14 +3,13 @@ name = "velora"
 version = "0.3.0"
 description = "A Liquid Reinforcement Learning (RL) framework."
 authors = [{ name = "Ryan Partridge", email = "codemonkey37@proton.me" }]
-license = "MIT License"
+license = "Apache-2.0"
 readme = "README.md"
 requires-python = ">=3.13,<4.0"
 
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
     "Natural Language :: English",
     "Operating System :: OS Independent",
     "Programming Language :: Python",
@@ -49,3 +48,6 @@ docs = [
     "mkdocstrings-python>=2.0.1",
 ]
 notebook = ["notebook>=7.5.1", "ipywidgets>=8.1.8"]
+
+[tool.setuptools.packages.find]
+include = ["velora*"]
