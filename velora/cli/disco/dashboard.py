@@ -26,6 +26,7 @@ from velora.cli.base.component import (
     MetricCard,
     ProgressCard,
     SetupCard,
+    Spacer,
     TitleCard,
 )
 from velora.cli.base.constant import Colour
@@ -91,10 +92,13 @@ class DiscoConsoleDashboard(ConsoleDashboard):
         card : MetricCard
             Training details card
         """
+        compiled = "Yes" if self.config.jit_compile else "No"
+
         return MetricCard(
             title="Key Details",
             metrics=[
                 Metric("Device Type", jax.default_backend().upper()),
+                Metric("JIT Compiled", compiled),
                 Divider(),
                 Metric("Meta Steps", self.config.meta_steps),
                 Metric("Inner Updates", self.config.n_updates),
@@ -115,10 +119,14 @@ class DiscoConsoleDashboard(ConsoleDashboard):
         card : MetricCard
             Environments card
         """
+        n_rows = 7
+        n_categories = len(self.env_categories)
+
         metrics = [
-            Metric("Total", self.config.env_total()),
-            Divider(),
             *[Metric(cat, count) for cat, count in self.env_categories.items()],
+            Spacer(count=n_rows - n_categories),
+            Divider(),
+            Metric("Total", self.config.env_total()),
         ]
 
         return MetricCard(
@@ -151,6 +159,7 @@ class DiscoConsoleDashboard(ConsoleDashboard):
             title="Agent Details",
             metrics=[
                 Metric("Total Training Steps", total_steps),
+                Spacer(),
                 Divider(),
                 Metric("Params per Agent", "[dim](active/total)[/dim]"),
                 Metric("Policy", str(self.params.policy)),

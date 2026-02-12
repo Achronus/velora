@@ -110,6 +110,8 @@ class DiscoDashboardSettings:
         Parameter counts for each agent type
     complete_path : str
         Checkpoint completion path
+    jit_compile : bool
+        Whether JIT compilation is enabled
     """
 
     meta_steps: int
@@ -124,6 +126,7 @@ class DiscoDashboardSettings:
 
     params: DiscoParamsSettings
     complete_path: str
+    jit_compile: bool
 
     def env_total(self) -> int:
         """

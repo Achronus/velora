@@ -105,6 +105,26 @@ class Divider:
         )
 
 
+@dataclass
+class Spacer:
+    """
+    Empty row spacer for vertical alignment in MetricCards.
+
+    Parameters
+    ----------
+    count : int (optional)
+        Number of empty rows. Default is `1`
+    """
+
+    count: int = 1
+
+    def render(self) -> Padding:
+        """Render empty rows for vertical spacing."""
+        rows = "\n" * max(0, self.count - 1)
+        padding = (0, 1, 0, 1) if self.count > 0 else (0, 0, 0, 0)
+        return Padding(Text(rows), padding)
+
+
 class Component(ABC):
     """Base for console components."""
 
@@ -365,7 +385,7 @@ class MetricCard(Component):
     def __init__(
         self,
         title: str,
-        metrics: List[Metric | Divider],
+        metrics: List[Metric | Divider | Spacer],
         colour: str = Colour.LAVENDER,
         height: int | None = None,
         padding: tuple[int, int, int, int] = (1, 1, 1, 0),
@@ -407,7 +427,7 @@ class MetricCard(Component):
             return t
 
         for metric in self.metrics:
-            if isinstance(metric, Divider):
+            if isinstance(metric, (Divider, Spacer)):
                 if current_table is not None:
                     renderables.append(current_table)
                     current_table = None

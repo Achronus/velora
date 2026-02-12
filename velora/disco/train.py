@@ -510,6 +510,7 @@ class RuleTrainer:
                 envs=envs.env_categories(),
                 params=self._dummy_params(trainer_keys[0]),
                 complete_path=str(self.rule_path),
+                jit_compile=self.jit_compile,
             )
         )
 

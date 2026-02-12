@@ -534,6 +534,7 @@ class RuleTrainerSettings:
         envs: Dict[str, int],
         params: DiscoParamsSettings,
         complete_path: str,
+        jit_compile: bool,
     ) -> DiscoDashboardSettings:
         """
         Sets the configuration for the `DiscoConsoleDashboard`.
@@ -546,6 +547,8 @@ class RuleTrainerSettings:
             Parameter counts for each agent type
         complete_path : str
             Checkpoint completion path
+        jit_compile : bool
+            Whether JIT compilation is enabled
 
         Returns
         -------
@@ -562,4 +565,5 @@ class RuleTrainerSettings:
             env_categories=envs,
             params=params,
             complete_path=complete_path,
+            jit_compile=jit_compile,
         )
