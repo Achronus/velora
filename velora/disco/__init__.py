@@ -1,3 +1,4 @@
+from velora.disco import config, nn, utils
 from velora.disco.agent import DiscoAgent, DiscoValueAgent, PolicyAgent
 from velora.disco.config.settings import (
     AgentTrainerSettings,
