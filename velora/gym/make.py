@@ -170,7 +170,7 @@ def make_dmlab_env(
     name: str,
     num_envs: int,
     vec_mode: VectorMode = "sync",
-    render_mode: str = "rgb_array",
+    render_mode: str | None = None,
     width: int = 84,
     height: int = 84,
     fps: int = 60,
@@ -196,8 +196,8 @@ def make_dmlab_env(
     vec_mode : Literal["sync", "async", "vector_entry_point"] (optional)
         The type of vector environment to make. Default is `sync`
     render_mode : str (optional)
-        The type of render mode for the environment.
-        Default is `rgb_array`
+        The type of render mode for the environment. Choices: `["human", None]`.
+        Default is `None`
     width : int (optional)
         Width of the observation. Default is `84`
     height : int (optional)
@@ -239,7 +239,7 @@ def make_dmlab_env(
             width=width,
             height=height,
             fps=fps,
-            render_mode=render_mode,
+            render_mode=render_mode if render_mode == "human" else None,
             **kwargs,
         )
 
