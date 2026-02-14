@@ -173,12 +173,13 @@ def make_dmlab_env(
     render_mode: str = "rgb_array",
     width: int = 84,
     height: int = 84,
+    fps: int = 60,
     observations: str = "RGBD",
     renderer: str = "software",
     **kwargs,
 ) -> JaxConversion:
     """
-    Creates a vectorized [DeepMind Lab](https://github.com/google-deepmind/lab) environment
+    Creates a vectorized [DeepMind Lab](https://github.com/Achronus/dmlab-gym) environment
     using [Shimmy](https://shimmy.farama.org/environments/dm_lab/) for Gymnasium compatibility.
 
     Applies wrappers -
@@ -201,6 +202,8 @@ def make_dmlab_env(
         Width of the observation. Default is `84`
     height : int (optional)
         Height of the observation. Default is `84`
+    fps : int (optional)
+        Frames per second. Default is `60`
     observations : str (optional)
         Type of observations ("RGBD", "RGB", etc.). Default is `RGBD`
     renderer : str (optional)
@@ -216,16 +219,16 @@ def make_dmlab_env(
     Raises
     ------
     MissingPackageError
-        If deepmind_lab or shimmy is not installed
+        If `deepmind_lab` or `shimmy` is not installed
     """
     try:
         from shimmy.dm_lab_compatibility import DmLabCompatibilityV0
     except ImportError as e:
         raise MissingPackageError(
             "DMLab environments require 'deepmind_lab' and 'shimmy[dm-lab]'. "
-            "Install with: pip install 'shimmy[dm-lab]'\n"
-            "Note: deepmind_lab must be built from source (Linux only). "
-            "See: https://shimmy.farama.org/environments/dm_lab/"
+            "Install with the compatibility package: pip install 'dmlab-gym'\n"
+            "and build 'deepmind_lab' with 'dmlab-gym build' (Linux only). "
+            "See: https://github.com/Achronus/dmlab-gym"
         ) from e
 
     def make_env():
@@ -235,7 +238,8 @@ def make_dmlab_env(
             renderer=renderer,
             width=width,
             height=height,
-            render_mode=render_mode if render_mode != "rgb_array" else None,
+            fps=fps,
+            render_mode=render_mode,
             **kwargs,
         )
 

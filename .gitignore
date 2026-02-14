@@ -174,3 +174,5 @@ CHANGELOG.md
 metrics.db
 metrics.db-journal
 *.prof
+/logs
+/checkpoints
