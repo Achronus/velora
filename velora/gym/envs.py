@@ -287,11 +287,11 @@ class DMLabEnvs(EnvGroup):
     30 3D navigation and puzzle-solving environments.
     """
 
-    prefix: str = "DMLab"
+    prefix: str = "dmlab_gym"
     category: str = "DMLab"
-    version: str = ""
+    version: str = "v0"
     required_packages: List[str] = field(
-        default_factory=lambda: ["shimmy", "deepmind_lab"]
+        default_factory=lambda: ["dmlab_gym", "deepmind_lab"]
     )
     envs: List[str] = field(
         default_factory=lambda: [
@@ -341,7 +341,7 @@ class DMLabEnvs(EnvGroup):
         return make_dmlab_env
 
     def get_name(self, env: str, version: str | None = None) -> str:
-        """Get full name: just the level name for DMLab."""
+        """Get level name. Registration handled by make_dmlab_env."""
         return env
 
 

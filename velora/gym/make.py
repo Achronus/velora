@@ -150,7 +150,7 @@ def make_procgen_env(
     except ImportError as e:
         raise MissingPackageError(
             "Procgen environments require 'procgen_gym'. "
-            "Install with: pip install procgen_gym"
+            "Install with: pip install procgen-gym"
         ) from e
 
     envs = gym.make_vec(
@@ -170,20 +170,17 @@ def make_dmlab_env(
     name: str,
     num_envs: int,
     vec_mode: VectorMode = "sync",
-    render_mode: str | None = None,
     width: int = 84,
     height: int = 84,
     fps: int = 60,
-    observations: str = "RGBD",
     renderer: str = "software",
     **kwargs,
 ) -> JaxConversion:
     """
-    Creates a vectorized [DeepMind Lab](https://github.com/Achronus/dmlab-gym) environment
-    using [Shimmy](https://shimmy.farama.org/environments/dm_lab/) for Gymnasium compatibility.
+    Creates a vectorized [DeepMind Lab](https://github.com/Achronus/dmlab-gym) environment.
 
     Applies wrappers -
-    - `shimmy.dm_lab_compatibility.DmLabCompatibilityV0`
+    - `dmlab_gym.wrappers.ActionDiscretize`
     - `gymnasium.wrappers.vector.RecordEpisodeStatistics`
     - `velora.gym.wrappers.JaxConversion`
 
@@ -195,21 +192,16 @@ def make_dmlab_env(
         The number of vectorized environments to make
     vec_mode : Literal["sync", "async", "vector_entry_point"] (optional)
         The type of vector environment to make. Default is `sync`
-    render_mode : str (optional)
-        The type of render mode for the environment. Choices: `["human", None]`.
-        Default is `None`
     width : int (optional)
         Width of the observation. Default is `84`
     height : int (optional)
         Height of the observation. Default is `84`
     fps : int (optional)
         Frames per second. Default is `60`
-    observations : str (optional)
-        Type of observations ("RGBD", "RGB", etc.). Default is `RGBD`
     renderer : str (optional)
         Renderer to use ("software" or "hardware"). Default is `software`
     kwargs : Any (optional)
-        Additional arguments passed to DmLabCompatibilityV0
+        Additional arguments passed to `dmlab_gym.DmLabEnv`
 
     Returns
     -------
@@ -219,33 +211,33 @@ def make_dmlab_env(
     Raises
     ------
     MissingPackageError
-        If `deepmind_lab` or `shimmy` is not installed
+        If `dmlab_gym` or `deepmind_lab` is not installed
     """
     try:
-        from shimmy.dm_lab_compatibility import DmLabCompatibilityV0
+        import dmlab_gym
+        from dmlab_gym.wrappers import ActionDiscretize
     except ImportError as e:
         raise MissingPackageError(
-            "DMLab environments require 'deepmind_lab' and 'shimmy[dm-lab]'. "
-            "Install with the compatibility package: pip install 'dmlab-gym'\n"
-            "and build 'deepmind_lab' with 'dmlab-gym build' (Linux only). "
+            "DMLab environments require 'dmlab-gym' (Linux only). "
+            "Install with: pip install dmlab-gym\n"
+            "Then build the native extension: dmlab-gym build\n"
             "See: https://github.com/Achronus/dmlab-gym"
         ) from e
 
-    def make_env():
-        return DmLabCompatibilityV0(
-            level_name=name,
-            observations=observations,
-            renderer=renderer,
-            width=width,
-            height=height,
-            fps=fps,
-            render_mode=render_mode if render_mode == "human" else None,
-            **kwargs,
-        )
+    dmlab_gym.register(
+        name,
+        renderer=renderer,
+        width=width,
+        height=height,
+        fps=fps,
+        **kwargs,
+    )
+    env_id = f"dmlab_gym/{name}-v0"
 
-    if vec_mode == "async":
-        envs = gym.vector.AsyncVectorEnv([make_env for _ in range(num_envs)])
-    else:
-        envs = gym.vector.SyncVectorEnv([make_env for _ in range(num_envs)])
-
+    envs = gym.make_vec(
+        env_id,
+        num_envs=num_envs,
+        vectorization_mode=vec_mode,
+        wrappers=[ActionDiscretize],
+    )
     return JaxConversion(RecordEpisodeStatistics(envs))
