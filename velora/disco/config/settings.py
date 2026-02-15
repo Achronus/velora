@@ -460,8 +460,8 @@ class RuleTrainerSettings:
         Number of timesteps per trajectory (rollout size; `T`).
         Default is `29`
     num_vec_envs : int (optional)
-        Number of vectorized environments. Acts as the rollout batch size.
-        Default is `8`
+        Number of vectorized environments. Acts as the rollout batch size. Recommended as `2` if on single GPU device.
+        Default is `2`
     tau : float (optional)
         Soft update coefficient for target network updates. Default is `0.9`
     """
@@ -485,7 +485,7 @@ class RuleTrainerSettings:
     n_updates: int = 15
     seq_len: int = 29
 
-    num_vec_envs: int = 8
+    num_vec_envs: int = 2
     tau: float = 0.9
 
     def verify_params(self) -> None:
@@ -533,6 +533,7 @@ class RuleTrainerSettings:
         self,
         envs: Dict[str, int],
         params: DiscoParamsSettings,
+        batch_size: int,
         complete_path: str,
         jit_compile: bool,
     ) -> DiscoDashboardSettings:
@@ -545,6 +546,8 @@ class RuleTrainerSettings:
             Mapping of environment category names to counts
         params : DiscoParamsSettings
             Parameter counts for each agent type
+        batch_size : int
+            Environment scheduler batch size
         complete_path : str
             Checkpoint completion path
         jit_compile : bool
@@ -559,7 +562,7 @@ class RuleTrainerSettings:
             meta_steps=self.n_steps,
             n_updates=self.n_updates,
             seq_len=self.seq_len,
-            batch_size=self.num_vec_envs,
+            batch_size=batch_size,
             log_dir=str(self.logger.dirpath),
             cp_dir=str(self.checkpoint.dirpath),
             env_categories=envs,

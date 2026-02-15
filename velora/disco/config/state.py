@@ -703,3 +703,30 @@ class RuleTrainerState:
         return self.__replace__(
             hidden=self.hidden.update(env_idx, disco_h, meta_h),
         )
+
+
+@struct.dataclass
+class AgentSnapshot:
+    """
+    Serializable snapshot of an `AgentTrainer`'s complete state.
+
+    Used by the `EnvironmentScheduler` to persist agent state
+    to CPU memory between activations. All JAX arrays should be placed
+    on the CPU device before storage.
+
+    Parameters
+    ----------
+    policy_params : chex.ArrayTree
+        Policy network parameters
+    target_params : chex.ArrayTree
+        Target network parameters
+    value_params : chex.ArrayTree
+        Value network parameters
+    trainer_state : AgentTrainerState
+        Full trainer state (optimizer, hidden, EMA, obs, step count)
+    """
+
+    policy_params: chex.ArrayTree
+    target_params: chex.ArrayTree
+    value_params: chex.ArrayTree
+    trainer_state: AgentTrainerState

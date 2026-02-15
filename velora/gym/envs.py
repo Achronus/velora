@@ -24,6 +24,26 @@ from velora.gym.wrappers import JaxConversion
 MakeFn = Callable[..., JaxConversion]
 
 
+@dataclass(frozen=True)
+class EnvSpec:
+    """
+    Specification for a single environment in the scheduler.
+
+    Parameters
+    ----------
+    name : str
+        Gymnasium environment ID (e.g., `"ALE/Pong-v5"`)
+    make_fn : MakeFn
+        Factory function `(env_name, num_vec_envs) -> VectorEnv`
+    category : str
+        Environment category for scheduling constraints
+    """
+
+    name: str
+    make_fn: MakeFn
+    category: str
+
+
 @dataclass
 class EnvGroup:
     """
@@ -144,6 +164,24 @@ class EnvGroup:
             True if all required packages are installed
         """
         return all(self.check().values())
+
+    def as_specs(self) -> List[EnvSpec]:
+        """
+        Convert all environments in this group to scheduler specs.
+
+        Returns
+        -------
+        specs : List[EnvSpec]
+            One spec per environment in this group
+        """
+        return [
+            EnvSpec(
+                name=env_name,
+                make_fn=make_fn,
+                category=self.category,
+            )
+            for env_name, make_fn in self
+        ]
 
 
 @dataclass
@@ -458,6 +496,21 @@ class EnvSet:
             f"{g.__class__.__name__}({g.n_envs})" for g in self._groups
         )
         return f"EnvSet({group_info}, total={self.n_envs})"
+
+    def as_specs(self) -> List[EnvSpec]:
+        """
+        Convert all environments across all groups to scheduler specs.
+
+        Returns
+        -------
+        specs : List[EnvSpec]
+            One spec per environment across all groups
+        """
+        specs = []
+        for group in self._groups:
+            specs.extend(group.as_specs())
+
+        return specs
 
 
 # Pre-instantiated environment groups for convenience
