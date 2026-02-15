@@ -835,15 +835,19 @@ class RuleTrainer:
         losses : LossStatistics
             Trainer loss statistics
         """
+        from velora.disco.utils.mixflow import fwdrev_value_and_grad
+
         meta_params = self.meta_agent.get_params()
         policy_params = trainer.policy_agent.get_params()
         disco_h, meta_h = self.state.hidden.get(trainer_idx)
+        inner_grad_fn = fwdrev_value_and_grad
 
         def meta_loss_fn(meta_params) -> Tuple[chex.Array, MetaLossAux]:
             """
             Meta-loss function.
 
-            Runs inner loop, then computes policy gradient on validation.
+            Runs inner loop with MixFlow-MG reparameterization, then
+            computes policy gradient on validation data.
 
             Parameters
             ----------
@@ -866,7 +870,7 @@ class RuleTrainer:
                 Tuple[DiscoAgentOutput, chex.Array],
             ]:
                 """
-                Single inner loop update step.
+                Single inner loop update step (MixFlow-MG reparameterized).
 
                 Parameters
                 ----------
@@ -911,7 +915,7 @@ class RuleTrainer:
                         self.config.loss_cost,
                     )
 
-                (_), grads = jax.value_and_grad(inner_loss_fn, has_aux=True)(p_params)
+                (_), grads = inner_grad_fn(inner_loss_fn, has_aux=True)(p_params)
 
                 # Apply inner update
                 updates, new_opt_state = trainer.policy_optim.update(
@@ -924,6 +928,9 @@ class RuleTrainer:
                 new_carry = (new_policy_params, disco_h, meta_h, new_opt_state)
                 return new_carry, (targets, rollout.target_preds.pi)
 
+            # Checkpoint gradients
+            checkpointed_step = jax.checkpoint(_inner_step, prevent_cse=False)  # type: ignore
+
             # Run inner loop
             init_carry = (
                 policy_params,
@@ -933,7 +940,7 @@ class RuleTrainer:
             )
             (final_p_params, final_d_h, final_m_h, _), (all_targets, all_targets_pi) = (
                 jax.lax.scan(
-                    _inner_step,
+                    checkpointed_step,
                     init_carry,  # type: ignore
                     train_rollouts,  # type: ignore
                 )
@@ -970,8 +977,8 @@ class RuleTrainer:
                 pg_loss=pg_loss,
                 entropy_loss=entropy_loss,
                 reg_loss=reg_loss,
-                disco_h=final_d_h,
-                meta_h=final_m_h,
+                disco_h=final_d_h,  # type: ignore
+                meta_h=final_m_h,  # type: ignore
                 p_params=final_p_params,
                 value_outs=value_outs,
             )
