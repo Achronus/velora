@@ -28,7 +28,7 @@ VectorMode = Literal["sync", "async", "vector_entry_point"]
 
 def make_atari_env(
     name: str,
-    num_envs: int,
+    num_envs: int = 1,
     vec_mode: VectorMode = "sync",
     render_mode: str = "rgb_array",
     **kwargs,
@@ -48,8 +48,8 @@ def make_atari_env(
     ----------
     name : str
         Name of the environment (e.g., "ALE/Breakout-v5")
-    num_envs : int
-        The number of vectorized environments to make
+    num_envs : int (optional)
+        The number of vectorized environments to make. Default is `1`
     vec_mode : Literal["sync", "async", "vector_entry_point"] (optional)
         The type of vector environment to make. Default is `sync`
     render_mode : str (optional)
@@ -97,8 +97,8 @@ def make_atari_env(
 
 def make_procgen_env(
     name: str,
-    num_envs: int,
-    vec_mode: VectorMode = "async",
+    num_envs: int = 1,
+    vec_mode: VectorMode = "sync",
     render_mode: str = "rgb_array",
     num_levels: int = 0,
     start_level: int = 0,
@@ -118,10 +118,10 @@ def make_procgen_env(
     ----------
     name : str
         Name of the environment (e.g., "procgen_gym/procgen-coinrun-v0")
-    num_envs : int
-        The number of vectorized environments to make
-    vec_mode : Literal["sync", "async", "vector_entry_point"] (optional)
-        The type of vector environment to make. Default is `async`
+    num_envs : int (optional)
+        The number of vectorized environments to make. Default is `1`
+    vec_mode : Literal["sync", "sync", "vector_entry_point"] (optional)
+        The type of vector environment to make. Default is `sync`
     render_mode : str (optional)
         The type of render mode for the environment.
         Default is `rgb_array`
@@ -168,16 +168,13 @@ def make_procgen_env(
 
 def make_dmlab_env(
     name: str,
-    num_envs: int,
-    vec_mode: VectorMode = "async",
+    num_envs: int = 1,
+    vec_mode: VectorMode = "sync",
     render_mode: str = "rgb_array",
     **kwargs,
 ) -> JaxConversion:
     """
     Creates a vectorized [DeepMind Lab](https://github.com/Achronus/dmlab-gym) environment.
-
-    Uses `async` mode with `forkserver` context by default, avoiding issues
-    with DMLab's C libraries and `fork()`.
 
     Applies wrappers -
     - `dmlab_gym.wrappers.ActionDiscretize`
@@ -188,10 +185,10 @@ def make_dmlab_env(
     ----------
     name : str
         Name of the level (e.g., "rooms_watermaze")
-    num_envs : int
-        The number of vectorized environments to make
-    vec_mode : Literal["sync", "async", "vector_entry_point"] (optional)
-        The type of vector environment to make. Default is `async`
+    num_envs : int (optional)
+        The number of vectorized environments to make. Default is `1`
+    vec_mode : Literal["sync", "sync", "vector_entry_point"] (optional)
+        The type of vector environment to make. Default is `sync`
     render_mode : str (optional)
         The type of render mode for the environment.
         Default is `rgb_array`
@@ -227,7 +224,6 @@ def make_dmlab_env(
         vectorization_mode=vec_mode,
         render_mode=render_mode,
         wrappers=[ActionDiscretize],
-        vector_kwargs={"context": "forkserver"},
         **kwargs,
     )
     return JaxConversion(RecordEpisodeStatistics(envs))
