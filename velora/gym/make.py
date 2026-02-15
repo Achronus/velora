@@ -98,7 +98,7 @@ def make_atari_env(
 def make_procgen_env(
     name: str,
     num_envs: int,
-    vec_mode: VectorMode = "sync",
+    vec_mode: VectorMode = "async",
     render_mode: str = "rgb_array",
     num_levels: int = 0,
     start_level: int = 0,
@@ -121,7 +121,7 @@ def make_procgen_env(
     num_envs : int
         The number of vectorized environments to make
     vec_mode : Literal["sync", "async", "vector_entry_point"] (optional)
-        The type of vector environment to make. Default is `sync`
+        The type of vector environment to make. Default is `async`
     render_mode : str (optional)
         The type of render mode for the environment.
         Default is `rgb_array`
@@ -169,15 +169,15 @@ def make_procgen_env(
 def make_dmlab_env(
     name: str,
     num_envs: int,
-    vec_mode: VectorMode = "sync",
-    width: int = 84,
-    height: int = 84,
-    fps: int = 60,
-    renderer: str = "software",
+    vec_mode: VectorMode = "async",
+    render_mode: str = "rgb_array",
     **kwargs,
 ) -> JaxConversion:
     """
     Creates a vectorized [DeepMind Lab](https://github.com/Achronus/dmlab-gym) environment.
+
+    Uses `async` mode with `forkserver` context by default, avoiding issues
+    with DMLab's C libraries and `fork()`.
 
     Applies wrappers -
     - `dmlab_gym.wrappers.ActionDiscretize`
@@ -191,15 +191,10 @@ def make_dmlab_env(
     num_envs : int
         The number of vectorized environments to make
     vec_mode : Literal["sync", "async", "vector_entry_point"] (optional)
-        The type of vector environment to make. Default is `sync`
-    width : int (optional)
-        Width of the observation. Default is `84`
-    height : int (optional)
-        Height of the observation. Default is `84`
-    fps : int (optional)
-        Frames per second. Default is `60`
-    renderer : str (optional)
-        Renderer to use ("software" or "hardware"). Default is `software`
+        The type of vector environment to make. Default is `async`
+    render_mode : str (optional)
+        The type of render mode for the environment.
+        Default is `rgb_array`
     kwargs : Any (optional)
         Additional arguments passed to `dmlab_gym.DmLabEnv`
 
@@ -224,20 +219,15 @@ def make_dmlab_env(
             "See: https://github.com/Achronus/dmlab-gym"
         ) from e
 
-    dmlab_gym.register(
-        name,
-        renderer=renderer,
-        width=width,
-        height=height,
-        fps=fps,
-        **kwargs,
-    )
     env_id = f"dmlab_gym/{name}-v0"
 
     envs = gym.make_vec(
         env_id,
         num_envs=num_envs,
         vectorization_mode=vec_mode,
+        render_mode=render_mode,
         wrappers=[ActionDiscretize],
+        vector_kwargs={"context": "forkserver"},
+        **kwargs,
     )
     return JaxConversion(RecordEpisodeStatistics(envs))
