@@ -173,6 +173,10 @@ class PolicyAgent:
         acm : ACM
             Action-Conditional Model (possibly JIT-wrapped)
         """
+        # Cache graphdef + non-param state for functional forward pass
+        self._ocm_graphdef, _, self._ocm_rest = nnx.split(self._ocm, nnx.Param, ...)
+        self._acm_graphdef, _, self._acm_rest = nnx.split(self._acm, nnx.Param, ...)
+
         if jit_compile:
             return nnx.jit(self._encoder), nnx.jit(self._ocm), nnx.jit(self._acm)  # type: ignore
 
@@ -230,11 +234,11 @@ class PolicyAgent:
         """
 
         # Process images
-        encoded = self.encoder(obs)  # (B, T, F)
+        encoding = self.encoder(obs)  # (B, T, F)
 
         # OCM forward - process observations and produce embeddings
         ocm_preds, ocm_h_state = self.ocm(
-            encoded,
+            encoding,
             h_state=ocm_h_state,
             timespans=timespans,
         )
@@ -248,10 +252,46 @@ class PolicyAgent:
 
         return (
             PolicyAgentOutput.create(
+                encoding,
                 *ocm_preds.output_values(),
                 *acm_preds.output_values(),
             ),
             PolicyAgentHiddenStates(ocm=ocm_h_state, acm=acm_h_state),
+        )
+
+    def functional_forward(
+        self,
+        encoding: chex.Array,
+        params: nnx.State,
+    ) -> PolicyAgentOutput:
+        """
+        Pure functional forward through OCM + ACM with explicit params. Safe for use inside `jax.grad`.
+
+        Parameters
+        ----------
+        encoding : chex.Array
+           Encoder embeddings `(B, T, F)`
+
+            - `batch_size (B)` the number of samples per timestep
+            - `seq_length (T)` the number of sequences (e.g., trajectories)
+            - `features (F)` number of features in the embedding
+        params : nnx.State
+            OCM and ACM parameters
+
+        Returns
+        -------
+        preds : AgentOutput
+            An object of agent predictions
+        """
+        ocm, acm = self.merge_params(params)
+
+        ocm_preds, _ = ocm(encoding)
+        acm_preds, _ = acm(ocm_preds.embedding)
+
+        return PolicyAgentOutput.create(
+            encoding,
+            *ocm_preds.output_values(),
+            *acm_preds.output_values(),
         )
 
     def act(self, logits: chex.Array) -> chex.Array:
@@ -308,6 +348,27 @@ class PolicyAgent:
         nnx.update(self._encoder, params["encoder"])
         nnx.update(self._ocm, params["ocm"])
         nnx.update(self._acm, params["acm"])
+
+    def merge_params(self, params: nnx.State) -> Tuple[OCM, ACM]:
+        """
+        Reconstruct OCM and ACM modules from explicit parameters.
+        Note: ignores encoder module for simplicity.
+
+        Parameters
+        ----------
+        params : nnx.State
+            OCM and ACM parameters
+
+        Returns
+        -------
+        ocm : OCM
+            An updated OCM with the given parameters
+        acm : ACM
+            An updated ACM with the given parameters
+        """
+        ocm = nnx.merge(self._ocm_graphdef, params["ocm"], self._ocm_rest)
+        acm = nnx.merge(self._acm_graphdef, params["acm"], self._acm_rest)
+        return ocm, acm
 
     def soft_param_update(self, tau: float, new_params: nnx.State) -> None:
         """
@@ -468,6 +529,20 @@ class DiscoAgent:
         meta_proj : nnx.Linear
             Meta projection layer (possibly JIT-wrapped)
         """
+        # Cache graphdef + non-param state for functional forward pass
+        self._disco_net_graphdef, _, self._disco_net_rest = nnx.split(
+            self._disco_net, nnx.Param, ...
+        )
+        self._meta_lnn_graphdef, _, self._meta_lnn_rest = nnx.split(
+            self._meta_lnn, nnx.Param, ...
+        )
+        self._meta_proj_graphdef, _, self._meta_proj_rest = nnx.split(
+            self._meta_proj, nnx.Param, ...
+        )
+        self._encoder_graphdef, _, self._encoder_rest = nnx.split(
+            self._encoder, nnx.Param, ...
+        )
+
         if jit_compile:
             return (
                 nnx.jit(self._encoder),
@@ -481,8 +556,10 @@ class DiscoAgent:
     def __call__(
         self,
         rollout: Rollout,
+        *,
         disco_h_state: chex.Array | None = None,
         meta_h_state: chex.Array | None = None,
+        params: nnx.State | None = None,
     ) -> Tuple[DiscoAgentOutput, chex.Array, chex.Array]:
         """
         Generate targets for agent training.
@@ -497,6 +574,8 @@ class DiscoAgent:
         meta_h_state : chex.Array (optional)
             Hidden state for MetaLNN. Shape: `(B, H_meta)`.
             Default is `None`
+        params : nnx.State (optional)
+            Meta-agent parameters from `get_params()`. Only required if using a functional approach for `jax.grad`. Default is `None`
 
         Returns
         -------
@@ -507,15 +586,26 @@ class DiscoAgent:
         meta_h_state : chex.Array
             Updated Meta-LNN hidden state
         """
+        # Condition based on functional approach
+        if params is not None:
+            encoder, disco_net, meta_lnn, meta_proj = self.merge_params(params)
+        else:
+            encoder, disco_net, meta_lnn, meta_proj = (
+                self.encoder,
+                self.disco_net,
+                self.meta_lnn,
+                self.meta_proj,
+            )
+
         # embed: (B, T, E), act_embed: (B, T, A, C)
-        embedding, action_embed = self.encoder(rollout)
+        embedding, action_embed = encoder(rollout)
         disco_input = embedding
 
         # Apply meta conditioning from previous update (if available)
         if meta_h_state is not None:
-            disco_input = self._meta_conditioning(embedding, meta_h_state)
+            disco_input = self._meta_conditioning(meta_proj, embedding, meta_h_state)
 
-        preds, disco_h_state = self.disco_net(
+        preds, disco_h_state = disco_net(
             disco_input,
             action_embed,
             h_state=disco_h_state,
@@ -523,7 +613,7 @@ class DiscoAgent:
 
         # Update Meta-LNN for next iteration using trajectory summary
         summary = jnp.mean(embedding, axis=1)  # (B, T, E) -> (B, E)
-        _, meta_h_state = self.meta_lnn(summary, h_state=meta_h_state)
+        _, meta_h_state = meta_lnn(summary, h_state=meta_h_state)
 
         targets = DiscoAgentOutput(pi=preds.pi, y=preds.y, z=preds.z)
 
@@ -536,13 +626,18 @@ class DiscoAgent:
         return targets, disco_h_state, meta_h_state
 
     def _meta_conditioning(
-        self, embedding: chex.Array, meta_h_state: chex.Array
+        self,
+        meta_proj: nnx.Linear,
+        embedding: chex.Array,
+        meta_h_state: chex.Array,
     ) -> chex.Array:
         """
         Applies multiplicative interaction with meta conditioning to encoder output.
 
         Parameters
         ----------
+        meta_proj : nnx.Linear
+            The active meta projection layer
         embedding : chex.Array
             Encoder output. Shape: `(B, T, E)`
         meta_h_state : chex.Array
@@ -554,7 +649,7 @@ class DiscoAgent:
             Conditioned embedding. Shape: `(B, T, E)`
         """
         # (B, H_meta) -> (B, E)
-        new_h = self.meta_proj(meta_h_state)  # type: ignore
+        new_h = meta_proj(meta_h_state)  # type: ignore
         new_h = jnp.expand_dims(new_h, axis=1)  # (B, E) -> (B, 1, E)
         return embedding * new_h
 
@@ -589,6 +684,50 @@ class DiscoAgent:
         nnx.update(self._disco_net, params["disco_net"])
         nnx.update(self._meta_lnn, params["meta_lnn"])
         nnx.update(self._meta_proj, params["meta_proj"])
+
+    def merge_params(
+        self, params: nnx.State
+    ) -> Tuple[DiscoInputEncoder, DiscoNetwork, LNN, nnx.Linear]:
+        """
+        Reconstruct all Disco modules from explicit parameters.
+
+        Parameters
+        ----------
+        params : nnx.State
+            Module parameters
+
+        Returns
+        -------
+        encoder : DiscoInputEncoder
+            An updated encoder with the given parameters
+        disco_net : DiscoNetwork
+            An updated disco network with the given parameters
+        meta_lnn : LNN
+            An updated meta LNN with the given parameters
+        meta_proj : nnx.Linear
+            An updated projection layer with the given parameters
+        """
+        encoder = nnx.merge(
+            self._encoder_graphdef,
+            params["encoder"],
+            self._encoder_rest,
+        )
+        disco_net = nnx.merge(
+            self._disco_net_graphdef,
+            params["disco_net"],
+            self._disco_net_rest,
+        )
+        meta_lnn = nnx.merge(
+            self._meta_lnn_graphdef,
+            params["meta_lnn"],
+            self._meta_lnn_rest,
+        )
+        meta_proj = nnx.merge(
+            self._meta_proj_graphdef,
+            params["meta_proj"],
+            self._meta_proj_rest,
+        )
+        return encoder, disco_net, meta_lnn, meta_proj
 
     def save(
         self,

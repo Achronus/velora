@@ -206,6 +206,13 @@ class PolicyAgentOutput:
 
     Parameters
     ----------
+    encoding : chex.Array
+        Encoder embedding output `(B, T, F)`
+
+        - `batch_size (B)` the number of samples per timestep
+        - `seq_length (T)` the number of sequences (e.g., trajectories)
+        - `features (F)` number of features in the embedding
+
     pi : jax.Array
         Policy logits with shape `(B, T, A)` or `(B, A)`:
 
@@ -244,6 +251,7 @@ class PolicyAgentOutput:
         - q_dim (`Q`) - the size of the action-value prediction head.
     """
 
+    encoding: chex.Array
     pi: chex.Array
     y: chex.Array
     z: chex.Array
@@ -253,6 +261,7 @@ class PolicyAgentOutput:
     @classmethod
     def create(
         cls,
+        encoding: chex.Array,
         pi: chex.Array,
         y: chex.Array,
         z: chex.Array,
@@ -260,7 +269,7 @@ class PolicyAgentOutput:
         q: chex.Array,
     ) -> Self:
         """Create a new instance with time dimension squeezed if `T=1`."""
-        return cls(*jax.tree.map(squeeze_time, (pi, y, z, aux_pi, q)))
+        return cls(*jax.tree.map(squeeze_time, (encoding, pi, y, z, aux_pi, q)))
 
 
 @struct.dataclass

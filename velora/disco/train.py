@@ -900,22 +900,28 @@ class RuleTrainer:
                     rollout,
                     disco_h_state=disco_h,
                     meta_h_state=meta_h,
+                    params=meta_params,
                 )
 
                 # Compute policy loss and gradient
                 def inner_loss_fn(params) -> Tuple[chex.Array, AgentLosses]:
+                    fresh_preds = trainer.policy_agent.functional_forward(
+                        rollout.preds.encoding,
+                        params,
+                    )
+
                     return compute_policy_loss(
                         targets,
-                        rollout.preds.pi,
-                        rollout.preds.y,
-                        rollout.preds.z,
-                        rollout.preds.aux_pi,
+                        fresh_preds.pi,
+                        fresh_preds.y,
+                        fresh_preds.z,
+                        fresh_preds.aux_pi,
                         rollout.actions,
                         rollout.discounts,
                         self.config.loss_cost,
                     )
 
-                (_), grads = inner_grad_fn(inner_loss_fn, has_aux=True)(p_params)
+                (_, _), grads = inner_grad_fn(inner_loss_fn, has_aux=True)(p_params)
 
                 # Apply inner update
                 updates, new_opt_state = trainer.policy_optim.update(
