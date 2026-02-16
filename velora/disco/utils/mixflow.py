@@ -32,6 +32,11 @@ computed via `fwdrev_grad` — a function with a custom VJP that computes
 Hessian-vector products (HVPs) using forward-over-reverse mode. This
 avoids storing inner backward pass activations, reducing dynamic memory
 by up to 10x and wall-clock time by up to 25%.
+
+References
+----------
+.. [1] Kemaev et al., "Scalable Meta-Learning via Mixed-Mode
+   Differentiation", Proceedings of the 42nd ICML, PMLR 267, 2025.
 """
 
 from functools import partial
@@ -46,8 +51,8 @@ def fwdrev_grad(
     *args: Any,
 ) -> Any:
     """
-    Compute the gradient of `fn` with a custom VJP rule that uses
-    forward-over-reverse mode for Hessian-vector products.
+    Compute the gradient of `fn` w.r.t. its first argument, with a
+    custom VJP rule that uses forward-over-reverse mode for HVPs.
 
     In the forward pass, this is identical to `jax.grad(fn)(*args)`.
     In the backward pass (when this function is itself differentiated
@@ -55,28 +60,25 @@ def fwdrev_grad(
     over `jax.grad` (forward-over-reverse) instead of the default
     `jax.grad` over `jax.grad` (reverse-over-reverse).
 
-    This avoids storing intermediate activations from the inner backward
-    pass, which is the primary source of memory savings.
+    This avoids storing intermediate activations from the inner backward pass, which is the primary source of memory savings.
+
+    Important: `fn` is a non-diff argument (static Python callable).
+    Any values that the outer gradient needs to differentiate through
+    must be passed as explicit `*args`, not closed over by `fn`.
 
     Parameters
     ----------
     fn : Callable
-        A scalar-valued function to differentiate. Must return either
-        a scalar or `(scalar, aux)` tuple
+        A scalar-valued function to differentiate. Must return a scalar. All differentiable state must be passed via `*args`.
     *args : Any
-        Arguments to `fn` (typically model parameters and inputs)
+        Arguments to `fn`. The gradient is computed w.r.t. the first
+        argument only, but ALL args participate in the outer backward
+        pass (HVP computation).
 
     Returns
     -------
     grad : Any
-        Gradient of `fn` w.r.t. its first argument, same structure
-        as `args[0]`
-
-    Notes
-    -----
-    Based on Algorithm 2 and Appendix A.4 of Kemaev et al. (2025).
-    The `nondiff_argnums=(0,)` ensures `fn` is not traced by JAX
-    but passed through as a static Python callable.
+        Gradient of `fn` w.r.t. `args[0]`
     """
     return jax.grad(fn)(*args)
 
@@ -88,7 +90,7 @@ def _fwdrev_grad_fwd(
     """
     Forward rule for `fwdrev_grad`.
 
-    Computes the gradient (primal output) and saves the arguments
+    Computes the gradient (primal output) and saves the args
     as residuals for use in the backward pass. The gradient itself
     is NOT saved as a residual — it will be recomputed in the backward
     pass via `jax.jvp`.
@@ -117,16 +119,15 @@ def _fwdrev_grad_bwd(
     cotangent: Any,
 ) -> Tuple[Any, ...]:
     """
-    Backward rule for `fwdrev_grad` using forward-over-reverse mode.
+    Backward rule using forward-over-reverse HVP.
 
-    When the outer `jax.grad` calls back through `fwdrev_grad`, it
-    needs to compute a vector-Hessian product (VHP): `v @ H` where
-    `v` is the cotangent and `H = ∂²L/∂θ²`.
+    Computes `jax.jvp(jax.grad(fn), primals, tangents)` which gives
+    the Hessian-vector product needed by the outer backward pass.
 
-    By the symmetry of the Hessian (Schwarz's theorem), this equals
-    `(H @ v)ᵀ = (HVP)ᵀ`. The HVP `H @ v` can be computed efficiently
-    using `jax.jvp` over `jax.grad` (forward-over-reverse), which
-    avoids storing the activations from the inner backward pass.
+    The cotangent tuple has the same structure as `*args`. The JVP
+    propagates tangents through all args, so the outer gradient
+    correctly flows through both the params (first arg) and any
+    additional differentiable state (remaining args).
 
     Parameters
     ----------
@@ -143,21 +144,8 @@ def _fwdrev_grad_bwd(
     grads : Tuple[Any, ...]
         Gradients w.r.t. each argument of `fwdrev_grad`, computed
         via forward-over-reverse HVP
-
-    Notes
-    -----
-    The `jax.jvp(jax.grad(fn), primals, tangents)` call computes:
-        - primals: `jax.grad(fn)(*args)` (recomputed, not stored)
-        - tangents: `J @ tangents` where J is the Jacobian of grad(fn)
-
-    For a scalar loss, the Jacobian of `grad(fn)` is exactly the Hessian,
-    so `tangents` gives us the HVP we need.
     """
     args = residuals
-
-    # Forward-over-reverse: jvp of grad(fn) computes HVP
-    # primals_out = grad(fn)(*args)       [recomputed]
-    # tangents_out = H @ cotangent        [the HVP we need]
     _, hvp = jax.jvp(jax.grad(fn), args, cotangent)
     return hvp
 
@@ -177,6 +165,15 @@ def fwdrev_value_and_grad(
     `jax.grad` (the outer meta-gradient), this produces the same
     mathematical result as `jax.value_and_grad` but with substantially
     lower memory consumption.
+
+    Important: unlike `jax.value_and_grad`, the loss function `fn`
+    must receive ALL differentiable state as explicit arguments. Values
+    that the outer `jax.grad` needs to differentiate through cannot
+    be closed over — they must be passed as arguments to `fn`.
+
+    The gradient is computed w.r.t. the **first** argument only (like
+    `jax.value_and_grad` with default `argnums=0`). Additional
+    arguments are passed through to support outer-gradient flow.
 
     Parameters
     ----------
