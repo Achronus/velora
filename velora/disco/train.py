@@ -903,11 +903,16 @@ class RuleTrainer:
                     params=meta_params,
                 )
 
+                # Set values for inner_loss_fn
+                encoding = rollout.preds.encoding
+                actions, discounts = rollout.actions, rollout.discounts
+
                 # Compute policy loss and gradient
-                def inner_loss_fn(params) -> Tuple[chex.Array, AgentLosses]:
+                def inner_loss_fn(
+                    params, encoding, targets, actions, discounts
+                ) -> Tuple[chex.Array, AgentLosses]:
                     fresh_preds = trainer.policy_agent.functional_forward(
-                        rollout.preds.encoding,
-                        params,
+                        encoding, params
                     )
 
                     return compute_policy_loss(
@@ -916,12 +921,14 @@ class RuleTrainer:
                         fresh_preds.y,
                         fresh_preds.z,
                         fresh_preds.aux_pi,
-                        rollout.actions,
-                        rollout.discounts,
+                        actions,
+                        discounts,
                         self.config.loss_cost,
                     )
 
-                (_, _), grads = inner_grad_fn(inner_loss_fn, has_aux=True)(p_params)
+                (_, _), grads = inner_grad_fn(inner_loss_fn, has_aux=True)(
+                    p_params, encoding, targets, actions, discounts
+                )
 
                 # Apply inner update
                 updates, new_opt_state = trainer.policy_optim.update(
@@ -934,9 +941,6 @@ class RuleTrainer:
                 new_carry = (new_policy_params, disco_h, meta_h, new_opt_state)
                 return new_carry, (targets, rollout.target_preds.pi)
 
-            # Checkpoint gradients
-            checkpointed_step = jax.checkpoint(_inner_step, prevent_cse=False)  # type: ignore
-
             # Run inner loop
             init_carry = (
                 policy_params,
@@ -946,7 +950,7 @@ class RuleTrainer:
             )
             (final_p_params, final_d_h, final_m_h, _), (all_targets, all_targets_pi) = (
                 jax.lax.scan(
-                    checkpointed_step,
+                    _inner_step,
                     init_carry,  # type: ignore
                     train_rollouts,  # type: ignore
                 )
