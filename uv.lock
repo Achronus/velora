@@ -581,15 +581,6 @@ wheels = [
 ]
 
 [[package]]
-name = "filelock"
-version = "3.20.3"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/1d/65/ce7f1b70157833bf3cb851b556a37d4547ceafc158aa9b34b36782f23696/filelock-3.20.3.tar.gz", hash = "sha256:18c57ee915c7ec61cff0ecf7f0f869936c7c30191bb0cf406f1341778d0834e1", size = 19485, upload-time = "2026-01-09T17:55:05.421Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/b5/36/7fb70f04bf00bc646cd5bb45aa9eddb15e19437a28b8fb2b4a5249fac770/filelock-3.20.3-py3-none-any.whl", hash = "sha256:4b0dda527ee31078689fc205ec4f1c1bf7d56cf88b6dc9426c4f230e46c2dce1", size = 16701, upload-time = "2026-01-09T17:55:04.334Z" },
-]
-
-[[package]]
 name = "flax"
 version = "0.12.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2152,19 +2143,6 @@ wheels = [
 ]
 
 [[package]]
-name = "procgen-gym"
-version = "0.1.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "filelock" },
-    { name = "gymnasium", extra = ["other"] },
-]
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/cd/e0/b9d98c7ccf79f1aa86f8d0ccd83206142acada84fde514f7161f97303cca/procgen_gym-0.1.1-cp313-cp313-manylinux_2_28_x86_64.whl", hash = "sha256:721b9ec724a28c4a52133a7f5b6d4e516a0fa353fc4d08dc5783de41601e6ed4", size = 52942116, upload-time = "2026-02-10T23:12:51.362Z" },
-    { url = "https://files.pythonhosted.org/packages/ff/68/85f8032412595064fcdce73904de41456dd26ab2f2adc2ef9d58b8afbfdd/procgen_gym-0.1.1-cp313-cp313-win_amd64.whl", hash = "sha256:c1032b7394fb182f0777000687598fde4a9d600db958ab0804ed147605862a81", size = 32488910, upload-time = "2026-02-10T23:12:54.713Z" },
-]
-
-[[package]]
 name = "proglog"
 version = "0.1.12"
 source = { registry = "https://pypi.org/simple" }
@@ -2992,7 +2970,6 @@ dependencies = [
     { name = "jax" },
     { name = "jax-ai-stack" },
     { name = "optax" },
-    { name = "procgen-gym" },
     { name = "rlax" },
     { name = "safetensors" },
     { name = "tensorboard" },
@@ -3023,7 +3000,6 @@ requires-dist = [
     { name = "jax", specifier = ">=0.8.0" },
     { name = "jax-ai-stack" },
     { name = "optax", specifier = ">=0.2.6" },
-    { name = "procgen-gym", specifier = "==0.1.1" },
     { name = "rlax", specifier = ">=0.1.8" },
     { name = "safetensors", specifier = ">=0.7.0" },
     { name = "tensorboard", specifier = ">=2.20.0" },

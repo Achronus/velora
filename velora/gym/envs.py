@@ -18,7 +18,7 @@ from importlib.util import find_spec
 from typing import Callable, Dict, Iterator, List, Self, Tuple, Union
 
 from velora.gym.error import MissingPackageError
-from velora.gym.make import make_atari_env, make_dmlab_env, make_procgen_env
+from velora.gym.make import make_atari_env
 from velora.gym.wrappers import JaxConversion
 
 MakeFn = Callable[..., JaxConversion]
@@ -271,118 +271,6 @@ class AtariEnvs(EnvGroup):
         return f"{self.prefix}/{env}-{ver}"
 
 
-@dataclass
-class ProcgenEnvs(EnvGroup):
-    """
-    [Procgen Benchmark (Gymnasium variant)](https://github.com/Achronus/procgen-gymnasium).
-
-    16 procedurally generated game environments.
-    """
-
-    prefix: str = "procgen_gym/procgen"
-    category: str = "Procgen"
-    version: str = "v0"
-    required_packages: List[str] = field(
-        default_factory=lambda: ["gymnasium", "procgen_gym"]
-    )
-    envs: List[str] = field(
-        default_factory=lambda: [
-            "bigfish",
-            "bossfight",
-            "caveflyer",
-            "chaser",
-            "climber",
-            "coinrun",
-            "dodgeball",
-            "fruitbot",
-            "heist",
-            "jumper",
-            "leaper",
-            "maze",
-            "miner",
-            "ninja",
-            "plunder",
-            "starpilot",
-        ]
-    )
-
-    @property
-    def make_fn(self) -> MakeFn:
-        """Factory function for creating Procgen environments."""
-        return make_procgen_env
-
-    def get_name(self, env: str, version: str | None = None) -> str:
-        """Get full name: procgen_gym/procgen-{env}-v0"""
-        ver = version if version is not None else self.version
-        return f"{self.prefix}-{env}-{ver}"
-
-
-@dataclass
-class DMLabEnvs(EnvGroup):
-    """
-    [DeepMind Lab](https://github.com/google-deepmind/lab) DMLab-30 benchmark.
-
-    30 3D navigation and puzzle-solving environments.
-    """
-
-    prefix: str = "dmlab_gym"
-    category: str = "DMLab"
-    version: str = "v0"
-    required_packages: List[str] = field(
-        default_factory=lambda: ["dmlab_gym", "deepmind_lab"]
-    )
-    envs: List[str] = field(
-        default_factory=lambda: [
-            # Rooms (5 levels)
-            "rooms_collect_good_objects_train",
-            "rooms_exploit_deferred_effects_train",
-            "rooms_select_nonmatching_object",
-            "rooms_watermaze",
-            "rooms_keys_doors_puzzle",
-            # Language (4 levels)
-            "language_select_described_object",
-            "language_select_located_object",
-            "language_execute_random_task",
-            "language_answer_quantitative_question",
-            # LaserTag (4 levels)
-            "lasertag_one_opponent_small",
-            "lasertag_three_opponents_small",
-            "lasertag_one_opponent_large",
-            "lasertag_three_opponents_large",
-            # NatLab (3 levels)
-            "natlab_fixed_large_map",
-            "natlab_varying_map_regrowth",
-            "natlab_varying_map_randomized",
-            # SkyMaze (2 levels)
-            "skymaze_irreversible_path_hard",
-            "skymaze_irreversible_path_varied",
-            # PsychLab (4 levels)
-            "psychlab_arbitrary_visuomotor_mapping",
-            "psychlab_continuous_recognition",
-            "psychlab_sequential_comparison",
-            "psychlab_visual_search",
-            # Explore (8 levels)
-            "explore_object_locations_small",
-            "explore_object_locations_large",
-            "explore_obstructed_goals_small",
-            "explore_obstructed_goals_large",
-            "explore_goal_locations_small",
-            "explore_goal_locations_large",
-            "explore_object_rewards_few",
-            "explore_object_rewards_many",
-        ]
-    )
-
-    @property
-    def make_fn(self) -> MakeFn:
-        """Factory function for creating DeepMind Lab environments."""
-        return make_dmlab_env
-
-    def get_name(self, env: str, version: str | None = None) -> str:
-        """Get level name. Registration handled by make_dmlab_env."""
-        return env
-
-
 class EnvSet:
     """
     A collection of environment groups for training across multiple suites.
@@ -515,7 +403,3 @@ class EnvSet:
 
 # Pre-instantiated environment groups for convenience
 ATARI = AtariEnvs()
-PROCGEN = ProcgenEnvs()
-DMLAB = DMLabEnvs()
-
-DISCRETE_103 = EnvSet(ATARI, PROCGEN, DMLAB)
