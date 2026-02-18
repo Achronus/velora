@@ -29,12 +29,7 @@ from velora.cli.disco.dashboard import DiscoConsoleDashboard
 from velora.cli.disco.settings import DiscoParamsSettings
 from velora.disco.agent import DiscoAgent, DiscoValueAgent, PolicyAgent
 from velora.disco.config.settings import AgentTrainerSettings, RuleTrainerSettings
-from velora.disco.config.state import (
-    AgentSnapshot,
-    AgentTrainerState,
-    CollectState,
-    RuleTrainerState,
-)
+from velora.disco.config.state import AgentTrainerState, CollectState, RuleTrainerState
 from velora.disco.ema import MovingAverage
 from velora.disco.outputs import (
     AgentLossAux,
@@ -45,7 +40,6 @@ from velora.disco.outputs import (
     ValueOutputs,
 )
 from velora.disco.rollouts import Rollout, RolloutStack
-from velora.disco.scheduler import EnvironmentScheduler, SchedulerSettings
 from velora.disco.utils.compute import compute_value_outputs
 from velora.disco.utils.loss import (
     compute_entropy_loss,
@@ -428,30 +422,6 @@ class AgentTrainer:
         """Clean up resources."""
         self.envs.close()
 
-    def serialize(self, device: str | None = None) -> AgentSnapshot:
-        """
-        Serialize the trainer's full state for CPU-resident storage.
-
-        Parameters
-        ----------
-        device : str (optional)
-            Target device for arrays. If `None`, uses `jax.devices("cpu")[0]`.
-            Default is `None`
-
-        Returns
-        -------
-        snapshot : AgentSnapshot
-            CPU-resident snapshot of this trainer's state
-        """
-        device = jax.devices(device or "cpu")[0]
-
-        return AgentSnapshot(
-            policy_params=jax.device_put(self.policy_agent.get_params(), device),
-            target_params=jax.device_put(self.target_agent.get_params(), device),
-            value_params=jax.device_put(self.value_agent.get_params(), device),
-            trainer_state=jax.device_put(self.state, device),
-        )
-
 
 class RuleTrainer:
     """
@@ -472,9 +442,6 @@ class RuleTrainer:
         Environment set or group to use for rule discovery
     config : RuleTrainerSettings
         Configuration for meta-training
-    scheduler_config : SchedulerConfig (optional)
-        Configuration for the environment scheduler. When `None` uses `SchedulerConfig()`.
-        Default is `None`
     seed : int (optional)
         Random number generator seed. Default is `42`
     jit_compile : bool (optional)
@@ -487,7 +454,6 @@ class RuleTrainer:
         envs: EnvSet | EnvGroup,
         *,
         config: RuleTrainerSettings,
-        scheduler_config: SchedulerSettings | None = None,
         seed: int = 42,
         jit_compile: bool = True,
     ) -> None:
@@ -513,7 +479,7 @@ class RuleTrainer:
 
         # Configure RNG keys
         key = jax.random.key(seed)
-        self.key, meta_key, setup_key = jax.random.split(key, 3)
+        self.key, meta_key, *trainer_keys = jax.random.split(key, self.num_envs + 2)
 
         # Init meta-agent and optimizer
         self.meta_agent = DiscoAgent(
@@ -533,13 +499,7 @@ class RuleTrainer:
             self.config.num_vec_envs,
             *self.meta_agent.hidden_sizes,
         )
-
-        # Init scheduler
-        self.scheduler = EnvironmentScheduler(
-            envs.as_specs(),
-            config=scheduler_config or SchedulerSettings(),
-            seed=seed,
-        )
+        self.trainers: List[AgentTrainer] = []
 
         # Checkpointing
         self.cp_manager = CheckpointManager(self.config.checkpoint)
@@ -549,15 +509,14 @@ class RuleTrainer:
         self.console = DiscoConsoleDashboard(
             self.config.console_config(
                 envs=envs.env_categories(),
-                params=self._dummy_params(setup_key),
-                batch_size=self.scheduler.config.batch_size,
+                params=self._dummy_params(trainer_keys[0]),
                 complete_path=str(self.rule_path),
                 jit_compile=self.jit_compile,
             )
         )
 
         # Initial setup
-        self._initial_setup(setup_key)
+        self._initial_setup(trainer_keys)
 
     def _dummy_params(self, rng_key: chex.PRNGKey) -> DiscoParamsSettings:
         """
@@ -594,96 +553,47 @@ class RuleTrainer:
             disco=self.meta_agent.param_count,
         )
 
-    def _initial_setup(self, key: chex.PRNGKey) -> None:
+    def _initial_setup(self, trainer_keys: List[chex.PRNGKey]) -> None:
         """
-        Perform initial setup: create one trainer for warm-up and
-        console dashboard initialization.
+        Performs an initial forward pass through all agent networks and trainers
+        and setups up environments.
 
-        The trainer is created temporarily, used for parameter counting
-        and meta-agent warm-up, then torn down.
+        Includes -
+            1. Materializing parameters before optimizer init
+            2. JIT compile
+            3. Creates environments
 
         Parameters
         ----------
-        key : chex.PRNGKey
-            Random number generator key
+        trainer_keys : List[chex.PRNGKey]
+            List of trainer random number generated keys
         """
-        env_name, make_fn = self._env_specs[0]
-        self.console.start_setup(3)
+        self.console.start_setup((2 * self.num_envs) + 1)
 
-        # Create temp trainer for warm-up
-        trainer = AgentTrainer(
-            env_name,
-            self.config.agent_trainer_config(),
-            key=key,
-            logger=self.logger,
-            writer_name=f"warm/{env_name}",
-            make_fn=make_fn,
-            jit_compile=self.jit_compile,
-        )
-        self.console.update_setup()
+        # Create remaining trainers with progress updates
+        for i, (env_name, make_fn) in enumerate(self._env_specs):
+            trainer = AgentTrainer(
+                env_name,
+                self.config.agent_trainer_config(),
+                key=trainer_keys[i],
+                logger=self.logger,
+                writer_name=f"envs/{env_name}",
+                make_fn=make_fn,
+                jit_compile=self.jit_compile,
+            )
+            self.trainers.append(trainer)
+            self.console.update_setup()
 
-        dummy_rollout = trainer.collect()
+        dummy_rollout = self.trainers[0].collect()
         _ = self.meta_agent(dummy_rollout)
         self.console.update_setup()
 
-        # Init env state and clean up
-        self.scheduler.set_state(0, trainer.serialize())
-        trainer.close()
+        # Warm all trainers
+        for trainer in self.trainers:
+            trainer.warm()
+            self.console.update_setup()
 
-        self.console.update_setup()
         self.console.finish_setup()
-
-    def _create_trainer(self, env_idx: int) -> AgentTrainer:
-        """
-        Create a fresh `AgentTrainer` for a specific environment.
-
-        If the scheduler holds a serialized state for this environment, the trainer's state is restored from it.
-
-        Parameters
-        ----------
-        env_idx : int
-            Environment spec list index
-
-        Returns
-        -------
-        trainer : AgentTrainer
-            New trainer, optionally restored from serialized state
-        """
-        env_name, make_fn = self._env_specs[env_idx]
-
-        # Deterministic key per env, varying by meta-step for resets
-        trainer_key = jax.random.fold_in(self.key, env_idx + self.state.meta_step)
-
-        trainer = AgentTrainer(
-            env_name,
-            self.config.agent_trainer_config(),
-            key=trainer_key,
-            logger=self.logger,
-            writer_name=f"envs/{env_name}",
-            make_fn=make_fn,
-            jit_compile=self.jit_compile,
-        )
-
-        # Restore state (if available)
-        state = self.scheduler.get_state(env_idx)
-        if state is not None:
-            EnvironmentScheduler.restore_trainer(trainer, state)
-
-        return trainer
-
-    def _teardown_trainer(self, env_idx: int, trainer: AgentTrainer) -> None:
-        """
-        Serialize a trainer's state and close its environment.
-
-        Parameters
-        ----------
-        env_idx : int
-            Environment index
-        trainer : AgentTrainer
-            Trainer to use
-        """
-        self.scheduler.set_state(env_idx, trainer.serialize())
-        trainer.close()
 
     def train(self) -> None:
         """
@@ -711,62 +621,45 @@ class RuleTrainer:
         self.console.start_training()
 
         for step in range(self.config.n_steps):
-            # Running gradient accumulation
             accumulated_grad = jax.tree.map(
                 jnp.zeros_like,
                 self.meta_agent.get_params(),
             )
-
-            n_envs_processed = 0
             all_rewards: List[float] = []
             all_losses: List[LossStatistics] = []
 
-            batch = self.scheduler.next_batch()
+            # Iterate through each environment
+            for idx, trainer in enumerate(self.trainers):
+                train_rollouts = trainer.collect_stack(self.config.n_updates)
+                valid_rollout = trainer.collect(self.config.seq_len * 2)
 
-            # Environment iteration
-            for env_batch in self.scheduler.iterate_concurrent(batch):
-                for env_idx in env_batch:
-                    trainer = self._create_trainer(env_idx)
+                # Compute meta_gradient for this agent
+                meta_grad, disco_h, meta_h, losses = self._compute_meta_gradient(
+                    idx,
+                    trainer,
+                    train_rollouts,
+                    valid_rollout,
+                )
 
-                    # Collect data
-                    train_rollouts = trainer.collect_stack(self.config.n_updates)
-                    valid_rollout = trainer.collect(self.config.seq_len * 2)
+                # Collect metrics
+                accumulated_grad = jax.tree.map(
+                    lambda acc, g: acc + g,
+                    accumulated_grad,
+                    meta_grad,
+                )
+                all_rewards.extend(trainer.get_episode_rewards())
+                all_losses.append(losses)
 
-                    # Compute meta_gradient for this agent
-                    meta_grad, disco_h, meta_h, losses = self._compute_meta_gradient(
-                        env_idx,
-                        trainer,
-                        train_rollouts,
-                        valid_rollout,
-                    )
+                # Update hidden states
+                self.state = self.state.update_hidden(idx, disco_h, meta_h)  # type: ignore
 
-                    # Collect metrics
-                    accumulated_grad = jax.tree.map(
-                        lambda acc, g: acc + g,
-                        accumulated_grad,
-                        meta_grad,
-                    )
-                    n_envs_processed += 1
+                # Update value function
+                _ = trainer.update_value(valid_rollout)
 
-                    all_rewards.extend(trainer.get_episode_rewards())
-                    all_losses.append(losses)
+                self.console.update_progress()
 
-                    # Update hidden states
-                    self.state = self.state.update_hidden(env_idx, disco_h, meta_h)  # type: ignore
-
-                    # Update value function
-                    _ = trainer.update_value(valid_rollout)
-
-                    # Close trainer
-                    self._teardown_trainer(env_idx, trainer)
-                    self.console.update_progress()
-
-            # Update meta-gradients across processed environments
-            avg_meta_grad = jax.tree.map(
-                lambda g: g / n_envs_processed,
-                accumulated_grad,
-            )
-            self._apply_meta_update(avg_meta_grad)
+            # Apply accumulated gradients
+            self._apply_meta_update(accumulated_grad)
 
             # Compute reward statistics
             reward_stats = RewardStatistics.from_rewards(all_rewards)
@@ -774,14 +667,12 @@ class RuleTrainer:
 
             # Log metrics
             metrics = {
-                "meta/grad_norm": float(optax.global_norm(avg_meta_grad)),
+                "meta/grad_norm": float(optax.global_norm(accumulated_grad)),
                 "meta/avg_reward": reward_stats.avg_reward,
                 "meta/reward_std": reward_stats.reward_std,
                 "meta/reward_min": reward_stats.reward_min,
                 "meta/reward_max": reward_stats.reward_max,
                 "meta/step": step,
-                "meta/envs_processed": n_envs_processed,
-                "meta/epoch": self.scheduler.epoch,
             }
             self.logger.log("meta", step, metrics)
 
@@ -1153,15 +1044,49 @@ class RuleTrainer:
         self.meta_agent.update_params(restored["meta_params"])
         self.state = restored["state"]
 
-        # Reset all serialized agent states (fresh start)
+        # Reset all agent trainers
         for idx in range(self.num_envs):
-            self.scheduler.set_state(idx, None)
+            self.reset_trainer(idx)
 
         return True
+
+    def reset_trainer(self, trainer_idx: int) -> None:
+        """
+        Reset a trainer to initial state.
+
+        Parameters
+        ----------
+        trainer_idx : int
+            Index of the trainer to reset
+        """
+        env_name, make_fn = self._env_specs[trainer_idx]
+
+        # Close existing trainer
+        self.trainers[trainer_idx].close()
+
+        # Fresh RNG keys
+        self.key, new_key = jax.random.split(self.key, 2)
+
+        # Init new trainer
+        self.trainers[trainer_idx] = AgentTrainer(
+            env_name,
+            self.config.agent_trainer_config(),
+            key=new_key,
+            logger=self.logger,
+            writer_name=f"envs/{env_name}",
+            make_fn=make_fn,
+            jit_compile=self.jit_compile,
+        )
+
+        # Reset hidden state for this environment
+        self.state: RuleTrainerState = self.state.update_hidden(trainer_idx, None, None)
 
     def close(self) -> None:
         """Clean up resources."""
         self.cp_manager.close()
+
+        for trainer in self.trainers:
+            trainer.close()
 
     def save_rule(self) -> Path:
         """

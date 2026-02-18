@@ -9,7 +9,7 @@ from velora.disco import (
     RuleTrainer,
     RuleTrainerSettings,
 )
-from velora.gym import ATARI, DISCRETE_103, DMLAB, PROCGEN, EnvGroup, EnvSet
+from velora.gym import ATARI, EnvGroup, EnvSet
 from velora.tracking import CheckpointSettings, MetricLoggerSettings
 
 __all__ = [
@@ -24,9 +24,6 @@ __all__ = [
     "CheckpointSettings",
     "MetricLoggerSettings",
     "ATARI",
-    "PROCGEN",
-    "DMLAB",
-    "DISCRETE_103",
     "EnvSet",
     "EnvGroup",
 ]

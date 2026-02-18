@@ -103,9 +103,9 @@ class DiscoConsoleDashboard(ConsoleDashboard):
                 Metric("Meta Steps", self.config.meta_steps),
                 Metric("Inner Updates", self.config.n_updates),
                 Metric("Trajectory Size", self.config.seq_len),
-                Metric("Env Sample Batch Size", self.config.batch_size),
+                Metric("Batch Size", self.config.batch_size),
                 Divider(),
-                Metric("Loss Update Freq (Steps)", self.config.loss_update_freq()),
+                Metric("Metric Update Freq (Steps)", self.config.env_total()),
             ],
             colour=Colour.PERIWINKLE,
         )

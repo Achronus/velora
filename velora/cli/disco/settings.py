@@ -99,7 +99,7 @@ class DiscoDashboardSettings:
     seq_len : int
         Trajectory sequence length (timesteps per rollout)
     batch_size : int
-        Environment scheduler batch size
+        Number of vectorized environments
     log_dir : str
         Directory path for Tensorboard logs
     cp_dir : str
@@ -148,15 +148,4 @@ class DiscoDashboardSettings:
         total : int
             Total training steps
         """
-        return self.meta_steps * (self.batch_size + 1)
-
-    def loss_update_freq(self) -> int:
-        """
-        Compute the loss update frequency in steps.
-
-        Returns
-        -------
-        total : int
-            Total loss update frequency
-        """
-        return self.total_steps() // self.meta_steps
+        return self.meta_steps * self.env_total()
