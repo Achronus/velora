@@ -39,7 +39,7 @@ from velora.disco.outputs import (
     MetaLossAux,
     ValueOutputs,
 )
-from velora.disco.rollouts import Rollout, RolloutStack
+from velora.disco.rollouts import Rollout
 from velora.disco.utils.compute import compute_value_outputs
 from velora.disco.utils.loss import (
     compute_entropy_loss,
@@ -57,8 +57,7 @@ class AgentTrainer:
     """
     Trains a single `PolicyAgent` in a single environment using a learned update rule.
 
-    `AgentTrainer` handles the inner loop of target rule learning (DiscoRL): collecting trajectories,
-    sampling from the buffer, generating targets via the target agent, and
+    `AgentTrainer` handles the inner loop of target rule learning (DiscoRL): collecting trajectories, generating targets via the target agent, and
     updating the `PolicyAgent` to minimize prediction error against those targets.
 
     This class is designed to be instantiated multiple times by `RuleTrainer`,
@@ -390,7 +389,7 @@ class AgentTrainer:
 
         return collect_state.to_rollout()
 
-    def collect_stack(self, n_rollouts: int) -> RolloutStack:
+    def collect_stack(self, n_rollouts: int) -> Rollout:
         """
         Collect a stack of rollouts.
 
@@ -401,11 +400,10 @@ class AgentTrainer:
 
         Returns
         -------
-        stack : RolloutStack
+        stack : Rollout
             Stacked rollouts
         """
-        rollouts = [self.collect() for _ in range(n_rollouts)]
-        return RolloutStack.from_list(rollouts)
+        return Rollout.from_list([self.collect() for _ in range(n_rollouts)])
 
     def get_episode_rewards(self) -> Tuple[float, ...]:
         """
@@ -696,7 +694,7 @@ class RuleTrainer:
         self,
         trainer_idx: int,
         trainer: AgentTrainer,
-        train_rollouts: RolloutStack,
+        train_rollouts: Rollout,
         valid_rollout: Rollout,
     ) -> Tuple[chex.ArrayTree, chex.ArrayTree, chex.ArrayTree, LossStatistics]:
         """
@@ -710,7 +708,7 @@ class RuleTrainer:
             Index of the trainer
         trainer : AgentTrainer
             The agent trainer
-        train_rollouts : RolloutStack
+        train_rollouts : Rollout
             Pre-collected training rollouts
         valid_rollout : Rollout
             Validation rollout for meta-loss

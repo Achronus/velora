@@ -398,7 +398,7 @@ class DiscoAgent:
     Combines DiscoRL techniques with Liquid Neural Networks (LNNs).
 
     Architecture:
-        - Input Encoder - converts buffer samples into embeddings for the Disco network
+        - Input Encoder - converts samples into embeddings for the Disco network
         - Disco Network - processes embeddings backwards through time to produce learned targets `(π̂, ŷ, ẑ)` for training the policy agent
         - Meta LNN - captures learning dynamics across the agent's lifetime, providing conditioning signals that modulate target generation
         - Meta Projection - projects meta conditioning to match encoder output to inject lifetime context into target generation
