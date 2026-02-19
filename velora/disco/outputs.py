@@ -463,9 +463,13 @@ class MetaLossAux:
     meta_h : chex.Array
         Meta LNN hidden state (`DiscoAgent`)
     p_params : optax.Params
-        Policy parameters
+        Policy agent parameters
     value_outs : ValueOutputs
         Value function outputs
+    v_params : optax.Params
+        Value agent parameters
+    v_opt_state : optax.OptState
+        Value agent optimizer state
     """
 
     pg_loss: chex.Array
@@ -475,6 +479,37 @@ class MetaLossAux:
     meta_h: chex.Array
     p_params: optax.Params
     value_outs: ValueOutputs
+    v_params: optax.Params
+    v_opt_state: optax.OptState
+
+
+@struct.dataclass
+class MetaInnerStepCarry:
+    """
+    Dataclass for the `_inner_step` in `RuleTrainer._compute_meta_gradient`.
+
+    Parameters
+    ----------
+    p_params : optax.Params
+        Policy agent parameters
+    v_params : optax.Params
+        Value agent parameters
+    disco_h : chex.Array
+        Disco network hidden state
+    meta_h : chex.Array
+        Meta LNN hidden state
+    p_opt_state : optax.OptState
+        Policy agent optimizer state
+    v_opt_state : optax.OptState
+        Value agent optimizer state
+    """
+
+    p_params: optax.Params
+    v_params: optax.Params
+    disco_h: chex.Array
+    meta_h: chex.Array
+    p_opt_state: optax.OptState
+    v_opt_state: optax.OptState
 
 
 @struct.dataclass(frozen=True)
