@@ -157,14 +157,21 @@ class RuleTrainerHiddenStates:
 
     Parameters
     ----------
-    disco : Tuple[chex.Array | None, ...]
+    disco : Tuple[chex.Array, ...]
         `DiscoNetwork` hidden states for each environment
-    meta : Tuple[chex.Array | None, ...]
+    meta : Tuple[chex.Array, ...]
         `MetaLNN` hidden states for each environment
+    disco_zero : chex.Array
+        Empty template array for resetting
+    meta_zero : chex.Array
+        Empty template array for resetting
     """
 
-    disco: Tuple[HiddenState, ...]
-    meta: Tuple[HiddenState, ...]
+    disco: Tuple[chex.Array, ...]
+    meta: Tuple[chex.Array, ...]
+
+    disco_zero: chex.Array
+    meta_zero: chex.Array
 
     @classmethod
     def create(
@@ -193,12 +200,14 @@ class RuleTrainerHiddenStates:
         states : RuleTrainerHiddenStates
             Initialized hidden states (all `0s`)
         """
-        disco_h = jnp.zeros((batch_size, disco_h_size))
-        meta_h = jnp.zeros((batch_size, meta_h_size))
+        disco_zero = jnp.zeros((batch_size, disco_h_size))
+        meta_zero = jnp.zeros((batch_size, meta_h_size))
 
         return cls(
-            disco=tuple(disco_h for _ in range(num_envs)),
-            meta=tuple(meta_h for _ in range(num_envs)),
+            disco=tuple(disco_zero for _ in range(num_envs)),
+            meta=tuple(meta_zero for _ in range(num_envs)),
+            disco_zero=disco_zero,
+            meta_zero=meta_zero,
         )
 
     def update(self, env_idx: int, disco_h: HiddenState, meta_h: HiddenState) -> Self:
@@ -210,9 +219,9 @@ class RuleTrainerHiddenStates:
         env_idx : int
             Index of the environment to update
         disco_h : chex.Array | None
-            New disco network hidden state
+            New disco network hidden state. When `None` replaced with array of `0s`
         meta_h : chex.Array | None
-            New meta-LNN hidden state
+            New meta-LNN hidden state. When `None` replaced with array of `0s`
 
         Returns
         -------
@@ -222,8 +231,8 @@ class RuleTrainerHiddenStates:
         disco_list = list(self.disco)
         meta_list = list(self.meta)
 
-        disco_list[env_idx] = disco_h
-        meta_list[env_idx] = meta_h
+        disco_list[env_idx] = disco_h if disco_h is not None else self.disco_zero
+        meta_list[env_idx] = meta_h if meta_h is not None else self.meta_zero
 
         return self.__replace__(
             disco=tuple(disco_list),
@@ -242,11 +251,11 @@ class RuleTrainerHiddenStates:
         Returns
         -------
         new_state : RuleTrainerHiddenStates
-            An updated hidden state with a single environments reset to `None`
+            An updated hidden state with single environments reset to `0s`
         """
         return self.update(env_idx, None, None)
 
-    def get(self, env_idx: int) -> Tuple[HiddenState, HiddenState]:
+    def get(self, env_idx: int) -> Tuple[chex.Array, chex.Array]:
         """
         Get hidden states for a specific environment.
 
@@ -257,9 +266,9 @@ class RuleTrainerHiddenStates:
 
         Returns
         -------
-        disco_h : chex.Array | None
+        disco_h : chex.Array
             An environments Disco network hidden state
-        meta_h : chex.Array | None
+        meta_h : chex.Array
             An environments Meta-LNN hidden state
         """
         return self.disco[env_idx], self.meta[env_idx]
