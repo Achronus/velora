@@ -481,6 +481,8 @@ class RuleTrainer:
     jit_compile : bool (optional)
         Flag to enable/disable JIT compilation. Recommended `True` to reduce training
         speed. Default is `True`
+    cache_dir : str | None (optional)
+        Directory path for JAX's persistent XLA compilation cache. On repeated runs with the same model shapes, compilation is skipped and loaded from disk instead. Set to `None` to disable. Only active when `jit_compile=True`. Default is `".cache/jax"`
     """
 
     def __init__(
@@ -490,7 +492,11 @@ class RuleTrainer:
         config: RuleTrainerSettings,
         seed: int = 42,
         jit_compile: bool = True,
+        cache_dir: str | None = ".cache/jax",
     ) -> None:
+        if jit_compile and cache_dir is not None:
+            jax.config.update("jax_compilation_cache_dir", cache_dir)
+
         if isinstance(envs, EnvGroup):
             envs = EnvSet(envs)
 
@@ -503,6 +509,7 @@ class RuleTrainer:
 
         self.config = config
         self.jit_compile = jit_compile
+        self.cache_dir = cache_dir
 
         # Init logger
         self.logger = MetricsLogger(self.config.logger)
@@ -546,6 +553,7 @@ class RuleTrainer:
                 params=self._dummy_params(trainer_keys[0]),
                 complete_path=str(self.rule_path),
                 jit_compile=self.jit_compile,
+                cache_dir=self.cache_dir,
             )
         )
 
