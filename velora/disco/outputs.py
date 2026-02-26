@@ -19,6 +19,7 @@ from typing import Dict, Self, Sequence, Tuple
 import chex
 import jax
 import jax.numpy as jnp
+import numpy as np
 import optax
 from flax import struct
 
@@ -270,6 +271,23 @@ class PolicyAgentOutput:
     ) -> Self:
         """Create a new instance with time dimension squeezed if `T=1`."""
         return cls(*jax.tree.map(squeeze_time, (encoding, pi, y, z, aux_pi, q)))
+
+    def to_numpy(self) -> Self:
+        """Convert all fields to numpy arrays."""
+        return jax.tree.map(np.asarray, self)
+
+    @classmethod
+    def from_numpy(
+        cls,
+        encoding: np.ndarray,
+        pi: np.ndarray,
+        y: np.ndarray,
+        z: np.ndarray,
+        aux_pi: np.ndarray,
+        q: np.ndarray,
+    ) -> Self:
+        """Create a new instance from numpy arrays."""
+        return cls(*jax.tree.map(jnp.asarray, (encoding, pi, y, z, aux_pi, q)))
 
 
 @struct.dataclass
