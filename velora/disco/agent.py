@@ -155,6 +155,11 @@ class PolicyAgent:
         """Get the agents parameter count."""
         return ParamCount(active=self.active_params, total=self.total_params)
 
+    @property
+    def encoding_dim(self) -> int:
+        """Output feature dimensionality of the encoder."""
+        return self._encoder.encoding_dim
+
     def _compile(self, jit_compile: bool) -> Tuple[ImageEncoder, OCM, ACM]:
         """
         Returns JIT-compiled or original modules based on compilation flag.

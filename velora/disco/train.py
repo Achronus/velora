@@ -21,6 +21,7 @@ import chex
 import gymnasium as gym
 import jax
 import jax.numpy as jnp
+import numpy as np
 import optax
 import orbax.checkpoint as ocp
 
@@ -29,7 +30,7 @@ from velora.cli.disco.dashboard import DiscoConsoleDashboard
 from velora.cli.disco.settings import DiscoParamsSettings
 from velora.disco.agent import DiscoAgent, DiscoValueAgent, PolicyAgent
 from velora.disco.config.settings import AgentTrainerSettings, RuleTrainerSettings
-from velora.disco.config.state import AgentTrainerState, CollectState, RuleTrainerState
+from velora.disco.config.state import AgentTrainerState, RuleTrainerState
 from velora.disco.ema import MovingAverage
 from velora.disco.outputs import (
     AgentLossAux,
@@ -40,7 +41,7 @@ from velora.disco.outputs import (
     MetaLossAux,
     ValueOutputs,
 )
-from velora.disco.rollouts import Rollout
+from velora.disco.rollouts import Rollout, RolloutBuffer
 from velora.disco.utils.compute import compute_value_outputs
 from velora.disco.utils.loss import (
     compute_entropy_loss,
@@ -50,6 +51,7 @@ from velora.disco.utils.loss import (
 )
 from velora.gym.envs import EnvGroup, EnvSet, MakeFn
 from velora.nn.optim import scale_by_adan_no_denom
+from velora.tracking.episode import EpisodeTracker
 from velora.tracking.logger import MetricsLogger
 from velora.tracking.manager import CheckpointManager
 
@@ -148,8 +150,29 @@ class AgentTrainer:
             current_obs=current_obs,
         )
 
-        # Episode reward tracking
+        # Episode tracking
         self._episode_rewards: Tuple[float, ...] = ()
+        self.episode_tracker = EpisodeTracker()
+
+        # Setup buffers
+        self.train_buffer = RolloutBuffer(
+            n_rollouts=self.config.n_updates,
+            n_envs=self.config.num_vec_envs,
+            seq_len=self.config.seq_len,
+            n_actions=self.n_actions,
+            encoding_dim=self.policy_agent.encoding_dim,
+            prediction_dim=self.config.agent.prediction_size,
+            q_dim=self.config.agent.q_size,
+        )
+        self.valid_buffer = RolloutBuffer(
+            n_rollouts=1,
+            n_envs=self.config.num_vec_envs,
+            seq_len=self.config.seq_len * 2,
+            n_actions=self.n_actions,
+            encoding_dim=self.policy_agent.encoding_dim,
+            prediction_dim=self.config.agent.prediction_size,
+            q_dim=self.config.agent.q_size,
+        )
 
     def _create_optim(self) -> optax.GradientTransformation:
         """
@@ -363,39 +386,44 @@ class AgentTrainer:
 
         return aux.value_outs, new_params, new_opt_state
 
-    def collect(self, seq_len: int | None = None) -> Rollout:
+    def _add_to_buffer(self, buffer: RolloutBuffer, seq_len: int) -> None:
         """
-        Collects a trajectory by interacting with the environment.
+        Collects a trajectory by interacting with the environment and writes
+        it into the `buffer`.
 
         Parameters
         ----------
-        seq_len : int (optional)
-            Trajectory length. Default is `None`.
-            When `None` uses `config.seq_len`
+        buffer : RolloutBuffer
+            Pre-allocated buffer to write into. Must have been advanced to
+            the correct rollout slot before this call (i.e.
+            `buffer._rollout_idx` must equal `rollout_idx`)
+        seq_len : int
+            Number of environment steps to collect. Must match the `T`
+            dimension the buffer was constructed with
 
         Returns
         -------
         rollout : Rollout
             Fresh trajectory of experience
         """
-        seq_len = seq_len or self.config.seq_len
         obs = self.state.current_obs
         hidden = self.state.hidden
-        collect_state = CollectState()
 
         # Trajectory collection
         for _ in range(seq_len):
+            obs_jax = jnp.asarray(obs)
+
             preds, h_policy = self.policy_agent(
-                obs,
+                obs_jax,
                 ocm_h_state=hidden.policy_ocm,
                 acm_h_state=hidden.policy_acm,
             )
             target_preds, h_target = self.target_agent(
-                obs,
+                obs_jax,
                 ocm_h_state=hidden.target_ocm,
                 acm_h_state=hidden.target_acm,
             )
-            values, h_value = self.value_agent(obs, h_state=hidden.value)
+            values, h_value = self.value_agent(obs_jax, h_state=hidden.value)
 
             # Env step
             actions = self.policy_agent.act(np.asarray(preds.pi))
@@ -411,44 +439,72 @@ class AgentTrainer:
             )[:, None]
 
             # Store step data and episode stats
-            collect_state = collect_state.append_step(
-                actions, rewards, discounts, values, preds, target_preds
+            buffer.write_step(
+                actions_np,
+                rewards[:, None],
+                discounts,
+                np.asarray(values),
+                preds,
+                target_preds,
             )
-            collect_state = collect_state.record_episodes(info)
+            self.episode_tracker.record(info)
 
             # Update and reset hidden states on episode boundaries
             hidden = hidden.update(h_policy, h_target, h_value)
-            hidden = hidden.reset_on_done(discounts, self.n_actions)
+            hidden = hidden.reset_on_done(jnp.asarray(discounts), self.n_actions)
 
             obs = next_obs
 
         # Update trainer state
         self.state = self.state.update_hidden(hidden)
-        self.state = self.state.update_obs(obs)
-
-        # Log episodic metrics and store rewards
-        self._episode_rewards = collect_state.completed_returns
-
-        if metrics := collect_state.episode_metrics():
-            self.log(metrics)
-
-        return collect_state.to_rollout()
+        self.state = self.state.update_obs(jnp.asarray(obs))
 
     def collect_stack(self, n_rollouts: int) -> Rollout:
         """
-        Collect a stack of rollouts.
+        Collect a stack of `N` rollout training trajectories.
+
+        Writes each rollout directly into `train_buffer` and returns a single
+        stacked `Rollout` with shape `(N, B, T, ...)`.
 
         Parameters
         ----------
         n_rollouts : int
-            Number of rollouts to collect
+            Number of rollouts to collect. Must match the `n_rollouts`
+            dimension in the `train_buffer`
 
         Returns
         -------
         stack : Rollout
-            Stacked rollouts
+            Stacked rollouts with shape `(N, B, T, ...)`.
+            All arrays are Jax arrays loaded onto the default device
         """
-        return Rollout.from_list([self.collect() for _ in range(n_rollouts)])
+        for _ in range(n_rollouts):
+            self._add_to_buffer(self.train_buffer, self.config.seq_len)
+            self.train_buffer.next_rollout()
+
+        rollout = self.train_buffer.to_rollout()
+
+        # Log episodic metrics and store rewards
+        if metrics := self.episode_tracker.metrics():
+            self.log(metrics)
+
+        self.episode_tracker.reset()
+        return rollout
+
+    def collect_valid(self) -> Rollout:
+        """
+        Collect a single validation trajectory using the `valid_buffer`.
+
+        Returns
+        -------
+        rollout : Rollout
+            Single rollout with shape `(1, B, seq_len * 2, ...)`.
+            All arrays are JAX arrays loaded onto the default device
+        """
+        self._add_to_buffer(self.valid_buffer, self.config.seq_len * 2)
+        self.valid_buffer.next_rollout()
+
+        return self.valid_buffer.to_rollout()
 
     def get_episode_rewards(self) -> Tuple[float, ...]:
         """
@@ -681,7 +737,7 @@ class RuleTrainer:
             # Iterate through each environment
             for idx, trainer in enumerate(self.trainers):
                 train_rollouts = trainer.collect_stack(self.config.n_updates)
-                valid_rollout = trainer.collect(self.config.seq_len * 2)
+                valid_rollout = trainer.collect_valid()[0]
 
                 # Compute meta_gradient for this agent
                 meta_grad, disco_h, meta_h, losses = self._compute_meta_gradient(

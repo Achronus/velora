@@ -381,6 +381,11 @@ class ImageEncoder(nnx.Module):
         """
         return self._active_params
 
+    @property
+    def encoding_dim(self) -> int:
+        """Output feature dimensionality of the encoder."""
+        return self.output_dim
+
     def __call__(self, x: chex.Array) -> chex.Array:
         """
         Perform a forward pass through the network.

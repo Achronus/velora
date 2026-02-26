@@ -398,6 +398,9 @@ class AgentTrainerSettings:
         EMA coefficient for target network updates
     seq_len : int
         Number of timesteps per trajectory (rollout size; `T`)
+    n_updates : int
+        Number of agent updates to backpropagate through for meta-gradient
+        computation (sliding window size)
     """
 
     agent: PolicyAgentSettings
@@ -408,6 +411,7 @@ class AgentTrainerSettings:
     num_vec_envs: int
     tau: float
     seq_len: int
+    n_updates: int
 
 
 @struct.dataclass(frozen=True)
@@ -527,6 +531,7 @@ class RuleTrainerSettings:
             num_vec_envs=self.num_vec_envs,
             tau=self.tau,
             seq_len=self.seq_len,
+            n_updates=self.n_updates,
         )
 
     def console_config(
