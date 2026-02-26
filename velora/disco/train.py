@@ -707,6 +707,38 @@ class RuleTrainer:
 
         self.console.finish_setup()
 
+    def train_profiling(self) -> None:
+        # ── PROFILING: one step, one env ──────────────────────────────────
+        PROFILE_STEPS = 1
+        PROFILE_ENVS = 1
+        trainers_to_run = self.trainers[:PROFILE_ENVS]
+        # ─────────────────────────────────────────────────────────────────
+
+        for step in range(PROFILE_STEPS):
+            accumulated_grad = jax.tree.map(
+                jnp.zeros_like, self.meta_agent.get_params()
+            )
+
+            for idx, trainer in enumerate(trainers_to_run):
+                train_rollouts = trainer.collect_stack(self.config.n_updates)
+                jax.effects_barrier()
+
+                valid_rollout = trainer.collect_valid()[0]
+                jax.effects_barrier()
+
+                meta_grad, disco_h, meta_h, losses = self._compute_meta_gradient(
+                    idx, trainer, train_rollouts, valid_rollout
+                )
+                jax.effects_barrier()
+
+                del train_rollouts, valid_rollout
+                jax.effects_barrier()
+
+                accumulated_grad = jax.tree.map(
+                    lambda acc, g: acc + g, accumulated_grad, meta_grad
+                )
+                self.state = self.state.update_hidden(idx, disco_h, meta_h)  # type: ignore
+
     def train(self) -> None:
         """
         Performs meta-training loop to discover an RL update rule.
