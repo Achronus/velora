@@ -948,7 +948,7 @@ class RuleTrainer:
             )
 
             final_out, (all_targets, all_targets_pi) = jax.lax.scan(
-                _inner_step,
+                jax.checkpoint(_inner_step),  # type: ignore
                 init_carry,  # type: ignore
                 train_rollouts,  # type: ignore
             )
