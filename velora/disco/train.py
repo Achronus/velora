@@ -505,6 +505,7 @@ class RuleTrainer:
     ) -> None:
         if jit_compile and cache_dir is not None:
             jax.config.update("jax_compilation_cache_dir", cache_dir)
+            jax.config.update("jax_persistent_cache_min_compile_time_secs", 0)
 
         if isinstance(envs, EnvGroup):
             envs = EnvSet(envs)
@@ -624,7 +625,7 @@ class RuleTrainer:
         trainer_keys : List[chex.PRNGKey]
             List of trainer random number generated keys
         """
-        self.console.start_setup((2 * self.num_envs) + 1)
+        self.console.start_setup(2 * self.num_envs)
 
         # Create remaining trainers with progress updates
         for i, (env_name, make_fn) in enumerate(self._env_specs):
@@ -640,12 +641,11 @@ class RuleTrainer:
             self.trainers.append(trainer)
             self.console.update_setup()
 
-        dummy_rollout = self.trainers[0].collect()
-        _ = self.meta_agent(dummy_rollout)
-        self.console.update_setup()
-
-        # Warm all trainers
+        # Warm meta-agent and each trainer with env-specific shapes
         for trainer in self.trainers:
+            dummy = trainer.collect_stack(self.config.n_updates)
+            _ = self.meta_agent(dummy[0])
+
             trainer.warm()
             self.console.update_setup()
 
