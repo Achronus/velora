@@ -17,11 +17,12 @@ from functools import partial
 from typing import Literal
 
 import gymnasium as gym
+from gymnasium.vector import VectorEnv
 from gymnasium.wrappers import AtariPreprocessing, FrameStackObservation
 from gymnasium.wrappers.vector import RecordEpisodeStatistics
 
 from velora.gym.error import MissingPackageError
-from velora.gym.wrappers import FrameStackReshape, JaxConversion
+from velora.gym.wrappers import FrameStackReshape
 
 VectorMode = Literal["sync", "async", "vector_entry_point"]
 
@@ -32,7 +33,7 @@ def make_atari_env(
     vec_mode: VectorMode = "sync",
     render_mode: str = "rgb_array",
     **kwargs,
-) -> JaxConversion:
+) -> VectorEnv:
     """
     Creates a vectorized [Atari](https://ale.farama.org/) environment using common
     pre-processing techniques.
@@ -42,7 +43,6 @@ def make_atari_env(
     - `gymnasium.wrappers.FrameStackObservation`
     - `velora.gym.wrappers.FrameStackReshape`
     - `gymnasium.wrappers.vector.RecordEpisodeStatistics`
-    - `velora.gym.wrappers.JaxConversion`
 
     Parameters
     ----------
@@ -92,4 +92,4 @@ def make_atari_env(
         frameskip=1,  # Handled by AtariPreprocessing
         **kwargs,
     )
-    return JaxConversion(RecordEpisodeStatistics(envs))
+    return RecordEpisodeStatistics(envs)

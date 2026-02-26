@@ -12,101 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
-from typing import Any, Dict, List, Tuple
 
-import chex
 import gymnasium as gym
-import jax.numpy as jnp
 import numpy as np
-
-
-class JaxConversion(gym.vector.VectorWrapper):
-    """
-    Gymnasium Vector Environment wrapper that converts outputs to Jax arrays.
-
-    Assumes vectorized environment uses the default standard (NumPy).
-
-    Parameters
-    ----------
-    env : gymnasium.vector.VectorEnv
-        Vectorized environment to convert
-    """
-
-    def __init__(self, env: gym.vector.VectorEnv) -> None:
-        super().__init__(env)
-        self.env = env
-
-    def _to_jax(self, array: np.ndarray) -> chex.Array:
-        """Convert NumPy array to Jax array."""
-        return jnp.asarray(array)
-
-    def _to_numpy(self, array: chex.Array) -> np.ndarray:
-        """Convert Jax array to NumPy array."""
-        return np.asarray(array)
-
-    def reset(
-        self,
-        *,
-        seed: int | List[int] | None = None,
-        options: Dict[str, Any] | None = None,
-    ) -> Tuple[chex.Array, Dict[str, Any]]:
-        """
-        Reset all parallel environments and return a batch of initial
-        observations and info.
-
-        Parameters
-        ----------
-        seed : int (optional)
-            The environment reset seed
-        options : Dict[str, Any] (optional)
-            Options to return
-
-        Returns
-        -------
-        obs : chex.Array
-            A batch of starting observations
-        info : Dict[str, Any]
-            Environment metadata
-        """
-        obs, info = self.env.reset(seed=seed, options=options)  # type: ignore
-        return self._to_jax(obs), info
-
-    def step(
-        self, action: chex.Array
-    ) -> Tuple[chex.Array, chex.Array, chex.Array, Dict[str, Any]]:
-        """
-        Take an action for each parallel environment.
-
-        Note: vectorized environments are reset automatically
-        during `env.step()`.
-
-        Parameters
-        ----------
-        action : jax.Array
-            Batch of actions with the `action_space` shape `(B, 1)`
-
-        Returns
-        -------
-        next_obs : jax.Array
-            Batch of next observations `(B, F)`
-        reward : jax.Array
-            Batch of rewards obtained `(B, 1)`
-        discount : jax.Array
-            Batch of episode discounts (terminations/truncations) `(B, 1)`. Values:
-                - `1.0` = episode continues
-                - `0.0` = episode ended
-        info : Dict[str, Any]
-            Environment metadata
-        """
-        obs, reward, terminated, truncated, info = self.env.step(
-            self._to_numpy(action.squeeze())
-        )
-        discount = jnp.where(terminated | truncated, 0.0, 1.0).astype(jnp.float32)
-
-        reward = jnp.expand_dims(self._to_jax(reward), axis=-1)
-        discount = jnp.expand_dims(discount, axis=-1)
-
-        return self._to_jax(obs), reward, discount, info
 
 
 class FrameStackReshape(gym.ObservationWrapper):
@@ -149,7 +57,7 @@ class FrameStackReshape(gym.ObservationWrapper):
             low=old_space.low.min(),
             high=old_space.high.max(),
             shape=new_shape,
-            dtype=old_space.dtype,
+            dtype=old_space.dtype,  # type: ignore
         )
 
     def observation(self, observation: np.ndarray) -> np.ndarray:

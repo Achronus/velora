@@ -398,8 +398,17 @@ class AgentTrainer:
             values, h_value = self.value_agent(obs, h_state=hidden.value)
 
             # Env step
-            actions = self.policy_agent.act(preds.pi)
-            next_obs, rewards, discounts, info = self.envs.step(actions)
+            actions = self.policy_agent.act(np.asarray(preds.pi))
+            actions_np = np.asarray(actions, dtype=np.int32)
+            next_obs, rewards, terminated, truncated, info = self.envs.step(
+                actions_np.squeeze()
+            )
+
+            discounts = np.where(
+                terminated | truncated,
+                np.float32(0.0),
+                np.float32(1.0),
+            )[:, None]
 
             # Store step data and episode stats
             collect_state = collect_state.append_step(

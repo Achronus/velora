@@ -17,11 +17,12 @@ from dataclasses import dataclass, field
 from importlib.util import find_spec
 from typing import Callable, Dict, Iterator, List, Self, Tuple, Union
 
+from gymnasium.vector import VectorEnv
+
 from velora.gym.error import MissingPackageError
 from velora.gym.make import make_atari_env
-from velora.gym.wrappers import JaxConversion
 
-MakeFn = Callable[..., JaxConversion]
+MakeFn = Callable[..., VectorEnv]
 
 
 @dataclass(frozen=True)
