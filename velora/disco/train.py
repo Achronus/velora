@@ -319,6 +319,8 @@ class AgentTrainer:
         func_error : ValueError
             Invalid parameters passed for functional mode
         """
+        from velora.disco.utils.mixflow import fwdrev_value_and_grad
+
         functional = value_params is not None
 
         if (value_params is None) != (value_opt_state is None):
@@ -333,13 +335,13 @@ class AgentTrainer:
         adv_ema = self.state.adv_ema
         td_ema = self.state.td_ema
 
-        def loss_fn(p) -> Tuple[chex.Array, AgentLossAux]:
+        def loss_fn(p, r, adv, td) -> Tuple[chex.Array, AgentLossAux]:
             """Compute value loss."""
             value_outs, new_adv_ema, new_td_ema = compute_value_outputs(
-                rollout,
+                r,
                 self.ema_utils,
-                adv_ema,
-                td_ema,
+                adv,
+                td,
                 self.config.value.gamma,
                 self.config.value.td_lambda,
             )
@@ -362,7 +364,9 @@ class AgentTrainer:
             return value_loss, aux
 
         # Compute gradients
-        (v_loss, aux), grads = jax.value_and_grad(loss_fn, has_aux=True)(params)
+        (v_loss, aux), grads = fwdrev_value_and_grad(loss_fn, has_aux=True)(
+            params, rollout, adv_ema, td_ema
+        )
 
         # Apply optimizer
         updates, new_opt_state = self.value_optim.update(grads, opt_state, params)
