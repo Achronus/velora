@@ -505,3 +505,8 @@ class RolloutBuffer:
             f"memory={self.memory_mb():.1f}MB"
             f")"
         )
+
+    def to_rollout_zeros(self) -> Rollout:
+        """Return a zero-filled Rollout with correct shapes for JIT warmup."""
+        dummy = self.to_rollout()
+        return jax.tree.map(jnp.zeros_like, dummy)

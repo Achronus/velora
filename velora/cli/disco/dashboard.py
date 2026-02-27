@@ -106,7 +106,7 @@ class DiscoConsoleDashboard(ConsoleDashboard):
                 Metric("Trajectory Size", self.config.seq_len),
                 Metric("Batch Size", self.config.batch_size),
                 Divider(),
-                Metric("Metric Update Freq (Steps)", self.config.env_total()),
+                Metric("Metric Update Freq (Steps)", self.config.update_freq()),
             ],
             colour=Colour.PERIWINKLE,
         )

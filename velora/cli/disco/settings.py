@@ -114,6 +114,8 @@ class DiscoDashboardSettings:
         Whether JIT compilation is enabled
     cache_status : str
         JIT compilation cache status
+    n_action_groups : int
+        Number of action groups for parallel training
     """
 
     meta_steps: int
@@ -130,6 +132,7 @@ class DiscoDashboardSettings:
     complete_path: str
     jit_compile: bool
     cache_status: str
+    n_action_groups: int
 
     def env_total(self) -> int:
         """
@@ -142,6 +145,17 @@ class DiscoDashboardSettings:
         """
         return sum(self.env_categories.values())
 
+    def update_freq(self) -> int:
+        """
+        Computes the metric update frequency.
+
+        Returns
+        -------
+        total : int
+            Metric update frequency in timesteps
+        """
+        return self.n_action_groups
+
     def total_steps(self) -> int:
         """
         Compute total training steps.
@@ -151,4 +165,4 @@ class DiscoDashboardSettings:
         total : int
             Total training steps
         """
-        return self.meta_steps * self.env_total()
+        return self.meta_steps * self.n_action_groups
