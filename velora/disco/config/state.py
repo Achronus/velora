@@ -79,10 +79,15 @@ class AgentTrainerHiddenStates:
         """
         Reset hidden states where episodes terminated (`discount=0`).
 
+        Applies a continuation mask to all hidden states. Where:
+            - `discount=1.0` - the hidden state is unchanged
+            - `discount=0.0` - the hidden state is zeroed, resetting the
+            recurrent context for that environment
+
         Parameters
         ----------
         discounts : chex.Array
-            Episode dones from the environment
+            Episode dones from the environment `(B, 1)`
         n_actions : int
             Number of actions agent can take
 
@@ -91,23 +96,21 @@ class AgentTrainerHiddenStates:
         new_state : AgentTrainerHiddenStates
             Updated state
         """
-        if not jnp.any(discounts == 0.0):
-            return self
+        # Squeeze to (B,) for broadcasting against hidden states (B, H)
+        mask = jnp.squeeze(discounts)  # (B,)
+        mask_expanded = jnp.repeat(mask, n_actions)  # (B*A,)
 
-        # Ensure discounts is 1D: (B,)
-        mask = jnp.squeeze(discounts)
-
-        def _end_check(h: chex.Array | None, m: chex.Array) -> chex.Array | None:
+        def _apply_mask(h: chex.Array | None, m: chex.Array) -> chex.Array | None:
             return h * m[:, None] if h is not None else None  # type: ignore
 
         mask_expanded = jnp.repeat(mask, n_actions)
 
         return self.__class__(
-            policy_ocm=_end_check(self.policy_ocm, mask),
-            policy_acm=_end_check(self.policy_acm, mask_expanded),
-            target_ocm=_end_check(self.target_ocm, mask),
-            target_acm=_end_check(self.target_acm, mask_expanded),
-            value=_end_check(self.value, mask),
+            policy_ocm=_apply_mask(self.policy_ocm, mask),
+            policy_acm=_apply_mask(self.policy_acm, mask_expanded),
+            target_ocm=_apply_mask(self.target_ocm, mask),
+            target_acm=_apply_mask(self.target_acm, mask_expanded),
+            value=_apply_mask(self.value, mask),
         )
 
     def update(
