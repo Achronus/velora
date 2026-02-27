@@ -14,6 +14,7 @@
 # ==============================================================================
 
 import shutil
+from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from typing import Dict, List, Tuple
 
@@ -745,6 +746,111 @@ class RuleTrainer:
                     lambda acc, g: acc + g, accumulated_grad, meta_grad
                 )
                 self.state = self.state.update_hidden(idx, disco_h, meta_h)  # type: ignore
+
+    def train_async(self) -> None:
+        """
+        Meta-training loop with async CPU/GPU overlap.
+
+        Overlaps trajectory collection (CPU-bound, ALE stepping) with
+        meta-gradient computation (GPU-bound, `value_and_grad` through
+        `lax.scan`) using a `ThreadPoolExecutor`.
+
+        While the GPU computes the meta-gradient for trainer `i`, the CPU
+        collects rollouts for trainer `i+1` in a background thread. Because
+        collection is entirely CPU/numpy (the `RolloutBuffer` design keeps
+        all data on CPU until `to_rollout()`) and meta-gradient is entirely
+        GPU (JAX ops on device), the two phases do not compete for the same
+        hardware resource and can genuinely run in parallel.
+
+        The expected wall-clock saving is approximately `min(t_collect, t_grad)`
+        per trainer — on 57+-env run this compounds to significant
+        total savings.
+
+        Notes
+        -----
+        Thread safety: JAX dispatch is thread-safe for read operations. The
+        background thread only calls `collect_stack` and `collect_valid`,
+        which touch numpy buffers and ALE state (both trainer-local). The main
+        thread owns all JAX gradient computation. No shared mutable state
+        exists between threads.
+        """
+        self.console.start_training()
+
+        def _collect(trainer: AgentTrainer) -> Tuple[Rollout, Rollout]:
+            """Collect train and validation rollouts for a single trainer."""
+            train_rollouts = trainer.collect_stack(self.config.n_updates)
+            valid_rollout = trainer.collect_valid()[0]
+            return train_rollouts, valid_rollout
+
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            for step in range(self.config.n_steps):
+                accumulated_grad = jax.tree.map(
+                    jnp.zeros_like,
+                    self.meta_agent.get_params(),
+                )
+                all_rewards: List[float] = []
+                all_losses: List[LossStatistics] = []
+
+                # Pre-fetch first trainer's rollouts before the loop starts
+                next_future: Future = pool.submit(_collect, self.trainers[0])
+
+                for idx, trainer in enumerate(self.trainers):
+                    # Wait for this trainer's rollouts (already running or done)
+                    train_rollouts, valid_rollout = next_future.result()
+
+                    # Immediately kick off next trainer's collection in background
+                    # while this trainer's meta-gradient runs on GPU
+                    if idx + 1 < len(self.trainers):
+                        next_future = pool.submit(_collect, self.trainers[idx + 1])
+
+                    # GPU: compute meta-gradient (overlaps with next collection)
+                    meta_grad, disco_h, meta_h, losses = self._compute_meta_gradient(
+                        idx,
+                        trainer,
+                        train_rollouts,
+                        valid_rollout,
+                    )
+
+                    accumulated_grad = jax.tree.map(
+                        lambda acc, g: acc + g,
+                        accumulated_grad,
+                        meta_grad,
+                    )
+                    all_rewards.extend(trainer.get_episode_rewards())
+                    all_losses.append(losses)
+
+                    self.state = self.state.update_hidden(idx, disco_h, meta_h)  # type: ignore
+                    self.console.update_progress()
+
+                # Apply averaged gradients
+                avg_grad = jax.tree.map(lambda g: g / self.num_envs, accumulated_grad)
+                self._apply_meta_update(avg_grad)
+
+                # Metrics and logging
+                reward_stats = RewardStatistics.from_rewards(all_rewards)
+                loss_stats = LossStatistics.from_losses(all_losses)
+
+                metrics = {
+                    "meta/grad_norm": float(optax.global_norm(avg_grad)),
+                    "meta/avg_reward": reward_stats.avg_reward,
+                    "meta/reward_std": reward_stats.reward_std,
+                    "meta/reward_min": reward_stats.reward_min,
+                    "meta/reward_max": reward_stats.reward_max,
+                    "meta/step": step,
+                }
+                self.logger.log("meta", step, metrics)
+                self.console.update_stats(**reward_stats.to_dict())
+                self.console.update_losses(**loss_stats.to_dict())
+
+                if step % self.config.checkpoint.freq == 0:
+                    self.save_checkpoint()
+
+                self.console.update_progress()
+
+        self.save_checkpoint(force=True)
+        self.save_rule()
+        self.close()
+        self.console.finish_training()
 
     def train(self) -> None:
         """
