@@ -540,7 +540,7 @@ class RuleTrainerSettings:
         params: DiscoParamsSettings,
         complete_path: str,
         jit_compile: bool,
-        cache_dir: str | None,
+        cache_status: str,
     ) -> DiscoDashboardSettings:
         """
         Sets the configuration for the `DiscoConsoleDashboard`.
@@ -555,8 +555,8 @@ class RuleTrainerSettings:
             Checkpoint completion path
         jit_compile : bool
             Whether JIT compilation is enabled
-        cache_dir : str | None
-            JAX compilation cache directory, or `None` if disabled
+        cache_status : str
+            JIT compilation cache status
 
         Returns
         -------
@@ -574,5 +574,5 @@ class RuleTrainerSettings:
             params=params,
             complete_path=complete_path,
             jit_compile=jit_compile,
-            cache_dir=cache_dir,
+            cache_status=cache_status,
         )

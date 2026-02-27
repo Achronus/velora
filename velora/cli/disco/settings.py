@@ -112,8 +112,8 @@ class DiscoDashboardSettings:
         Checkpoint completion path
     jit_compile : bool
         Whether JIT compilation is enabled
-    cache_dir : str | None
-        JAX compilation cache directory, or `None` if disabled
+    cache_status : str
+        JIT compilation cache status
     """
 
     meta_steps: int
@@ -129,7 +129,7 @@ class DiscoDashboardSettings:
     params: DiscoParamsSettings
     complete_path: str
     jit_compile: bool
-    cache_dir: str | None
+    cache_status: str
 
     def env_total(self) -> int:
         """

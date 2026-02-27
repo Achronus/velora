@@ -54,6 +54,7 @@ from velora.nn.optim import scale_by_adan_no_denom
 from velora.tracking.episode import EpisodeTracker
 from velora.tracking.logger import MetricsLogger
 from velora.tracking.manager import CheckpointManager
+from velora.utils.format import cache_status
 
 
 class AgentTrainer:
@@ -563,6 +564,8 @@ class RuleTrainer:
         jit_compile: bool = True,
         cache_dir: str | None = ".cache/jax",
     ) -> None:
+        _cache_status = cache_status(cache_dir, jit_compile)
+
         if jit_compile and cache_dir is not None:
             jax.config.update("jax_compilation_cache_dir", cache_dir)
             jax.config.update("jax_persistent_cache_min_compile_time_secs", 0)
@@ -622,8 +625,8 @@ class RuleTrainer:
                 envs=envs.env_categories(),
                 params=self._dummy_params(trainer_keys[0]),
                 complete_path=str(self.rule_path),
-                jit_compile=self.jit_compile,
-                cache_dir=self.cache_dir,
+                jit_compile=jit_compile,
+                cache_status=_cache_status,
             )
         )
 

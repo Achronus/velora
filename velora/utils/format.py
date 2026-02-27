@@ -147,3 +147,22 @@ def format_path(path: Path | str, *, as_str: bool = False) -> Path | str:
         return f"./{path_formatted.as_posix()}"
 
     return path_formatted
+
+
+def cache_status(cache_dir: str | None, jit_compile: bool) -> str:
+    """
+    Determine the JAX compilation cache status.
+
+    Returns
+    -------
+    status : str
+        Either -
+        - `"Warm"` - cache hit expected
+        - `"Cold"` - will compile
+        - `"Disabled"` - caching is off
+    """
+    if not jit_compile or cache_dir is None:
+        return "Disabled"
+
+    cache_path = Path(cache_dir)
+    return "Warm" if cache_path.exists() and any(cache_path.iterdir()) else "Cold"

@@ -13,7 +13,6 @@
 # limitations under the License.
 # ==============================================================================
 
-from pathlib import Path
 from typing import List
 
 import jax
@@ -84,23 +83,6 @@ class DiscoConsoleDashboard(ConsoleDashboard):
             ),
         ]
 
-    def _cache_status(self) -> str:
-        """
-        Determine the JAX compilation cache status.
-
-        Returns
-        -------
-        status : str
-            One of `"Warm"` (cache hit expected), `"Cold"` (will compile), or `"Disabled"` (caching is off)
-        """
-        cache_dir = self.config.cache_dir
-
-        if not self.config.jit_compile or cache_dir is None:
-            return "Disabled"
-
-        cache_path = Path(cache_dir)
-        return "Warm" if cache_path.exists() and any(cache_path.iterdir()) else "Cold"
-
     def _training_card(self) -> MetricCard:
         """
         Create a training details metric card.
@@ -118,7 +100,7 @@ class DiscoConsoleDashboard(ConsoleDashboard):
                 Metric("Device Type", jax.default_backend().upper()),
                 Metric("JIT Compiled", compiled),
                 Divider(),
-                Metric("Compile Cache", self._cache_status()),
+                Metric("Compile Cache", self.config.cache_status),
                 Metric("Meta Steps", self.config.meta_steps),
                 Metric("Inner Updates", self.config.n_updates),
                 Metric("Trajectory Size", self.config.seq_len),
