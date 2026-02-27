@@ -436,17 +436,17 @@ class AgentTrainer:
                 actions_np.squeeze()
             )
 
-            discounts = np.where(
+            discounts = jnp.where(
                 terminated | truncated,
-                np.float32(0.0),
-                np.float32(1.0),
+                jnp.float32(0.0),
+                jnp.float32(1.0),
             )[:, None]
 
             # Store step data and episode stats
             buffer.write_step(
                 actions_np,
                 rewards[:, None],
-                discounts,
+                np.asarray(discounts),
                 np.asarray(values),
                 preds,
                 target_preds,
@@ -455,7 +455,7 @@ class AgentTrainer:
 
             # Update and reset hidden states on episode boundaries
             hidden = hidden.update(h_policy, h_target, h_value)
-            hidden = hidden.reset_on_done(jnp.asarray(discounts), self.n_actions)
+            hidden = hidden.reset_on_done(discounts, self.n_actions)
 
             obs = next_obs
 
