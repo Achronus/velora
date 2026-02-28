@@ -403,4 +403,77 @@ class EnvSet:
 
 
 # Pre-instantiated environment groups for convenience
-ATARI = AtariEnvs()
+ATARI_BASE = AtariEnvs(
+    envs=[
+        "Assault",
+        "Atlantis",
+        "Boxing",
+        "Breakout",
+        "CrazyClimber",
+        "DemonAttack",
+        "Gopher",
+        "Kangaroo",
+        "Krull",
+        "NameThisGame",
+        "RoadRunner",
+        "Robotank",
+        "StarGunner",
+        "VideoPinball",
+    ],
+)
+ATARI_EASY = AtariEnvs(
+    envs=[
+        "BeamRider",
+        "Enduro",
+        "FishingDerby",
+        "Freeway",
+        "Hero",
+        "IceHockey",
+        "Jamesbond",
+        "KungFuMaster",
+        "Phoenix",
+        "Pong",
+        "Qbert",
+        "SpaceInvaders",
+        "Tennis",
+        "TimePilot",
+        "Tutankham",
+        "UpNDown",
+    ],
+)
+ATARI_MEDIUM = AtariEnvs(
+    envs=[
+        "Alien",
+        "Amidar",
+        "Asterix",
+        "BankHeist",
+        "BattleZone",
+        "Centipede",
+        "ChopperCommand",
+        "Defender",
+        "Riverraid",
+        "Seaquest",
+        "Venture",
+        "WizardOfWor",
+        "Zaxxon",
+    ],
+)
+ATARI_HARD = AtariEnvs(
+    envs=[
+        "Asteroids",
+        "Berzerk",
+        "Bowling",
+        "DoubleDunk",
+        "Frostbite",
+        "Gravitar",
+        "MontezumaRevenge",
+        "MsPacman",
+        "Pitfall",
+        "PrivateEye",
+        "Skiing",
+        "Solaris",
+        "Surround",
+        "YarsRevenge",
+    ],
+)
+ATARI_57 = AtariEnvs()

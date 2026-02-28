@@ -9,7 +9,15 @@ from velora.disco import (
     RuleTrainer,
     RuleTrainerSettings,
 )
-from velora.gym import ATARI, EnvGroup, EnvSet
+from velora.gym import (
+    ATARI_57,
+    ATARI_BASE,
+    ATARI_EASY,
+    ATARI_HARD,
+    ATARI_MEDIUM,
+    EnvGroup,
+    EnvSet,
+)
 from velora.tracking import CheckpointSettings, MetricLoggerSettings
 
 __all__ = [
@@ -23,7 +31,11 @@ __all__ = [
     "LossCostSettings",
     "CheckpointSettings",
     "MetricLoggerSettings",
-    "ATARI",
+    "ATARI_BASE",
+    "ATARI_EASY",
+    "ATARI_MEDIUM",
+    "ATARI_HARD",
+    "ATARI_57",
     "EnvSet",
     "EnvGroup",
 ]
