@@ -120,8 +120,6 @@ class DiscoDashboardSettings:
         Whether JIT compilation is enabled
     cache_status : str
         JIT compilation cache status
-    n_action_groups : int
-        Number of action groups for parallel training
     """
 
     meta_steps: int
@@ -138,7 +136,6 @@ class DiscoDashboardSettings:
     complete_path: str
     jit_compile: bool
     cache_status: str
-    n_action_groups: int
 
     def env_total(self) -> int:
         """

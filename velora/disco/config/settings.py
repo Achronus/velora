@@ -541,7 +541,6 @@ class RuleTrainerSettings:
         complete_path: str,
         jit_compile: bool,
         cache_status: str,
-        n_action_groups: int,
     ) -> DiscoDashboardSettings:
         """
         Sets the configuration for the `DiscoConsoleDashboard`.
@@ -558,8 +557,6 @@ class RuleTrainerSettings:
             Whether JIT compilation is enabled
         cache_status : str
             JIT compilation cache status
-        n_action_groups : int
-            Number of action groups for parallel training
 
         Returns
         -------
@@ -578,5 +575,4 @@ class RuleTrainerSettings:
             complete_path=complete_path,
             jit_compile=jit_compile,
             cache_status=cache_status,
-            n_action_groups=n_action_groups,
         )
