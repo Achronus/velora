@@ -13,56 +13,86 @@
 # limitations under the License.
 # ==============================================================================
 
-from dataclasses import dataclass
-from typing import Any, Dict, Tuple
+from collections import deque
+from typing import Dict, Tuple
+
+import numpy as np
 
 
-@dataclass
 class EpisodeTracker:
     """
-    Tracks completed episode statistics during trajectory collection.
+    Tracks completed episode statistics across a vectorized environment.
 
-    Accumulates returns and lengths from environment info dicts and
-    exposes summary metrics for logging.
+    Maintains per-environment running accumulators for the current episode
+    and records completed episodes on termination.
 
     Parameters
     ----------
-    completed_returns : Tuple[float, ...]
-        Episodic returns for all completed episodes. Default is `()`
-    completed_lengths : Tuple[int, ...]
-        Episode lengths for all completed episodes. Default is `()`
+    num_envs : int
+        Number of parallel environments
+    window : int (optional)
+        Lifetime sliding window size. Default is `100` meta-steps
     """
 
-    completed_returns: Tuple[float, ...] = ()
-    completed_lengths: Tuple[int, ...] = ()
+    def __init__(self, num_envs: int, window: int = 100) -> None:
+        self.num_envs = num_envs
 
-    def record(self, info: Dict[str, Any]) -> None:
+        # Running accumulators - (num_envs,)
+        self._current_returns = np.zeros(num_envs, dtype=np.float32)
+        self._current_lengths = np.zeros(num_envs, dtype=np.int32)
+
+        # Completed episode statistics for this collection window
+        self.completed_returns: Tuple[float, ...] = ()
+        self.completed_lengths: Tuple[int, ...] = ()
+
+        # Lifetime sliding window — never reset, survives across meta-steps
+        self._return_window: deque[float] = deque(maxlen=window)
+        self._length_window: deque[int] = deque(maxlen=window)
+
+    def record(
+        self,
+        rewards: np.ndarray,
+        terminated: np.ndarray,
+        truncated: np.ndarray,
+    ) -> None:
         """
-        Record completed episode statistics from an env info dict.
+        Update accumulators for one environment step.
 
         Parameters
         ----------
-        info : Dict[str, Any]
-            Environment metadata returned by `envs.step()`.
-            Expects a `"final_info"` key populated by
-            `RecordEpisodeStatistics`.
+        rewards : np.ndarray
+            Raw environment rewards `(num_envs,)`
+        terminated : np.ndarray
+            Terminal flags `(num_envs,)`
+        truncated : np.ndarray
+            Truncated flags `(num_envs,)`
         """
-        if "final_info" not in info:
-            return
+        self._current_returns += rewards.squeeze()
+        self._current_lengths += 1
 
-        for env_info in info["final_info"]:
-            if env_info is not None and "episode" in env_info:
-                self.completed_returns += (env_info["episode"]["r"],)
-                self.completed_lengths += (env_info["episode"]["l"],)
+        done = terminated | truncated
+
+        if done.any():
+            for i in np.where(done)[0]:
+                r = float(self._current_returns[i])
+                l = int(self._current_lengths[i])
+
+                self.completed_returns += (r,)
+                self.completed_lengths += (l,)
+                self._return_window.append(r)
+                self._length_window.append(l)
+
+                self._current_returns[i] = 0.0
+                self._current_lengths[i] = 0
 
     def reset(self) -> None:
-        """Clear accumulated episode data for the next collection call."""
+        """Clear accumulated episode data for the next collection window."""
         self.completed_returns = ()
         self.completed_lengths = ()
 
     def metrics(self) -> Dict[str, float] | None:
         """
-        Return episode metrics if any episodes completed this collection.
+        Return summary metrics if any episodes completed this window.
 
         Returns
         -------
@@ -90,6 +120,7 @@ class EpisodeTracker:
         """Mean episodic return across completed episodes."""
         if not self.completed_returns:
             return 0.0
+
         return sum(self.completed_returns) / len(self.completed_returns)
 
     @property
@@ -97,4 +128,21 @@ class EpisodeTracker:
         """Mean episode length across completed episodes."""
         if not self.completed_lengths:
             return 0.0
+
         return sum(self.completed_lengths) / len(self.completed_lengths)
+
+    @property
+    def windowed_mean_return(self) -> float:
+        """Sliding window mean return."""
+        if not self._return_window:
+            return 0.0
+
+        return float(sum(self._return_window) / len(self._return_window))
+
+    @property
+    def windowed_mean_length(self) -> float:
+        """Sliding window mean length."""
+        if not self._length_window:
+            return 0.0
+
+        return float(sum(self._length_window) / len(self._length_window))
