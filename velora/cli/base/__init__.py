@@ -7,11 +7,11 @@ from velora.cli.base.component import (
     LiveMonitoringCard,
     Metric,
     MetricCard,
-    ProgressCard,
     ProgressComponent,
     SetupCard,
     T,
     TitleCard,
+    TrainingProgressCard,
 )
 from velora.cli.base.constant import VELORA_LOGO, Colour
 from velora.cli.base.dashboard import ConsoleDashboard
@@ -26,7 +26,7 @@ __all__ = [
     "LiveMonitoringCard",
     "Metric",
     "MetricCard",
-    "ProgressCard",
+    "TrainingProgressCard",
     "ProgressComponent",
     "SetupCard",
     "TitleCard",

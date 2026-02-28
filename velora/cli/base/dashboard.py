@@ -22,9 +22,9 @@ from rich.live import Live
 from velora.cli.base.component import (
     Component,
     LiveMetricsCard,
-    ProgressCard,
     SetupCard,
     TitleCard,
+    TrainingProgressCard,
 )
 
 
@@ -52,7 +52,7 @@ class ConsoleDashboard:
         self,
         title: TitleCard,
         body: List[Component],
-        training: ProgressCard | None = None,
+        training: TrainingProgressCard | None = None,
         live_metrics: LiveMetricsCard | None = None,
         setup: SetupCard | None = None,
         width: int = 120,
@@ -202,17 +202,28 @@ class ConsoleDashboard:
         if self._live:
             self._live.update(self._build_training_display())
 
-    def update_progress(self, advance: int = 1) -> None:
+    def update_progress(
+        self,
+        description: str,
+        *,
+        advance: int = 1,
+        env_name: str | None = None,
+    ) -> None:
         """
         Update the progress bar.
 
         Parameters
         ----------
+        description : str
+            Progress bar to update
         advance : int (optional)
             Advancement progress count. Default is `1`
+        env_name : str (optional)
+            Environment name being trained on. Default is `None`
         """
         if self.training:
-            self.training.update(advance)
+            self.training.update(description, advance=advance, env_name=env_name)
+            self._refresh_training()
 
     def stop(self) -> None:
         """Stop the live display."""

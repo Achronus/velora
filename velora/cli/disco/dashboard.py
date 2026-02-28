@@ -24,10 +24,10 @@ from velora.cli.base.component import (
     LiveMonitoringCard,
     Metric,
     MetricCard,
-    ProgressCard,
     SetupCard,
     Spacer,
     TitleCard,
+    TrainingProgressCard,
 )
 from velora.cli.base.constant import Colour
 from velora.cli.base.dashboard import ConsoleDashboard
@@ -53,9 +53,12 @@ class DiscoConsoleDashboard(ConsoleDashboard):
         # Create cards
         title = TitleCard("DiscoRL: Rule Training")
         body = self._body()
-        progress = ProgressCard(
-            "Meta-training",
-            total=config.total_steps(),
+        progress = TrainingProgressCard(
+            tasks=[
+                ("Meta Steps", config.meta_steps),
+                ("Inner Updates", config.env_total()),
+            ],
+            total=config.meta_steps,
             complete_path=self.config.complete_path,
         )
         live_metrics = LiveMetricsCard(DiscoLosses, DiscoStats)
@@ -100,13 +103,13 @@ class DiscoConsoleDashboard(ConsoleDashboard):
                 Metric("Device Type", jax.default_backend().upper()),
                 Metric("JIT Compiled", compiled),
                 Divider(),
-                Metric("Compile Cache", self.config.cache_status),
                 Metric("Meta Steps", self.config.meta_steps),
                 Metric("Inner Updates", self.config.n_updates),
                 Metric("Trajectory Size", self.config.seq_len),
                 Metric("Batch Size", self.config.batch_size),
+                Spacer(),
                 Divider(),
-                Metric("Metric Update Freq (Steps)", self.config.update_freq()),
+                Metric("Compile Cache", self.config.cache_status),
             ],
             colour=Colour.PERIWINKLE,
         )

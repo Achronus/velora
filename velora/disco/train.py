@@ -815,6 +815,11 @@ class RuleTrainer:
 
             # Iterate through each environment
             for idx, trainer in enumerate(self.trainers):
+                self.console.update_progress(
+                    "Inner Updates",
+                    env_name=self.env_names[idx],
+                )
+
                 train_rollouts = trainer.collect_stack(self.config.n_updates)
                 valid_rollout = trainer.collect_valid()[0]
 
@@ -844,8 +849,6 @@ class RuleTrainer:
                 self.state = self.state.update_hidden(idx, disco_h, meta_h)  # type: ignore
                 trainer.meta_opt_state = new_meta_opt_state
 
-                self.console.update_progress()
-
             # Apply average gradients
             avg_grad = jax.tree.map(lambda g: g / self.num_envs, accumulated_grad)
             self._apply_meta_update(avg_grad)
@@ -869,7 +872,7 @@ class RuleTrainer:
             if step % self.config.checkpoint.freq == 0:
                 self.save_checkpoint()
 
-            self.console.update_progress()
+            self.console.update_progress("Meta Steps")
 
         # Final cleanup
         self.save_checkpoint(force=True)

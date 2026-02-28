@@ -17,7 +17,7 @@ import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Generic, List, Type, TypeVar
+from typing import Generic, List, Tuple, Type, TypeVar
 
 from rich.console import Group, RenderableType
 from rich.padding import Padding
@@ -153,38 +153,25 @@ class ProgressComponent(Component, ABC):
 
     Parameters
     ----------
-    title : str
-        Panel title displayed during progress
-    description : str
-        Progress bar description text
     colour : str
         Hex colour for border, spinner, and label
     complete_colour : str
         Hex colour for completion state
-    total : int (optional)
-        Total steps for determinate progress, or `None` for indeterminate. Default is `None`
     """
 
     def __init__(
         self,
-        title: str,
-        description: str,
         colour: str,
         complete_colour: str,
-        total: int | None = None,
     ) -> None:
-        self.title = title
-        self.description = description
         self.colour = colour
         self.complete_colour = complete_colour
-        self.total = total
 
         self._is_complete = False
         self._elapsed: float | None = None
         self._start_time: float | None = None
 
         self.progress = self._create_progress()
-        self.task_id: TaskID | None = None
 
     def _create_progress(self) -> Progress:
         """
@@ -207,46 +194,22 @@ class ProgressComponent(Component, ABC):
         ]
         return Progress(*columns, expand=True)
 
-    def start(self) -> None:
-        """Start the progress tracker."""
-        self._start_time = time.perf_counter()
-        self.task_id = self.progress.add_task(
-            self.description,
-            total=self.total,
-        )
-
-    def set_total(self, total: int) -> None:
-        """
-        Set or update the total step count.
-
-        Parameters
-        ----------
-        total : int
-            Total steps for determinate progress
-        """
-        self.total = total
-
-        if self.task_id is not None:
-            self.progress.update(self.task_id, total=total)
-
-    def update(self, advance: int = 1) -> None:
-        """
-        Advance the progress bar.
-
-        Parameters
-        ----------
-        advance : int (optional)
-            Advancement progress count. Default is `1`
-        """
-        if self.task_id is not None:
-            self.progress.update(self.task_id, advance=advance)
-
     def complete(self) -> None:
         """Mark as complete."""
         self._is_complete = True
 
         if self._start_time is not None:
             self._elapsed = time.perf_counter() - self._start_time
+
+    @abstractmethod
+    def start(self) -> None:
+        """Start the progress component."""
+        raise NotImplementedError()
+
+    @abstractmethod
+    def update(self, *args, **kwargs) -> None:
+        """Update the progress component."""
+        raise NotImplementedError()
 
     @abstractmethod
     def _render_complete(self) -> Panel:
@@ -258,23 +221,19 @@ class ProgressComponent(Component, ABC):
         panel : Panel
             Completion panel
         """
-        pass
+        raise NotImplementedError()
 
+    @abstractmethod
     def _render_in_progress(self) -> Panel:
         """
-        Render the in-progress state.
+        Render the in progress state.
 
         Returns
         -------
         panel : Panel
             In progress panel
         """
-        return Panel(
-            self.progress,
-            title=f"[bold {self.colour}]{self.title}[/bold {self.colour}]",
-            border_style=self.colour,
-            padding=(1, 2),
-        )
+        raise NotImplementedError()
 
     def render(self) -> Panel:
         if self._is_complete:
@@ -453,14 +412,16 @@ class MetricCard(Component):
         )
 
 
-class ProgressCard(ProgressComponent):
+class TrainingProgressCard(ProgressComponent):
     """
     Training progress bar card.
 
     Parameters
     ----------
-    description : str
-        Progress bar caption
+    tasks : List[Tuple[str, int]]
+        A list of tuples containing `(description, total)`.
+        First task acts as a progress bar and additional tasks are sub-components
+        underneath it
     total : int
         Total number of steps
     colour : str (optional)
@@ -473,23 +434,104 @@ class ProgressCard(ProgressComponent):
 
     def __init__(
         self,
-        description: str,
+        tasks: List[Tuple[str, int]],
         total: int,
         colour: str = Colour.TEAL,
         complete_colour: str = Colour.TEAL,
         complete_path: str | None = None,
     ) -> None:
-        path_formatted = (
+        self.complete_path = (
             format_path(complete_path, as_str=True) if complete_path else None
         )
-        self.complete_path = path_formatted
+        self.total = total
 
-        super().__init__(
-            title="Training Progress",
-            description=description,
-            colour=colour,
-            complete_colour=complete_colour,
-            total=total,
+        self._tasks = tasks
+        self._task_ids: dict[str, TaskID] = {}
+        self._current_env: str | None = None
+
+        self._inner_total: int = tasks[1][1]
+        self._inner_count: int = 0
+
+        super().__init__(colour=colour, complete_colour=complete_colour)
+
+    def start(self) -> None:
+        self._start_time = time.perf_counter()
+
+        # Only add the first task as a progress bar
+        description, total = self._tasks[0]
+        task_id = self.progress.add_task(description, total=total)
+        self._task_ids[description] = task_id
+
+    def update(
+        self,
+        description: str,
+        *,
+        advance: int = 1,
+        env_name: str | None = None,
+    ) -> None:
+        """
+        Advance the progress card.
+
+        Parameters
+        ----------
+        description : str
+            Task to update
+        advance : int (optional)
+            Number to increment bar by. Default is `1`
+        env_name : str (optional)
+            Environment name being trained on. Default is `None`
+        """
+        task_id = self._task_ids.get(description)
+
+        if task_id is not None:
+            # First task
+            self.progress.update(task_id, advance=advance)
+            self.reset(self._tasks[1][0])
+
+        elif description == self._tasks[1][0]:
+            # Second task
+            self._inner_count = min(self._inner_count + advance, self._inner_total)
+
+        if env_name is not None:
+            self._current_env = env_name
+
+    def reset(self, description: str) -> None:
+        """
+        Reset part of the progress card.
+
+        Parameters
+        ----------
+        description : str
+            The task to update
+        """
+        if description == self._tasks[1][0]:
+            self._inner_count = 0
+            self._current_env = None
+
+    def _render_in_progress(self) -> Panel:
+        table = Table.grid(expand=True)
+        table.add_column()
+        table.add_row(self.progress)
+
+        # Update second task
+        if self._current_env:
+            display_name = (
+                self._current_env.split("/")[-1]
+                if "/" in self._current_env
+                else self._current_env
+            )
+            table.add_row(
+                Text(
+                    f"    ↳  {display_name} ({self._inner_count}/{self._inner_total})",
+                    style="dim",
+                )
+            )
+
+        return Panel(
+            table,
+            title=f"[bold {self.colour}]Training Progress[/bold {self.colour}]",
+            border_style=self.colour,
+            padding=(1, 2),
         )
 
     def _render_complete(self) -> Panel:
@@ -500,9 +542,9 @@ class ProgressCard(ProgressComponent):
         content.add_column(justify="left")
 
         if self.complete_path:
-            title = f"[bold {self.complete_colour}]✓[/bold {self.complete_colour}] [bold white]Training Complete[/bold white] [dim]({total} steps in {elapsed}. Final checkpoint saved to):[/dim]"
+            title = f"[bold {self.complete_colour}]✓[/bold {self.complete_colour}] [bold white]Training Complete[/bold white] [dim]({total} meta steps in {elapsed}. Final checkpoint saved to):[/dim]"
         else:
-            title = f"[bold {self.complete_colour}]✓ Training Complete[/bold {self.complete_colour}] [dim]({total} steps in {elapsed})[/dim]"
+            title = f"[bold {self.complete_colour}]✓ Training Complete[/bold {self.complete_colour}] [dim]({total} meta steps in {elapsed})[/dim]"
 
         content.add_row(title)
 
@@ -670,22 +712,60 @@ class SetupCard(ProgressComponent):
         Card completion colour. Default is `Colour.SLATE`
     """
 
+    _DESCRIPTION = "Setting up"
+
     def __init__(
         self,
         colour: str = Colour.SLATE,
         complete_colour: str = Colour.SLATE,
     ) -> None:
-        super().__init__(
-            title="Setup",
-            description="Setting up",
-            colour=colour,
-            complete_colour=complete_colour,
-            total=None,
+        self._total: int | None = None
+        self._task_id: TaskID | None = None
+
+        super().__init__(colour=colour, complete_colour=complete_colour)
+
+    def set_total(self, total: int) -> None:
+        """
+        Set or update the total step count.
+
+        Parameters
+        ----------
+        total : int
+            Total steps for determinate progress
+        """
+        self._total = total
+
+        if self._task_id is not None:
+            self.progress.update(self._task_id, total=total)
+
+    def start(self) -> None:
+        self._start_time = time.perf_counter()
+        self._task_id = self.progress.add_task(self._DESCRIPTION, total=self._total)
+
+    def update(self, advance: int = 1) -> None:
+        """
+        Advance the progress bar.
+
+        Parameters
+        ----------
+        advance : int (optional)
+            Advancement progress count. Default is `1`
+        """
+        if self._task_id is not None:
+            self.progress.update(self._task_id, advance=advance)
+
+    def _render_in_progress(self) -> Panel:
+        return Panel(
+            self.progress,
+            title=f"[bold {self.colour}]Setup[/bold {self.colour}]",
+            border_style=self.colour,
+            padding=(1, 2),
         )
 
     def _render_complete(self) -> Panel:
         elapsed = format_duration(self._elapsed) if self._elapsed else "0s"
         content = f"[bold {self.complete_colour}]✓ Setup Complete[/bold {self.complete_colour}] [dim]({elapsed})[/dim]"
+
         return Panel(
             content,
             border_style=self.complete_colour,
