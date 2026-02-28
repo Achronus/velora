@@ -18,11 +18,12 @@ After the first couple of steps you should see *no* further compile messages.
 import jax
 
 from velora.disco import RuleTrainer, RuleTrainerSettings
+from velora.gym.envs import ATARI_BASE
 
 # ── Configuration ──────────────────────────────────────────────────────────────
 # Use a small 2-env subset so the test finishes quickly.
 # Both envs have the same action space so only one XLA program is compiled.
-TEST_ENVS = ["ALE/Pong-v5", "ALE/Breakout-v5"]
+TEST_ENVS = ATARI_BASE
 N_STEPS = 10
 MAX_DELTA_MB = 50  # memory growth per step (after warm-up) must be below this
 
@@ -69,8 +70,8 @@ def _unpatch() -> None:
 def main() -> None:
     config = RuleTrainerSettings(
         n_steps=N_STEPS,
-        n_updates=2,   # keep the inner loop short for speed
-        seq_len=16,
+        n_updates=3,  # keep the inner loop short for speed
+        # seq_len=16,
     )
 
     trainer = RuleTrainer(TEST_ENVS, config=config)
