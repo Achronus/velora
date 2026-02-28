@@ -1,19 +1,25 @@
 """
 Memory leak regression test.
 
-Runs N meta-steps and asserts that GPU device memory does not grow linearly.
+Runs N meta-steps and asserts that:
+  1. GPU device memory does not grow linearly after warm-up.
+  2. The XLA persistent cache does not accumulate new files during training
+     (new files = new compilations = the concrete-closure fix isn't working).
 
 Expected behaviour (after fix):
   - Step 0: first compilation — memory jumps to a working set.
   - Steps 1-2: possible minor warm-up growth.
   - Steps 3+: memory delta per step should be near zero.
+  - Cache file count: fixed after _initial_setup; zero growth during training.
 
 Run with:
-    JAX_LOG_COMPILES=1 python test_memory.py
+    JAX_LOG_COMPILES=1 python scripts/test_memory.py
 
 JAX_LOG_COMPILES=1 will print a line every time XLA recompiles something.
 After the first couple of steps you should see *no* further compile messages.
 """
+
+from pathlib import Path
 
 import jax
 
@@ -21,11 +27,10 @@ from velora.disco import RuleTrainer, RuleTrainerSettings
 from velora.gym.envs import ATARI_BASE
 
 # ── Configuration ──────────────────────────────────────────────────────────────
-# Use a small 2-env subset so the test finishes quickly.
-# Both envs have the same action space so only one XLA program is compiled.
 TEST_ENVS = ATARI_BASE
-N_STEPS = 10
+N_STEPS = 30
 MAX_DELTA_MB = 50  # memory growth per step (after warm-up) must be below this
+CACHE_DIR = Path(".cache/jax")
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -39,14 +44,22 @@ def bytes_in_use() -> int:
         return 0
 
 
+def cache_file_count() -> int:
+    """Count files currently in the XLA persistent compilation cache."""
+    if not CACHE_DIR.exists():
+        return 0
+    return sum(1 for _ in CACHE_DIR.rglob("*") if _.is_file())
+
+
 # ── Instrumented training loop ─────────────────────────────────────────────────
 samples: list[int] = []
+cache_counts: list[int] = []
 
 _original_apply = None
 
 
 def _patch(trainer: RuleTrainer) -> None:
-    """Monkey-patch _apply_meta_update to sample memory after each meta-step."""
+    """Monkey-patch _apply_meta_update to sample memory and cache after each meta-step."""
     from velora.disco.train import RuleTrainer as RT
 
     global _original_apply
@@ -55,6 +68,7 @@ def _patch(trainer: RuleTrainer) -> None:
     def hooked(self, avg_grad):
         _original_apply(self, avg_grad)  # type: ignore[operator]
         samples.append(bytes_in_use())
+        cache_counts.append(cache_file_count())
 
     RT._apply_meta_update = hooked  # type: ignore[method-assign]
 
@@ -87,10 +101,23 @@ def main() -> None:
         return
 
     print(f"\nMemory samples ({len(samples)} steps):")
-    for i, s in enumerate(samples):
-        print(f"  step {i:3d}: {s / 1e6:.1f} MB")
+    for i, (s, c) in enumerate(zip(samples, cache_counts)):
+        print(f"  step {i:3d}: {s / 1e6:.1f} MB  |  cache files: {c}")
 
-    # Warm-up: skip first 3 steps (compilation + initial allocations)
+    # ── Cache check ────────────────────────────────────────────────────────────
+    # After step 0 the cache should be stable. Any growth means new XLA programs
+    # are being compiled during training (the closure-constant fix isn't working).
+    if len(cache_counts) > 1:
+        cache_growth = cache_counts[-1] - cache_counts[0]
+        print(f"\nXLA cache growth (step 0 → {N_STEPS - 1}): {cache_growth} files")
+
+        assert cache_growth == 0, (
+            f"Recompilation detected: {cache_growth} new XLA cache files "
+            f"appeared during training steps"
+        )
+        print("PASS: XLA cache is stable (no recompilation during training).")
+
+    # ── Memory check ───────────────────────────────────────────────────────────
     warmup = 3
     if len(samples) <= warmup:
         print(f"Too few steps ({len(samples)}) to evaluate post-warmup growth.")
