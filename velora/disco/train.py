@@ -189,6 +189,9 @@ class AgentTrainer:
             current_obs=current_obs,
         )
 
+        self.meta_optim: optax.GradientTransformation = None  # type: ignore
+        self.meta_opt_state: optax.OptState = None  # type: ignore
+
         # Episode tracking
         self.episode_tracker = EpisodeTracker(self.config.num_vec_envs)
         self._collection_step = 0
@@ -230,6 +233,23 @@ class AgentTrainer:
             optax.clip(self.config.agent.max_grad_norm),
             optax.scale(-self.config.agent.lr),
         )
+
+    def _init_meta_optim(self, meta_params: optax.Params) -> None:
+        """
+        Initializes a trainer meta-gradient optimizer to stabilize gradient norms.
+
+        Uses Adan optimizer (without denominator) with gradient clipping.
+
+        Returns
+        -------
+        optim : optax.GradientTransformation
+            Configured optimizer chain
+        """
+        self.meta_optim = optax.chain(
+            scale_by_adan_no_denom(),
+            optax.clip(self.config.agent.max_grad_norm),
+        )
+        self.meta_opt_state = self.meta_optim.init(meta_params)
 
     def warm(self) -> None:
         """
@@ -741,6 +761,7 @@ class RuleTrainer:
                 make_fn=make_fn,
                 jit_compile=self.jit_compile,
             )
+            trainer._init_meta_optim(self.meta_agent.get_params())
             self.trainers.append(trainer)
             self.console.update_setup()
 
@@ -797,7 +818,7 @@ class RuleTrainer:
                 train_rollouts = trainer.collect_stack(self.config.n_updates)
                 valid_rollout = trainer.collect_valid()[0]
 
-                # Compute meta_gradient for this agent
+                # Compute gradients for this agent
                 meta_grad, disco_h, meta_h, losses = self._compute_meta_gradient(
                     idx,
                     trainer,
@@ -805,16 +826,23 @@ class RuleTrainer:
                     valid_rollout,
                 )
 
-                # Collect metrics
+                normed_grad, new_meta_opt_state = trainer.meta_optim.update(
+                    meta_grad,
+                    trainer.meta_opt_state,
+                    trainer.policy_agent.get_params(),  # params arg required by some optax transforms
+                )
                 accumulated_grad = jax.tree.map(
                     lambda acc, g: acc + g,
                     accumulated_grad,
-                    meta_grad,
+                    normed_grad,
                 )
+
+                # Collect metrics
                 stats.record(trainer.ep_return(), trainer.ep_length(), losses)
 
-                # Update hidden states
+                # Update values
                 self.state = self.state.update_hidden(idx, disco_h, meta_h)  # type: ignore
+                trainer.meta_opt_state = new_meta_opt_state
 
                 self.console.update_progress()
 
