@@ -661,16 +661,28 @@ class MetaStepStats:
     def __init__(self, num_envs: int) -> None:
         self._num_envs = num_envs
         self._idx = 0
+        self._reward_count = 0
 
         zero = jnp.zeros((num_envs,), dtype=jnp.float32)
-        empty = jnp.empty((0,), dtype=jnp.float32)
 
-        self._rewards = RewardStatistics(rewards=empty, lengths=empty)
+        # Pre-allocate fixed-size buffers
+        self._reward_buf: chex.Array = zero
+        self._length_buf: chex.Array = zero
+
         self._losses = LossStatistics(
             meta=zero,
             policy_gradient=zero,
             entropy=zero,
             regularization=zero,
+        )
+
+    @property
+    def _rewards(self) -> RewardStatistics:
+        """Expose only the filled portion of the reward buffers."""
+        n = self._reward_count
+
+        return RewardStatistics(
+            rewards=self._reward_buf[:n], lengths=self._length_buf[:n]
         )
 
     def record(
@@ -694,10 +706,9 @@ class MetaStepStats:
         i = self._idx
 
         if ep_return is not None:
-            self._rewards = RewardStatistics(
-                rewards=jnp.append(self._rewards.rewards, jnp.float32(ep_return)),
-                lengths=jnp.append(self._rewards.lengths, jnp.float32(ep_length)),
-            )
+            self._reward_buf = self._reward_buf.at[i].set(jnp.float32(ep_return))
+            self._length_buf = self._length_buf.at[i].set(jnp.float32(ep_length))
+            self._reward_count += 1
 
         # Write all four loss fields in one tree operation
         self._losses = jax.tree.map(
