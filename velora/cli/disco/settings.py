@@ -34,12 +34,15 @@ class DiscoLosses:
         Entropy loss. Default is `0.0`
     regularization : float (optional)
         Regularization loss. Default is `0.0`
+    gradient_norm : float (optional)
+        Gradient normalization. Default is `0.0`
     """
 
     meta: float = 0.0
     policy_gradient: float = 0.0
     entropy: float = 0.0
     regularization: float = 0.0
+    gradient_norm: float = 0.0
 
 
 @dataclass
@@ -51,6 +54,8 @@ class DiscoStats:
     ----------
     avg_reward : float (optional)
         Average reward. Default is `0.0`
+    avg_length : float (optional)
+        Average episode length. Default is `0.0`
     reward_std : float (optional)
         Reward standard deviation. Default is `0.0`
     reward_min : float (optional)
@@ -60,6 +65,7 @@ class DiscoStats:
     """
 
     avg_reward: float = 0.0
+    avg_length: float = 0.0
     reward_std: float = 0.0
     reward_min: float = 0.0
     reward_max: float = 0.0
@@ -154,7 +160,7 @@ class DiscoDashboardSettings:
         total : int
             Metric update frequency in timesteps
         """
-        return self.n_action_groups
+        return self.env_total()
 
     def total_steps(self) -> int:
         """
@@ -165,4 +171,4 @@ class DiscoDashboardSettings:
         total : int
             Total training steps
         """
-        return self.meta_steps * self.n_action_groups
+        return self.meta_steps * self.env_total()

@@ -26,13 +26,12 @@ import numpy as np
 import optax
 import orbax.checkpoint as ocp
 
-from velora.base.outputs import RewardStatistics
 from velora.cli.disco.dashboard import DiscoConsoleDashboard
 from velora.cli.disco.settings import DiscoParamsSettings
 from velora.disco.agent import DiscoAgent, DiscoValueAgent, PolicyAgent
 from velora.disco.config.settings import AgentTrainerSettings, RuleTrainerSettings
 from velora.disco.config.state import AgentTrainerState, RuleTrainerState
-from velora.disco.ema import EMAState, MovingAverage
+from velora.disco.ema import MovingAverage
 from velora.disco.outputs import (
     AgentLossAux,
     AgentLosses,
@@ -40,6 +39,7 @@ from velora.disco.outputs import (
     LossStatistics,
     MetaInnerStepCarry,
     MetaLossAux,
+    MetaStepStats,
     ValueOutputs,
 )
 from velora.disco.rollouts import Rollout, RolloutBuffer
@@ -191,8 +191,7 @@ class AgentTrainer:
         )
 
         # Episode tracking
-        self._episode_rewards: Tuple[float, ...] = ()
-        self.episode_tracker = EpisodeTracker()
+        self.episode_tracker = EpisodeTracker(self.config.num_vec_envs)
 
         # Setup buffers
         self.train_buffer = RolloutBuffer(
@@ -472,7 +471,7 @@ class AgentTrainer:
             # Env step
             actions = self.policy_agent.act(np.asarray(preds.pi))
             actions_np = np.asarray(actions, dtype=np.int32)
-            next_obs, rewards, terminated, truncated, info = self.envs.step(
+            next_obs, rewards, terminated, truncated, _ = self.envs.step(
                 actions_np.squeeze()
             )
 
@@ -491,7 +490,7 @@ class AgentTrainer:
                 preds,
                 target_preds,
             )
-            self.episode_tracker.record(info)
+            self.episode_tracker.record(rewards, terminated, truncated)
 
             # Update and reset hidden states on episode boundaries
             hidden = hidden.update(h_policy, h_target, h_value)
@@ -522,6 +521,8 @@ class AgentTrainer:
             Stacked rollouts with shape `(N, B, T, ...)`.
             All arrays are Jax arrays loaded onto the default device
         """
+        self.episode_tracker.reset()
+
         for _ in range(n_rollouts):
             self._add_to_buffer(self.train_buffer, self.config.seq_len)
             self.train_buffer.next_rollout()
@@ -532,7 +533,6 @@ class AgentTrainer:
         if metrics := self.episode_tracker.metrics():
             self.log(metrics)
 
-        self.episode_tracker.reset()
         return rollout
 
     def collect_valid(self) -> Rollout:
@@ -550,16 +550,13 @@ class AgentTrainer:
 
         return self.valid_buffer.to_rollout()
 
-    def get_episode_rewards(self) -> Tuple[float, ...]:
-        """
-        Get episode rewards from the most recent collection.
+    def ep_return(self) -> float:
+        """Windowed mean episodic return."""
+        return self.episode_tracker.windowed_mean_return
 
-        Returns
-        -------
-        rewards : Tuple[float, ...]
-            Episode rewards from last `collect()` call
-        """
-        return self._episode_rewards
+    def ep_length(self) -> float:
+        """Windowed mean episode length."""
+        return self.episode_tracker.windowed_mean_length
 
     def close(self) -> None:
         """Clean up resources."""
@@ -1332,8 +1329,7 @@ class RuleTrainer:
                 jnp.zeros_like,
                 self.meta_agent.get_params(),
             )
-            all_rewards: List[float] = []
-            all_losses: List[LossStatistics] = []
+            stats = MetaStepStats(self.config.num_vec_envs)
 
             # Iterate through each environment
             for idx, trainer in enumerate(self.trainers):
@@ -1354,8 +1350,7 @@ class RuleTrainer:
                     accumulated_grad,
                     meta_grad,
                 )
-                all_rewards.extend(trainer.get_episode_rewards())
-                all_losses.append(losses)
+                stats.record(trainer.ep_return(), trainer.ep_length(), losses)
 
                 # Update hidden states
                 self.state = self.state.update_hidden(idx, disco_h, meta_h)  # type: ignore
@@ -1366,23 +1361,20 @@ class RuleTrainer:
             avg_grad = jax.tree.map(lambda g: g / self.num_envs, accumulated_grad)
             self._apply_meta_update(avg_grad)
 
-            # Compute reward statistics
-            reward_stats = RewardStatistics.from_rewards(all_rewards)
-            loss_stats = LossStatistics.from_losses(all_losses)
-
             # Log metrics
+            grad_norm = float(optax.global_norm(avg_grad))
             metrics = {
-                "meta/grad_norm": float(optax.global_norm(avg_grad)),
-                "meta/avg_reward": reward_stats.avg_reward,
-                "meta/reward_std": reward_stats.reward_std,
-                "meta/reward_min": reward_stats.reward_min,
-                "meta/reward_max": reward_stats.reward_max,
+                "meta/grad_norm": grad_norm,
+                **stats.summary("meta/"),
                 "meta/step": step,
             }
             self.logger.log("meta", step, metrics)
 
-            self.console.update_stats(**reward_stats.to_dict())
-            self.console.update_losses(**loss_stats.to_dict())
+            self.console.update_stats(**stats.rewards_as_dict())
+            self.console.update_losses(
+                **stats.losses_as_dict(),
+                gradient_norm=grad_norm,
+            )
 
             # Checkpoint periodically
             if step % self.config.checkpoint.freq == 0:
@@ -1619,10 +1611,10 @@ class RuleTrainer:
         )
 
         losses = LossStatistics(
-            meta=float(meta_loss),
-            policy_gradient=float(aux.pg_loss),
-            entropy=float(aux.entropy_loss),
-            regularization=float(aux.reg_loss),
+            meta=meta_loss,
+            policy_gradient=aux.pg_loss,
+            entropy=aux.entropy_loss,
+            regularization=aux.reg_loss,
         )
 
         return meta_grad, aux.disco_h, aux.meta_h, losses

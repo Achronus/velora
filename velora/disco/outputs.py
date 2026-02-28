@@ -14,7 +14,7 @@
 # ==============================================================================
 
 from dataclasses import field, fields
-from typing import Dict, Self, Sequence, Tuple
+from typing import Dict, NamedTuple, Self, Tuple
 
 import chex
 import jax
@@ -530,59 +530,217 @@ class MetaInnerStepCarry:
     v_opt_state: optax.OptState
 
 
-@struct.dataclass(frozen=True)
-class LossStatistics:
+class LossStatistics(NamedTuple):
     """
     Loss statistics for meta-training.
 
     Parameters
     ----------
-    meta : float
+    meta : chex.Array
         Total meta loss
-    policy_gradient : float
+    policy_gradient : chex.Array
         Policy gradient loss
-    entropy : float
+    entropy : chex.Array
         Entropy loss
-    regularization : float
+    regularization : chex.Array
         Regularization loss
     """
 
-    meta: float
-    policy_gradient: float
-    entropy: float
-    regularization: float
+    meta: chex.Array
+    policy_gradient: chex.Array
+    entropy: chex.Array
+    regularization: chex.Array
 
-    @classmethod
-    def from_losses(cls, losses: Sequence[Self]) -> Self:
+    def to_dict(self) -> Dict[str, float]:
+        return {
+            "meta": float(self.meta),
+            "policy_gradient": float(self.policy_gradient),
+            "entropy": float(self.entropy),
+            "regularization": float(self.regularization),
+        }
+
+
+class RewardStatistics(NamedTuple):
+    """
+    Per-trainer episodic rewards and lengths.
+
+    Parameters
+    ----------
+    rewards : chex.Array
+        Windowed mean returns across trainers `(N,)`
+    lengths : chex.Array
+        Windows mean episode lengths across trainers `(N,)`
+    """
+
+    rewards: chex.Array
+    lengths: chex.Array
+
+    @property
+    def has_data(self) -> bool:
+        """Check if at least one trainer completed an episode this window."""
+        return jnp.shape(self.rewards)[0] > 0
+
+    def summary(self, cat: str = "") -> Dict[str, float]:
         """
-        Create averaged statistics from a sequence of losses.
+        Scalar summary statistics for logging.
+
+        Computes `mean`, `std`, `min`, `max` for both rewards and lengths.
+        Returns zeros for all fields if no episodes completed.
 
         Parameters
         ----------
-        losses : Sequence[LossStatistics]
-            Sequence of loss statistics
+        cat : str (optional)
+            An optional category for the statistics. E.g., `"meta/"` =
+            `"meta/avg_reward"`
 
         Returns
         -------
-        stats : LossStatistics
-            Averaged loss statistics
+        stats : Dict[str, float]
+            Keys - `[avg_reward, reward_std, reward_min, reward_max,avg_length, length_std, length_min, length_max]`
         """
-        n = len(losses)
+        if not self.has_data:
+            return {
+                f"{cat}avg_reward": 0.0,
+                f"{cat}reward_std": 0.0,
+                f"{cat}reward_min": 0.0,
+                f"{cat}reward_max": 0.0,
+                f"{cat}avg_length": 0.0,
+                f"{cat}length_std": 0.0,
+                f"{cat}length_min": 0.0,
+                f"{cat}length_max": 0.0,
+            }
 
-        return cls(
-            meta=sum(loss.meta for loss in losses) / n,
-            policy_gradient=sum(loss.policy_gradient for loss in losses) / n,
-            entropy=sum(loss.entropy for loss in losses) / n,
-            regularization=sum(loss.regularization for loss in losses) / n,
+        return {
+            f"{cat}avg_reward": float(jnp.mean(self.rewards)),
+            f"{cat}reward_std": float(jnp.std(self.rewards)),
+            f"{cat}reward_min": float(jnp.min(self.rewards)),
+            f"{cat}reward_max": float(jnp.max(self.rewards)),
+            f"{cat}avg_length": float(jnp.mean(self.lengths)),
+            f"{cat}length_std": float(jnp.std(self.lengths)),
+            f"{cat}length_min": float(jnp.min(self.lengths)),
+            f"{cat}length_max": float(jnp.max(self.lengths)),
+        }
+
+    def core_stats(self) -> Dict[str, float]:
+        """
+        Core scalar reward statistics for logging.
+
+        Returns
+        -------
+        stats : Dict[str, float]
+            Keys - `[avg_reward, avg_length, reward_std, reward_min, reward_max]`
+        """
+        if not self.has_data:
+            return {
+                "avg_reward": 0.0,
+                "avg_length": 0.0,
+                "reward_std": 0.0,
+                "reward_min": 0.0,
+                "reward_max": 0.0,
+            }
+
+        return {
+            "avg_reward": float(jnp.mean(self.rewards)),
+            "avg_length": float(jnp.mean(self.lengths)),
+            "reward_std": float(jnp.std(self.rewards)),
+            "reward_min": float(jnp.min(self.rewards)),
+            "reward_max": float(jnp.max(self.rewards)),
+        }
+
+
+class MetaStepStats:
+    """
+    Accumulator for per-trainer metrics across one meta-step.
+
+    Parameters
+    ----------
+    num_envs : int
+        Number of vectorized environments
+    """
+
+    def __init__(self, num_envs: int) -> None:
+        self._num_envs = num_envs
+        self._idx = 0
+
+        zero = jnp.zeros((num_envs,), dtype=jnp.float32)
+        empty = jnp.empty((0,), dtype=jnp.float32)
+
+        self._rewards = RewardStatistics(rewards=empty, lengths=empty)
+        self._losses = LossStatistics(
+            meta=zero,
+            policy_gradient=zero,
+            entropy=zero,
+            regularization=zero,
         )
 
-    def to_dict(self) -> Dict[str, float]:
+    def record(
+        self,
+        ep_return: float,
+        ep_length: float,
+        losses: LossStatistics,
+    ) -> None:
         """
-        Convert to dictionary.
+        Record one trainer's results into the next available slot.
+
+        Parameters
+        ----------
+        ep_return : float
+            Episodic return
+        ep_length : float
+            Episode length
+        losses : LossStatistics
+            Training losses
+        """
+        i = self._idx
+
+        if ep_return is not None:
+            self._rewards = RewardStatistics(
+                rewards=jnp.append(self._rewards.rewards, jnp.float32(ep_return)),
+                lengths=jnp.append(self._rewards.lengths, jnp.float32(ep_length)),
+            )
+
+        # Write all four loss fields in one tree operation
+        self._losses = jax.tree.map(
+            lambda acc, v: acc.at[i].set(v),
+            self._losses,
+            losses,
+        )
+        self._idx += 1
+
+    def summary(self, cat: str = "") -> Dict[str, float]:
+        """
+        Scalar summary statistics for logging.
+
+        Computes `mean`, `std`, `min`, `max` for both rewards and lengths.
+        Returns zeros for all fields if no episodes completed.
+
+        Parameters
+        ----------
+        cat : str (optional)
+            An optional category for the statistics. E.g., `"meta/"` =
+            `"meta/avg_reward"`
+        """
+        return self._rewards.summary(cat)
+
+    def rewards_as_dict(self) -> Dict[str, float]:
+        """
+        Extracts reward statistics as a dictionary.
+
+        Returns
+        -------
+        stats : Dict[str, float]
+            Reward statistics as a dictionary
+        """
+        return self._rewards.core_stats()
+
+    def losses_as_dict(self) -> Dict[str, float]:
+        """
+        Extract loss statistics as a dictionary.
 
         Returns
         -------
         stats : Dict[str, float]
             Loss statistics as a dictionary
         """
-        return vars(self)
+        mean_losses: LossStatistics = jax.tree.map(jnp.mean, self._losses)
+        return mean_losses.to_dict()
