@@ -191,6 +191,7 @@ class AgentTrainer:
 
         # Episode tracking
         self.episode_tracker = EpisodeTracker(self.config.num_vec_envs)
+        self._collection_step = 0
 
         # Setup buffers
         self.train_buffer = RolloutBuffer(
@@ -246,17 +247,20 @@ class AgentTrainer:
         _ = self.target_agent(dummy_obs)
         _ = self.value_agent(dummy_obs)
 
-    def log(self, metrics: Dict[str, float]) -> None:
+    def log(self, metrics: Dict[str, float], *, idx: int | None = None) -> None:
         """
         Log metrics to `MetricsLogger` if logger is available.
 
         Parameters
         ----------
+        idx : int (optional)
+            Step index. Default is `None`
         metrics : Dict[str, float]
             Mapping of metric names to scalar values
         """
         if self.logger:
-            self.logger.log(self.writer_name, self.state.steps_trained, metrics)
+            idx = idx if idx is not None else self.state.steps_trained
+            self.logger.log(self.writer_name, idx, metrics)
 
     def update_policy(
         self,
@@ -530,8 +534,9 @@ class AgentTrainer:
 
         # Log episodic metrics and store rewards
         if metrics := self.episode_tracker.metrics():
-            self.log(metrics)
+            self.log(metrics, idx=self._collection_step)
 
+        self._collection_step += 1
         return rollout
 
     def collect_valid(self) -> Rollout:
