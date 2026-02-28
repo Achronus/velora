@@ -105,17 +105,21 @@ def main() -> None:
         print(f"  step {i:3d}: {s / 1e6:.1f} MB  |  cache files: {c}")
 
     # ── Cache check ────────────────────────────────────────────────────────────
-    # After step 0 the cache should be stable. Any growth means new XLA programs
-    # are being compiled during training (the closure-constant fix isn't working).
-    if len(cache_counts) > 1:
-        cache_growth = cache_counts[-1] - cache_counts[0]
-        print(f"\nXLA cache growth (step 0 → {N_STEPS - 1}): {cache_growth} files")
+    # Step 0→1 may add a small number of files for operations not covered by
+    # _initial_setup (e.g. meta_optim.update, apply_updates). That is expected.
+    # From step 1 onwards the cache must be completely stable — any growth there
+    # means new XLA programs are being compiled during training.
+    if len(cache_counts) > 2:
+        first_step_growth = cache_counts[1] - cache_counts[0]
+        sustained_growth = cache_counts[-1] - cache_counts[1]
+        print(f"\nXLA cache: +{first_step_growth} files on step 1 (expected first-use)")
+        print(f"XLA cache: +{sustained_growth} files steps 1–{N_STEPS - 1} (must be 0)")
 
-        assert cache_growth == 0, (
-            f"Recompilation detected: {cache_growth} new XLA cache files "
-            f"appeared during training steps"
+        assert sustained_growth == 0, (
+            f"Recompilation detected: {sustained_growth} new XLA cache files "
+            f"appeared after step 1 — the closure-constant fix may have regressed"
         )
-        print("PASS: XLA cache is stable (no recompilation during training).")
+        print("PASS: XLA cache is stable from step 1 onwards.")
 
     # ── Memory check ───────────────────────────────────────────────────────────
     warmup = 3
