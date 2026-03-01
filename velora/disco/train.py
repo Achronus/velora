@@ -15,6 +15,7 @@
 
 import shutil
 from collections import defaultdict
+from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from typing import Callable, Dict, List, Tuple
 
@@ -1708,15 +1709,49 @@ class ParallelRuleTrainer(RuleTrainer):
 
         return jax.jit(jax.vmap(_pure_fn, in_axes=(None, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)))
 
+    def _collect_group(
+        self,
+        group: ActionGroup,
+    ) -> tuple[list[Rollout], list[Rollout]]:
+        """
+        CPU phase: collect train and validation rollouts for all trainers in a group.
+
+        Called on a background thread while the main thread runs GPU gradient
+        computation for the previous group (S2 async pipeline).
+
+        Parameters
+        ----------
+        group : ActionGroup
+            The trainer group to collect rollouts for
+
+        Returns
+        -------
+        train_rollouts, valid_rollouts : tuple[list[Rollout], list[Rollout]]
+            Collected rollouts for each trainer in the group, in group-index order
+        """
+        train_rollouts: list[Rollout] = []
+        valid_rollouts: list[Rollout] = []
+
+        for local_i, trainer in enumerate([self.trainers[i] for i in group.indices]):
+            self.console.update_progress(
+                "Inner Updates", env_name=self.env_names[group.indices[local_i]]
+            )
+            train_rollouts.append(trainer.collect_stack(self.config.n_updates))
+            valid_rollouts.append(trainer.collect_valid()[0])
+
+        return train_rollouts, valid_rollouts
+
     def _process_group_batch(
         self,
         group: ActionGroup,
+        train_rollouts: list[Rollout],
+        valid_rollouts: list[Rollout],
         meta_params: chex.ArrayTree,
         accumulated_grad: chex.ArrayTree,
         stats: MetaStepStats,
     ) -> chex.ArrayTree:
         """
-        Collect rollouts and compute meta-gradients for a trainer group via vmap.
+        GPU phase: compute meta-gradients for pre-collected rollouts.
 
         For groups of size > 1, meta-gradients are computed in chunks of
         `max_group_size` using a single `jax.vmap` call per chunk. For singletons
@@ -1726,6 +1761,10 @@ class ParallelRuleTrainer(RuleTrainer):
         ----------
         group : ActionGroup
             The trainer group to process
+        train_rollouts : list[Rollout]
+            Pre-collected training rollouts, one per trainer in group-index order
+        valid_rollouts : list[Rollout]
+            Pre-collected validation rollouts, one per trainer in group-index order
         meta_params : ArrayTree
             Current meta-network parameters (shared, not batched)
         accumulated_grad : ArrayTree
@@ -1740,22 +1779,12 @@ class ParallelRuleTrainer(RuleTrainer):
         """
         trainers = [self.trainers[i] for i in group.indices]
 
-        # CPU phase: collect all rollouts for this group
-        group_train_rollouts = []
-        group_valid_rollouts = []
-        for i, trainer in enumerate(trainers):
-            self.console.update_progress(
-                "Inner Updates", env_name=self.env_names[group.indices[i]]
-            )
-            group_train_rollouts.append(trainer.collect_stack(self.config.n_updates))
-            group_valid_rollouts.append(trainer.collect_valid()[0])
-
         # Singleton: batching provides no benefit, use sequential path
         if len(group.indices) == 1:
             idx = group.indices[0]
             trainer = trainers[0]
             meta_grad, disco_h, meta_h, losses = self._compute_meta_gradient(
-                idx, trainer, group_train_rollouts[0], group_valid_rollouts[0]
+                idx, trainer, train_rollouts[0], valid_rollouts[0]
             )
             normed_grad, new_meta_opt = trainer.meta_optim.update(
                 meta_grad, trainer.meta_opt_state, trainer.policy_agent.get_params()
@@ -1775,8 +1804,8 @@ class ParallelRuleTrainer(RuleTrainer):
         for start in chunk_starts:
             chunk_idx = group.indices[start : start + self.max_group_size]
             chunk_trainers = [self.trainers[i] for i in chunk_idx]
-            chunk_train = group_train_rollouts[start : start + self.max_group_size]
-            chunk_valid = group_valid_rollouts[start : start + self.max_group_size]
+            chunk_train = train_rollouts[start : start + self.max_group_size]
+            chunk_valid = valid_rollouts[start : start + self.max_group_size]
 
             # Stack chunk inputs along leading group dimension
             stacked_train = jax.tree.map(lambda *xs: jnp.stack(xs), *chunk_train)
@@ -1928,56 +1957,73 @@ class ParallelRuleTrainer(RuleTrainer):
 
     def train(self) -> None:
         """
-        Meta-training loop with batched group parallelism.
+        Meta-training loop with batched group parallelism and async CPU/GPU overlap.
 
-        Trainers are grouped by `n_actions` at the start of training. Within
-        each group, meta-gradients are computed in chunks of `max_group_size`
-        via batched execution, replacing N sequential GPU calls with
-        ceil(N/chunk) batched calls. Singleton groups fall through to the
-        sequential path.
+        Trainers are grouped by `n_actions` at the start of training. Within each
+        group, meta-gradients are computed in chunks of `max_group_size` via batched
+        execution. A single background thread pre-collects rollouts for group[i+1]
+        while the main thread runs GPU gradient computation for group[i], overlapping
+        the CPU-bound env-step phase with GPU work.
         """
         self.console.start_training()
 
-        for step in range(self.config.n_steps):
-            accumulated_grad = jax.tree.map(
-                jnp.zeros_like,
-                self.meta_agent.get_params(),
-            )
-            stats = MetaStepStats(self.config.num_vec_envs)
-            meta_params = self.meta_agent.get_params()
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            for step in range(self.config.n_steps):
+                accumulated_grad = jax.tree.map(
+                    jnp.zeros_like,
+                    self.meta_agent.get_params(),
+                )
+                stats = MetaStepStats(self.config.num_vec_envs)
+                meta_params = self.meta_agent.get_params()
 
-            # Process each action group — largest first
-            for group in self.action_groups:
-                accumulated_grad = self._process_group_batch(
-                    group=group,
-                    meta_params=meta_params,
-                    accumulated_grad=accumulated_grad,
-                    stats=stats,
+                # Kick off collection for the first group immediately
+                pending: Future[tuple[list[Rollout], list[Rollout]]] = executor.submit(
+                    self._collect_group, self.action_groups[0]
                 )
 
-            # Apply averaged gradients
-            avg_grad = jax.tree.map(lambda g: g / self.num_envs, accumulated_grad)
-            self._apply_meta_update(avg_grad)
+                for i, group in enumerate(self.action_groups):
+                    # Wait for this group's rollouts (may already be ready)
+                    train_rollouts, valid_rollouts = pending.result()
 
-            # Log metrics
-            grad_norm = float(optax.global_norm(avg_grad))
-            metrics = {
-                "meta/grad_norm": grad_norm,
-                **stats.summary("meta/"),
-                "meta/step": step,
-            }
-            self.logger.log("meta", step, metrics)
+                    # While GPU runs below, pre-collect next group in background
+                    if i + 1 < len(self.action_groups):
+                        pending = executor.submit(
+                            self._collect_group, self.action_groups[i + 1]
+                        )
 
-            self.console.update_stats(**stats.rewards_as_dict())
-            self.console.update_losses(
-                **stats.losses_as_dict(),
-                gradient_norm=grad_norm,
-            )
+                    # GPU phase: compute meta-gradients for current group
+                    accumulated_grad = self._process_group_batch(
+                        group=group,
+                        train_rollouts=train_rollouts,
+                        valid_rollouts=valid_rollouts,
+                        meta_params=meta_params,
+                        accumulated_grad=accumulated_grad,
+                        stats=stats,
+                    )
 
-            if step % self.config.checkpoint.freq == 0:
-                self.save_checkpoint()
+                # Apply averaged gradients
+                avg_grad = jax.tree.map(lambda g: g / self.num_envs, accumulated_grad)
+                self._apply_meta_update(avg_grad)
 
-            self.console.update_progress("Meta Steps")
+                # Log metrics
+                grad_norm = float(optax.global_norm(avg_grad))
+                metrics = {
+                    "meta/grad_norm": grad_norm,
+                    **stats.summary("meta/"),
+                    "meta/step": step,
+                }
+                self.logger.log("meta", step, metrics)
+
+                self.console.update_stats(**stats.rewards_as_dict())
+                self.console.update_losses(
+                    **stats.losses_as_dict(),
+                    gradient_norm=grad_norm,
+                )
+
+                if step % self.config.checkpoint.freq == 0:
+                    self.save_checkpoint()
+
+                self.console.update_progress("Meta Steps")
 
         # Final cleanup
         self.save_checkpoint(force=True)

@@ -24,6 +24,7 @@ from pathlib import Path
 import jax
 
 from velora.disco import RuleTrainer, RuleTrainerSettings
+from velora.disco.train import ParallelRuleTrainer
 from velora.gym.envs import ATARI_BASE
 
 # ── Configuration ──────────────────────────────────────────────────────────────
@@ -88,7 +89,7 @@ def main() -> None:
         # seq_len=16,
     )
 
-    trainer = RuleTrainer(TEST_ENVS, config=config)
+    trainer = ParallelRuleTrainer(TEST_ENVS, config=config)
     _patch(trainer)
 
     try:
