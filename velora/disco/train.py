@@ -667,7 +667,8 @@ class RuleTrainer:
         )
 
         # Initial setup
-        self._initial_setup(trainer_keys)
+        self._initial_setup(trainer_keys, 2 * self.num_envs)
+        self.console.finish_setup()
 
     def _dummy_params(self, rng_key: chex.PRNGKey) -> DiscoParamsSettings:
         """
@@ -709,7 +710,11 @@ class RuleTrainer:
             disco=self.meta_agent.param_count,
         )
 
-    def _initial_setup(self, trainer_keys: List[chex.PRNGKey]) -> None:
+    def _initial_setup(
+        self,
+        trainer_keys: List[chex.PRNGKey],
+        setup_total: int,
+    ) -> None:
         """
         Performs an initial forward pass through all agent networks and trainers
         and setups up environments.
@@ -723,8 +728,10 @@ class RuleTrainer:
         ----------
         trainer_keys : List[chex.PRNGKey]
             List of trainer random number generated keys
+        setup_total : int
+            Total setup steps to take
         """
-        self.console.start_setup(2 * self.num_envs)
+        self.console.start_setup(setup_total)
 
         # Create remaining trainers with progress updates
         for i, (env_name, make_fn) in enumerate(self._env_specs):
@@ -780,8 +787,6 @@ class RuleTrainer:
                 self._build_trainer_grad_fn(trainer)
 
             self.console.update_setup()
-
-        self.console.finish_setup()
 
     def train(self) -> None:
         """
@@ -1844,10 +1849,14 @@ class ParallelRuleTrainer(RuleTrainer):
 
         return accumulated_grad
 
-    def _initial_setup(self, trainer_keys: List[chex.PRNGKey]) -> None:
+    def _initial_setup(
+        self,
+        trainer_keys: List[chex.PRNGKey],
+        setup_total: int,
+    ) -> None:
         """
         Extends `RuleTrainer._initial_setup` to build action groups and
-        pre-compile the JIT+vmap gradient function for each unique `n_actions`.
+        pre-compile the JIT-batched gradient function for each unique `n_actions`.
         """
         super()._initial_setup(trainer_keys)
 
