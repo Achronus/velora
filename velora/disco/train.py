@@ -90,6 +90,11 @@ class AgentTrainer:
         Factory function to create the environment
     jit_compile : bool (optional)
         Flag to enable/disable JIT compilation. Default is `False`
+    use_bfloat16 : bool (optional)
+        Flag to set all floating-point arrays in the returned `Rollout` to
+        `bfloat16` on GPU transfer. Halves VRAM usage for rollout buffers with
+        negligible effect on training quality. `actions` remain `int32`.
+        Default is `True`
     """
 
     def __init__(
@@ -102,6 +107,7 @@ class AgentTrainer:
         writer_name: str,
         make_fn: MakeFn,
         jit_compile: bool = False,
+        use_bfloat16: bool = True,
     ) -> None:
         self.config = config
         self.env_name = env_name
@@ -111,6 +117,7 @@ class AgentTrainer:
         self.logger = logger
         self.writer_name = writer_name
         self.jit_compile = jit_compile
+        self.use_bfloat16 = use_bfloat16
 
         self.action_space: gym.spaces.Discrete = self.envs.single_action_space  # type: ignore
         self.obs_space: gym.spaces.Box = self.envs.single_observation_space  # type: ignore
@@ -175,6 +182,7 @@ class AgentTrainer:
             encoding_dim=self.policy_agent.encoding_dim,
             prediction_dim=self.config.agent.prediction_size,
             q_dim=self.config.agent.q_size,
+            use_bfloat16=self.use_bfloat16,
         )
         self.valid_buffer = RolloutBuffer(
             n_rollouts=1,
@@ -184,6 +192,7 @@ class AgentTrainer:
             encoding_dim=self.policy_agent.encoding_dim,
             prediction_dim=self.config.agent.prediction_size,
             q_dim=self.config.agent.q_size,
+            use_bfloat16=self.use_bfloat16,
         )
 
     def _create_optim(self) -> optax.GradientTransformation:
@@ -595,6 +604,11 @@ class RuleTrainer:
         Dashboard display settings. Default is `True`.
             - If `True` - renders the full Rich dashboard during training
             - If `False` - uses a lightweight tqdm progress bar instead
+    use_bfloat16 : bool (optional)
+        Flag to set all floating-point arrays in the returned `Rollout` to
+        `bfloat16` on GPU transfer. Halves VRAM usage for rollout buffers with
+        negligible effect on training quality. `actions` remain `int32`.
+        Default is `True`
     """
 
     def __init__(
@@ -606,6 +620,7 @@ class RuleTrainer:
         jit_compile: bool = True,
         cache_dir: str | None = ".cache/jax",
         verbose: bool = True,
+        use_bfloat16: bool = True,
     ) -> None:
         _cache_status = cache_status(cache_dir, jit_compile)
 
@@ -626,6 +641,7 @@ class RuleTrainer:
         self.config = config
         self.jit_compile = jit_compile
         self.cache_dir = cache_dir
+        self.use_bfloat16 = use_bfloat16
 
         # Init logger
         self.logger = MetricsLogger(self.config.logger)
@@ -753,6 +769,7 @@ class RuleTrainer:
                 writer_name=f"envs/{env_name}",
                 make_fn=make_fn,
                 jit_compile=self.jit_compile,
+                use_bfloat16=self.use_bfloat16,
             )
             trainer._init_meta_optim(self.meta_agent.get_params())
             self.trainers.append(trainer)
@@ -1316,6 +1333,7 @@ class RuleTrainer:
             writer_name=f"envs/{env_name}",
             make_fn=make_fn,
             jit_compile=self.jit_compile,
+            use_bfloat16=self.use_bfloat16,
         )
 
         # Reset hidden state for this environment
@@ -1383,6 +1401,11 @@ class ParallelRuleTrainer(RuleTrainer):
         Dashboard display settings. Default is `True`.
             - If `True` - renders the full Rich dashboard during training
             - If `False` - uses a lightweight tqdm progress bar instead
+    use_bfloat16 : bool (optional)
+        Flag to set all floating-point arrays in the returned `Rollout` to
+        `bfloat16` on GPU transfer. Halves VRAM usage for rollout buffers with
+        negligible effect on training quality. `actions` remain `int32`.
+        Default is `True`
     """
 
     def __init__(
@@ -1395,6 +1418,7 @@ class ParallelRuleTrainer(RuleTrainer):
         jit_compile: bool = True,
         cache_dir: str | None = ".cache/jax",
         verbose: bool = True,
+        use_bfloat16: bool = True,
     ) -> None:
         self.max_group_size = max_group_size
 
@@ -1408,6 +1432,7 @@ class ParallelRuleTrainer(RuleTrainer):
             jit_compile=jit_compile,
             cache_dir=cache_dir,
             verbose=verbose,
+            use_bfloat16=use_bfloat16,
         )
 
     def _count_batch_groups(self) -> int:

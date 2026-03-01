@@ -251,6 +251,10 @@ class RolloutBuffer:
     q_dim : int
         Number of bins in the distributional action-value head `q`.
         Set to `n_actions` for a standard scalar Q head.
+    use_bfloat16 : bool (optional)
+        Flag to set all floating-point arrays in the returned `Rollout` to `bfloat16` on GPU transfer. Halves VRAM usage for rollout
+        buffers with negligible effect on training quality. `actions` remain
+        `int32`. Default is `True`
 
     Attributes
     ----------
@@ -290,8 +294,10 @@ class RolloutBuffer:
         encoding_dim: int,
         prediction_dim: int,
         q_dim: int,
+        use_bfloat16: bool = True,
     ):
         shape = (n_rollouts, n_envs, seq_len)  # (N, B, T)
+        self._use_bfloat16 = use_bfloat16
 
         # Core
         self.actions = np.zeros((*shape, 1), dtype=np.int32)
@@ -453,6 +459,16 @@ class RolloutBuffer:
                 self.t_q,
             ),
         )
+
+        if self._use_bfloat16:
+            rollout = jax.tree.map(
+                lambda x: (
+                    x.astype(jnp.bfloat16)
+                    if jnp.issubdtype(x.dtype, jnp.floating)
+                    else x
+                ),
+                rollout,
+            )
 
         # Reset write-head for the next collect_stack call
         self._rollout_idx = 0
