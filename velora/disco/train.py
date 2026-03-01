@@ -1904,8 +1904,8 @@ class ParallelRuleTrainer(RuleTrainer):
                 jax.tree.map(lambda x: x[None], t.state.value_opt_state),
                 jax.tree.map(lambda x: x[None], t.state.adv_ema),
                 jax.tree.map(lambda x: x[None], t.state.td_ema),
-                dummy_train[None],
-                dummy_valid[None],
+                jax.tree.map(lambda x: x[None], dummy_train),
+                jax.tree.map(lambda x: x[None], dummy_valid),
             )
 
             self._batch_grad_fns[group.n_actions] = fn
