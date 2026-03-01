@@ -15,6 +15,7 @@ from velora.cli.base.component import (
 )
 from velora.cli.base.constant import VELORA_LOGO, Colour
 from velora.cli.base.dashboard import ConsoleDashboard
+from velora.cli.base.simple import SimpleDashboard
 
 __all__ = [
     "T",
@@ -33,4 +34,5 @@ __all__ = [
     "VELORA_LOGO",
     "Colour",
     "ConsoleDashboard",
+    "SimpleDashboard",
 ]

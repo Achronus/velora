@@ -26,6 +26,7 @@ import numpy as np
 import optax
 import orbax.checkpoint as ocp
 
+from velora.cli.base.simple import SimpleDashboard
 from velora.cli.disco.dashboard import DiscoConsoleDashboard
 from velora.cli.disco.settings import DiscoParamsSettings
 from velora.disco.agent import DiscoAgent, DiscoValueAgent, PolicyAgent
@@ -589,6 +590,10 @@ class RuleTrainer:
         speed. Default is `True`
     cache_dir : str | None (optional)
         Directory path for JAX's persistent XLA compilation cache. On repeated runs with the same model shapes, compilation is skipped and loaded from disk instead. Set to `None` to disable. Only active when `jit_compile=True`. Default is `".cache/jax"`
+    verbose : bool (optional)
+        Dashboard display settings. Default is `True`.
+            - If `True` - renders the full Rich dashboard during training
+            - If `False` - uses a lightweight tqdm progress bar instead
     """
 
     def __init__(
@@ -599,6 +604,7 @@ class RuleTrainer:
         seed: int = 42,
         jit_compile: bool = True,
         cache_dir: str | None = ".cache/jax",
+        verbose: bool = True,
     ) -> None:
         _cache_status = cache_status(cache_dir, jit_compile)
 
@@ -656,15 +662,18 @@ class RuleTrainer:
         self.rule_path = Path(self.cp_manager.cp_dir, "final_disco").resolve()
 
         # init console dashboard
-        self.console = DiscoConsoleDashboard(
-            self.config.console_config(
-                envs=envs.env_categories(),
-                params=self._dummy_params(trainer_keys[0]),
-                complete_path=str(self.rule_path),
-                jit_compile=jit_compile,
-                cache_status=_cache_status,
+        if verbose:
+            self.console = DiscoConsoleDashboard(
+                self.config.console_config(
+                    envs=envs.env_categories(),
+                    params=self._dummy_params(trainer_keys[0]),
+                    complete_path=str(self.rule_path),
+                    jit_compile=jit_compile,
+                    cache_status=_cache_status,
+                )
             )
-        )
+        else:
+            self.console = SimpleDashboard(config.n_steps)
 
         # Initial setup
         self._initial_setup(trainer_keys, 2 * self.num_envs)
@@ -1369,6 +1378,10 @@ class ParallelRuleTrainer(RuleTrainer):
     cache_dir : str | None (optional)
         Directory path for JAX's persistent XLA compilation cache.
         Default is `".cache/jax"`
+    verbose : bool (optional)
+        Dashboard display settings. Default is `True`.
+            - If `True` - renders the full Rich dashboard during training
+            - If `False` - uses a lightweight tqdm progress bar instead
     """
 
     def __init__(
@@ -1380,6 +1393,7 @@ class ParallelRuleTrainer(RuleTrainer):
         seed: int = 42,
         jit_compile: bool = True,
         cache_dir: str | None = ".cache/jax",
+        verbose: bool = True,
     ) -> None:
         self.max_group_size = max_group_size
 
@@ -1392,6 +1406,7 @@ class ParallelRuleTrainer(RuleTrainer):
             seed=seed,
             jit_compile=jit_compile,
             cache_dir=cache_dir,
+            verbose=verbose,
         )
 
     def _count_batch_groups(self) -> int:
