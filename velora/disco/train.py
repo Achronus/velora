@@ -1384,7 +1384,7 @@ class ParallelRuleTrainer(RuleTrainer):
         self.max_group_size = max_group_size
 
         self.action_groups: List[ActionGroup] = []
-        self._vmap_grad_fns: Dict[int, Callable] = {}
+        self._batch_grad_fns: Dict[int, Callable] = {}
 
         super().__init__(
             envs,
@@ -1393,6 +1393,30 @@ class ParallelRuleTrainer(RuleTrainer):
             jit_compile=jit_compile,
             cache_dir=cache_dir,
         )
+
+    def _count_batch_groups(self) -> int:
+        """
+        Count the number of action groups that will require batch gradient
+        compilation (i.e. groups with more than one trainer).
+
+        Opens each environment briefly to read its action space size. Called
+        before trainers are built so the setup total can be set correctly
+        upfront.
+
+        Returns
+        -------
+        n : int
+            Number of multi-trainer action groups
+        """
+        buckets: Dict[int, int] = defaultdict(int)
+
+        for env_name, make_fn in self._env_specs:
+            env = make_fn(env_name, 1)
+            action_space: gym.spaces.Discrete = env.single_action_space  # type: ignore
+            buckets[action_space.n.item()] += 1
+            env.close()
+
+        return sum(1 for count in buckets.values() if count > 1)
 
     def _build_action_groups(self) -> List[ActionGroup]:
         """
@@ -1409,12 +1433,8 @@ class ParallelRuleTrainer(RuleTrainer):
         """
         buckets: Dict[int, List[int]] = defaultdict(list)
 
-        for idx, (env_name, make_fn) in enumerate(self._env_specs):
-            env = make_fn(env_name, self.config.num_vec_envs)
-            ap: gym.spaces.Discrete = env.single_action_space  # type: ignore
-            n_actions = ap.n.item()
-            env.close()
-            buckets[n_actions].append(idx)
+        for idx, trainer in enumerate(self.trainers):
+            buckets[trainer.n_actions].append(idx)
 
         groups = [ActionGroup(n_actions=n, indices=idxs) for n, idxs in buckets.items()]
         groups.sort(key=lambda g: (-len(g.indices), g.n_actions))
@@ -1634,7 +1654,7 @@ class ParallelRuleTrainer(RuleTrainer):
             normalized_advantages=aux.value_outs.normalized_advantages,
         )
 
-    def _build_vmap_grad_fn(self, group: ActionGroup) -> Callable:
+    def _build_batch_grad_fn(self, group: ActionGroup) -> Callable:
         """
         Build a JIT+vmap compiled meta-gradient function for a trainer group.
 
@@ -1673,7 +1693,7 @@ class ParallelRuleTrainer(RuleTrainer):
 
         return jax.jit(jax.vmap(_pure_fn, in_axes=(None, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)))
 
-    def _process_group_vmap(
+    def _process_group_batch(
         self,
         group: ActionGroup,
         meta_params: chex.ArrayTree,
@@ -1708,11 +1728,14 @@ class ParallelRuleTrainer(RuleTrainer):
         # CPU phase: collect all rollouts for this group
         group_train_rollouts = []
         group_valid_rollouts = []
-        for trainer in trainers:
+        for i, trainer in enumerate(trainers):
+            self.console.update_progress(
+                "Inner Updates", env_name=self.env_names[group.indices[i]]
+            )
             group_train_rollouts.append(trainer.collect_stack(self.config.n_updates))
             group_valid_rollouts.append(trainer.collect_valid()[0])
 
-        # Singleton: vmap provides no benefit, use sequential path
+        # Singleton: batching provides no benefit, use sequential path
         if len(group.indices) == 1:
             idx = group.indices[0]
             trainer = trainers[0]
@@ -1728,11 +1751,10 @@ class ParallelRuleTrainer(RuleTrainer):
             self.state = self.state.update_hidden(idx, disco_h, meta_h)  # type: ignore
             trainer.meta_opt_state = new_meta_opt
             stats.record(trainer.ep_return(), trainer.ep_length(), losses)
-            self.console.update_progress("Inner Updates", env_name=self.env_names[idx])
             return accumulated_grad
 
-        # GPU phase: vmap meta-gradient across group in chunks
-        vmapped_fn = self._vmap_grad_fns[group.n_actions]
+        # GPU phase: batch meta-gradient across group in chunks
+        vmapped_fn = self._batch_grad_fns[group.n_actions]
         chunk_starts = range(0, len(group.indices), self.max_group_size)
 
         for start in chunk_starts:
@@ -1788,7 +1810,7 @@ class ParallelRuleTrainer(RuleTrainer):
                 stacked_valid,
             )
 
-            # Post-vmap: apply updates and log sequentially
+            # Post-batch: apply updates and log sequentially
             for i, (global_idx, trainer) in enumerate(zip(chunk_idx, chunk_trainers)):
                 p_params_i = jax.tree.map(lambda x: x[i], chunk_out.p_params)
                 v_params_i = jax.tree.map(lambda x: x[i], chunk_out.v_params)
@@ -1843,9 +1865,6 @@ class ParallelRuleTrainer(RuleTrainer):
                     regularization=chunk_out.reg_loss[i],
                 )
                 stats.record(trainer.ep_return(), trainer.ep_length(), losses_i)
-                self.console.update_progress(
-                    "Inner Updates", env_name=self.env_names[global_idx]
-                )
 
         return accumulated_grad
 
@@ -1858,16 +1877,16 @@ class ParallelRuleTrainer(RuleTrainer):
         Extends `RuleTrainer._initial_setup` to build action groups and
         pre-compile the JIT-batched gradient function for each unique `n_actions`.
         """
-        super()._initial_setup(trainer_keys)
+        n_batch_groups = self._count_batch_groups()
+        super()._initial_setup(trainer_keys, setup_total + n_batch_groups)
 
-        # Build action groups for vmap parallelism
+        # Build action groups for batched parallelism
         self.action_groups = self._build_action_groups()
 
-        for group in self.action_groups:
-            if group.n_actions in self._vmap_grad_fns or len(group.indices) <= 1:
-                continue
+        batch_groups = [g for g in self.action_groups if len(g.indices) > 1]
 
-            fn = self._build_vmap_grad_fn(group)
+        for group in batch_groups:
+            fn = self._build_batch_grad_fn(group)
 
             # Trigger XLA compilation with a size-1 dummy call so no compilation
             # happens during the training loop itself.
@@ -1889,16 +1908,18 @@ class ParallelRuleTrainer(RuleTrainer):
                 dummy_valid[None],
             )
 
-            self._vmap_grad_fns[group.n_actions] = fn
+            self._batch_grad_fns[group.n_actions] = fn
+            self.console.update_setup()
 
     def train(self) -> None:
         """
-        Meta-training loop with vmap-based group parallelism.
+        Meta-training loop with batched group parallelism.
 
         Trainers are grouped by `n_actions` at the start of training. Within
         each group, meta-gradients are computed in chunks of `max_group_size`
-        via `jax.vmap`, replacing N sequential GPU calls with ceil(N/chunk)
-        batched calls. Singleton groups fall through to the sequential path.
+        via batched execution, replacing N sequential GPU calls with
+        ceil(N/chunk) batched calls. Singleton groups fall through to the
+        sequential path.
         """
         self.console.start_training()
 
@@ -1912,7 +1933,7 @@ class ParallelRuleTrainer(RuleTrainer):
 
             # Process each action group — largest first
             for group in self.action_groups:
-                accumulated_grad = self._process_group_vmap(
+                accumulated_grad = self._process_group_batch(
                     group=group,
                     meta_params=meta_params,
                     accumulated_grad=accumulated_grad,
