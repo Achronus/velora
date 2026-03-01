@@ -13,7 +13,7 @@
 # limitations under the License.
 # ==============================================================================
 
-from typing import NamedTuple
+from typing import List, NamedTuple
 
 import chex
 import optax
@@ -60,3 +60,38 @@ class MetaLossFnInputs(NamedTuple):
     td_ema: EMAState
     train_rollouts: Rollout
     valid_rollout: Rollout
+
+
+class PureMetaGradOutput(NamedTuple):
+    """
+    All outputs from a single pure meta-gradient computation.
+    """
+
+    meta_grad: chex.ArrayTree
+    disco_h: chex.Array
+    meta_h: chex.Array
+    p_params: chex.ArrayTree
+    v_params: chex.ArrayTree
+    v_opt_state: chex.ArrayTree
+    pg_loss: chex.Array
+    entropy_loss: chex.Array
+    reg_loss: chex.Array
+    meta_loss: chex.Array
+    advantages: chex.Array
+    normalized_advantages: chex.Array
+
+
+class ActionGroup(NamedTuple):
+    """
+    A group of trainers sharing the same `n_actions` value.
+
+    Parameters
+    ----------
+    n_actions : int
+        Shared action space size for all trainers in the group
+    indices : List[int]
+        Global trainer indices (into self.trainers)
+    """
+
+    n_actions: int
+    indices: List[int]
