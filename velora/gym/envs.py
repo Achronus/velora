@@ -343,7 +343,11 @@ class EnvSet:
         categories : Dict[str, int]
             Mapping of category names to environment counts
         """
-        return {g.category: g.n_envs for g in self._groups}
+        counts: Dict[str, int] = {}
+        for g in self._groups:
+            counts[g.category] = counts.get(g.category, 0) + g.n_envs
+
+        return counts
 
     def __iter__(self) -> Iterator[Tuple[str, MakeFn]]:
         """Iterate over (env_name, make_fn) tuples from all groups."""
