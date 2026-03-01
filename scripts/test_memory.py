@@ -1,3 +1,8 @@
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 """
 Memory leak regression test.
 
@@ -25,10 +30,10 @@ import jax
 
 from velora.disco import RuleTrainer, RuleTrainerSettings
 from velora.disco.train import ParallelRuleTrainer
-from velora.gym.envs import ATARI_BASE
+from velora.gym.envs import ATARI_BASE, ATARI_EASY, EnvSet
 
 # ── Configuration ──────────────────────────────────────────────────────────────
-TEST_ENVS = ATARI_BASE
+TEST_ENVS = EnvSet(ATARI_BASE, ATARI_EASY)
 N_STEPS = 30
 MAX_DELTA_MB = 50  # memory growth per step (after warm-up) must be below this
 CACHE_DIR = Path(".cache/jax")
@@ -85,11 +90,14 @@ def _unpatch() -> None:
 def main() -> None:
     config = RuleTrainerSettings(
         n_steps=N_STEPS,
-        n_updates=3,  # keep the inner loop short for speed
+        n_updates=2,  # keep the inner loop short for speed
         # seq_len=16,
     )
 
-    trainer = ParallelRuleTrainer(TEST_ENVS, config=config)
+    trainer = ParallelRuleTrainer(
+        TEST_ENVS,
+        config=config,
+    )
     _patch(trainer)
 
     try:
