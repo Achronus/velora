@@ -2,7 +2,6 @@
 
 ![Python Version](https://img.shields.io/pypi/pyversions/velora)
 ![License](https://img.shields.io/github/license/Achronus/velora)
-![Issues](https://img.shields.io/github/issues/Achronus/velora)
 
 Found on:
 
@@ -11,96 +10,137 @@ Found on:
 
 # Velora
 
-**Velora** is a lightweight and modular framework built on top of powerful libraries like [Gymnasium](https://gymnasium.farama.org/) and [PyTorch](https://pytorch.org/). It is home to a new type of RL agent called ***NeuroFlow*** (NF) that specializes in Autonomous Cyber Defence through a novel Deep Reinforcement Learning (RL) approach we call ***Liquid RL***.
+**Velora** is a Liquid Reinforcement Learning (RL) Flax-based research framework for autonomous systems.
 
-## Benefits
+At its core, Velora combines [Closed-form Continuous-time (CfC) Liquid Neural Networks](https://arxiv.org/abs/2106.13898) with **DiscoRL** (Discovery RL) — a meta-reinforcement learning algorithm that learns a *generalizable update rule* across a large suite of environments, rather than training a separate agent per task.
 
-- **Explainability**: NF agents use [Liquid Neural Networks](https://arxiv.org/abs/2006.04439) (LNNs) and [Neural Circuit Policies](https://arxiv.org/abs/1803.08554) (NCPs) to model Cyber system dynamics, not just data patterns. Also, they use sparse NCP connections to mimic biological efficiency, enabling clear, interpretable strategies via a labeled Strategy Library.
-- **Adaptability**: NF agents dynamically grow their networks using a fitness score, adding more neurons to a backbone only when new Cyber strategies emerge, keeping agents compact and robust.
-- **Planning**: NF agents use a Strategy Library and learned environment model to plan strategic sequences for proactive Cyber defense.
-- **Always Learning**: using [EWC](https://arxiv.org/abs/1612.00796), NF agents refine existing strategies and learn new ones post-training, adapting to evolving Cyber threats like new attack patterns.
-- **Customizable**: NF agents are PyTorch-based, designed to be intuitive, easy to use, and modular so you can easily build your own!
+Traditional RL algorithms — such as PPO, DQN, or A3C — are hand-crafted by researchers and trained independently per environment. Each design decision (update rule, loss function, hyperparameters) requires careful manual tuning, making cross-task generalization difficult. DiscoRL sidesteps this by using meta-learning to *automatically discover* the update rule itself, producing one that is general-purpose by construction and outperforms manually designed rules across challenging benchmarks.
+
+> **Note:** Our DiscoRL implementation currently only supports **discrete action spaces**. Continuous action space support is planned for a future release.
+
+## Features
+
+- **Meta-learning across many environments** — train over 57+ environments simultaneously with a shared update rule
+- **JAX-native** — JIT compilation, `vmap` for parallel gradient computation, persistent XLA cache
+- **Async CPU/GPU pipeline** — rollout collection for the next group runs on CPU while the GPU computes gradients for the current group
+- **VRAM-efficient** — bfloat16 rollout buffers halve GPU memory usage; built-in VRAM advisor recommends the optimal batch size for your hardware
+- **Parallel trainer** — `ParallelRuleTrainer` chunks environments into action-space groups and vmaps gradients across each chunk
+- **Dashboard** — Rich-based live dashboard with progress, metrics, and losses; tqdm fallback for Docker/headless environments
+- **Checkpointing** — orbax-based checkpoint saving and restoration
 
 ## Installation
 
-To get started, simply install it through [pip](https://pypi.org/project/velora) using one of the options below.
+Velora requires Python 3.13+ and [Flax](https://flax.readthedocs.io/en/latest/).
 
-### GPU Enabled
-
-For [PyTorch](https://pytorch.org/get-started/locally/) with CUDA (recommended):
+### GPU (recommended)
 
 ```bash
-pip install torch torchvision velora --extra-index-url https://download.pytorch.org/whl/cu126
+uv add velora jax[cuda13]
 ```
 
-### CPU Only
-
-Or, for [PyTorch](https://pytorch.org/get-started/locally/) with CPU only:
+### CPU only
 
 ```bash
-pip install torch torchvision velora
+uv add velora
 ```
 
-## Example Usage
+### TPU
 
-Here's a simple example that should work 'as is':
+```bash
+uv add velora jax[tpu]
+```
+
+## Quick Start
+
+### Sequential training (`RuleTrainer`)
+
+Trains across environments one at a time. Good for debugging and smaller environment sets.
 
 ```python
-from velora.models import NeuroFlow, NeuroFlowCT
-from velora.utils import set_device
+from velora.disco import RuleTrainer, RuleTrainerSettings
+from velora.gym.envs import ATARI_BASE, ATARI_EASY, EnvSet
 
-# Setup PyTorch device
-device = set_device()
+envs = EnvSet(ATARI_BASE, ATARI_EASY)
 
-# For continuous tasks
-model = NeuroFlowCT(
-    "InvertedPendulum-v5",
-    20,  # actor neurons 
-    128,  # critic neurons
-    device=device,
-    seed=64,  # remove for automatic generation
+config = RuleTrainerSettings(
+    n_steps=1_000_000,
+    n_updates=15,
+    seq_len=29,
+    num_vec_envs=4,
 )
 
-# For discrete tasks
-model = NeuroFlow(
-    "CartPole-v1",
-    20,  # actor neurons 
-    128,  # critic neurons
-    device=device,
-)
-
-# Train the model using a batch size of 64
-model.train(64, n_episodes=50, display_count=10)
+trainer = RuleTrainer(envs, config=config)
+trainer.train()
 ```
 
-Currently, the framework only supports [Gymnasium](https://gymnasium.farama.org/) environments and is planned to expand to [PettingZoo](https://pettingzoo.farama.org/index.html) for Multi-agent (MARL) tasks, with updated adaptations of [CybORG](https://github.com/cage-challenge/CybORG/tree/main) environments.
+### Parallel training (`ParallelRuleTrainer`)
 
-## API Structure
-
-The frameworks API is designed to be simple and intuitive. We've broken into two main categories: `core` and `extras`.
-
-### Core
-
-The primary building blocks you'll use regularly.
+Groups environments by action-space size and `vmaps` gradient computation across each group, overlapping CPU rollout collection with GPU gradient passes.
 
 ```python
-from velora.models import [algorithm]
-from velora.callbacks import [callback]
+from velora.disco import ParallelRuleTrainer, RuleTrainerSettings
+from velora.gym.envs import ATARI_57, EnvSet
+
+envs = EnvSet(ATARI_57)
+config = RuleTrainerSettings(n_steps=1_000_000)
+
+trainer = ParallelRuleTrainer(envs, config=config, max_group_size=8)
+trainer.train()
 ```
 
-### Extras
-
-Utility methods that you may use occasionally.
+## API Overview
 
 ```python
-from velora.gym import [method]
-from velora.utils import [method]
+# Trainers
+from velora.disco import RuleTrainer, ParallelRuleTrainer
+
+# Configuration
+from velora.disco import RuleTrainerSettings
+
+# Environment sets (Atari)
+from velora.gym.envs import ATARI_BASE, ATARI_EASY, ATARI_MEDIUM, ATARI_HARD, ATARI_57, EnvSet
 ```
+
+### `RuleTrainerSettings` — key parameters
+
+| Parameter | Default | Description |
+| --- | --- | --- |
+| `n_steps` | `1_000_000` | Number of meta-training steps |
+| `n_updates` | `15` | Inner-loop gradient updates per environment |
+| `seq_len` | `29` | Rollout trajectory length |
+| `num_vec_envs` | `4` | Parallel environment instances per trainer |
+| `meta_lr` | `0.001` | Meta-optimizer learning rate |
+
+### `ParallelRuleTrainer` — additional parameters
+
+| Parameter | Default | Description |
+| --- | --- | --- |
+| `max_group_size` | `8` | Max trainers per vmapped gradient chunk |
+| `use_bfloat16` | `True` | Store rollout floats in `bfloat16` (halves VRAM) |
+| `verbose` | `True` | Use Rich dashboard (`False` → `tqdm` alternative) |
+
+## IDE Setup
+
+For full IntelliSense support (auto-imports for all subpackage symbols), add the following to your project's `.vscode/settings.json`:
+
+```json
+{
+    "python.analysis.packageIndexDepths": [
+        {
+            "name": "velora",
+            "depth": 3,
+            "includeAllSymbols": true
+        }
+    ]
+}
+```
+
+## References
+
+- Oh, J., Farquhar, G., Kemaev, I., Calian, D. A., Hessel, M., Zintgraf, L., Singh, S., van Hasselt, H., & Silver, D. (2025). Discovering state-of-the-art reinforcement learning algorithms. *Nature*, 648, 312–319. [https://doi.org/10.1038/s41586-025-09761-x](https://doi.org/10.1038/s41586-025-09761-x)
 
 ## Active Development
 
 🚧 View the [Roadmap](https://velora.achronus.dev/starting/roadmap) 🚧
 
-**Velora** is a tool that is continuously being developed. There's still a lot to do to make it a great framework, such as detailed API documentation, and expanding our NeuroFlow agents.
-
-Our goal is to provide a quality open-source product that works 'out-of-the-box' that everyone can experiment with, and then gradually fix unexpected bugs and introduce more features on the road to a `v1` release.
+**Velora** is under active development. The DiscoRL algorithm, environment coverage, and documentation are all expanding.
