@@ -13,7 +13,10 @@
 # limitations under the License.
 # ==============================================================================
 
+from typing import List
+
 import chex
+import jax
 import jax.numpy as jnp
 
 
@@ -73,3 +76,51 @@ def squeeze_time(x: chex.Array) -> chex.Array:
     if x.ndim >= 2 and jnp.shape(x)[1] == 1:
         return jnp.squeeze(x, axis=1)
     return x
+
+
+def stack_pytrees(items: List) -> chex.ArrayTree:
+    """
+    Stack a list of pytrees along a new leading axis.
+
+    Acts as a thin wrapper around `jax.tree.map` + `jnp.stack`.
+    Each element of `items` must be a pytree with identical structure and
+    leaf shapes.
+
+    Parameters
+    ----------
+    items : List[chex.ArrayTree]
+        List of pytrees to stack. All elements must share the same
+        structure and leaf shapes
+
+    Returns
+    -------
+    stacked : chex.ArrayTree
+        A single pytree where every leaf has shape `(len(items), ...)`
+    """
+    return jax.tree.map(lambda *xs: jnp.stack(xs), *items)
+
+
+def unstack_pytree(tree: chex.ArrayTree, i: int) -> chex.ArrayTree:
+    """
+    Extract the `i`-th element from every leaf of a pytree.
+
+    The inverse of `stack_pytrees` — where `stack_pytrees` combines a
+    list of pytrees into a single batched pytree with a leading group
+    dimension, `unstack_pytrees` slices out one element along that
+    dimension.
+
+    Parameters
+    ----------
+    tree : chex.ArrayTree
+        A pytree whose leaves have a leading batch dimension, typically
+        the output of a vmapped function
+    i : int
+        Index to extract along the leading dimension of every leaf
+
+    Returns
+    -------
+    sliced : chex.ArrayTree
+        A pytree with the same structure as `tree` but with every leaf
+        reduced from shape `(B, ...)` to `(...,)`
+    """
+    return jax.tree.map(lambda x: x[i], tree)
