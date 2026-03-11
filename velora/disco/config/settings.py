@@ -578,6 +578,7 @@ class RuleTrainerSettings:
     def console_config(
         self,
         envs: Dict[str, int],
+        num_trainers: int,
         params: DiscoParamsSettings,
         complete_path: str,
         jit_compile: bool,
@@ -590,6 +591,8 @@ class RuleTrainerSettings:
         ----------
         envs : Dict[str, int]
             Mapping of environment category names to counts
+        num_trainers : int
+            Number of agent trainers
         params : DiscoParamsSettings
             Parameter counts for each agent type
         complete_path : str
@@ -605,10 +608,11 @@ class RuleTrainerSettings:
             Configuration for `DiscoConsoleDashboard`
         """
         return DiscoDashboardSettings(
-            meta_steps=self.n_steps,
+            meta_steps=self.n_meta_steps(num_trainers),
             n_updates=self.n_updates,
             seq_len=self.seq_len,
-            batch_size=self.num_vec_envs,
+            n_agents=num_trainers,
+            total_steps=self.total_env_steps,
             log_dir=str(self.logger.dirpath),
             cp_dir=str(self.checkpoint.dirpath),
             env_categories=envs,

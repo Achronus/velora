@@ -104,8 +104,10 @@ class DiscoDashboardSettings:
         Number of inner loop agent updates per meta-step
     seq_len : int
         Trajectory sequence length (timesteps per rollout)
-    batch_size : int
-        Number of vectorized environments
+    n_agents : int
+        Number of agents in the population
+    total_steps : int
+        Total number of training steps
     log_dir : str
         Directory path for Tensorboard logs
     cp_dir : str
@@ -125,7 +127,8 @@ class DiscoDashboardSettings:
     meta_steps: int
     n_updates: int
     seq_len: int
-    batch_size: int
+    n_agents: int
+    total_steps: int
 
     log_dir: str
     cp_dir: str
@@ -147,25 +150,3 @@ class DiscoDashboardSettings:
             Environment training total
         """
         return sum(self.env_categories.values())
-
-    def update_freq(self) -> int:
-        """
-        Computes the metric update frequency.
-
-        Returns
-        -------
-        total : int
-            Metric update frequency in timesteps
-        """
-        return self.env_total()
-
-    def total_steps(self) -> int:
-        """
-        Compute total training steps.
-
-        Returns
-        -------
-        total : int
-            Total training steps
-        """
-        return self.meta_steps * self.env_total()

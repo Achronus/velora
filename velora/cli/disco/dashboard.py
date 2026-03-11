@@ -104,9 +104,9 @@ class DiscoConsoleDashboard(ConsoleDashboard):
                 Metric("JIT Compiled", compiled),
                 Divider(),
                 Metric("Meta Steps", self.config.meta_steps),
+                Metric("Agent Population Size", self.config.n_agents),
                 Metric("Inner Updates", self.config.n_updates),
                 Metric("Trajectory Size", self.config.seq_len),
-                Metric("Batch Size", self.config.batch_size),
                 Spacer(),
                 Divider(),
                 Metric("Compile Cache", self.config.cache_status),
@@ -148,8 +148,6 @@ class DiscoConsoleDashboard(ConsoleDashboard):
         card : MetricCard
             Agent details card
         """
-        total_steps = number_to_short(self.config.total_steps())
-
         active_params = number_to_short(
             self.params.policy.active
             + self.params.value.active
@@ -162,7 +160,7 @@ class DiscoConsoleDashboard(ConsoleDashboard):
         return MetricCard(
             title="Agent Details",
             metrics=[
-                Metric("Total Training Steps", total_steps),
+                Metric("Total Training Steps", self.config.total_steps),
                 Spacer(),
                 Divider(),
                 Metric("Params per Agent", "[dim](active/total)[/dim]"),
