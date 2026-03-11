@@ -14,7 +14,7 @@
 # ==============================================================================
 
 from dataclasses import field, fields
-from typing import Dict, NamedTuple, Self, Tuple
+from typing import Dict, Self, Tuple
 
 import chex
 import jax
@@ -504,7 +504,7 @@ class MetaLossAux:
 @struct.dataclass
 class MetaInnerStepCarry:
     """
-    Dataclass for the `_inner_step` in `RuleTrainer._compute_meta_gradient`.
+    Carry state for the `_inner_step` in `RuleTrainer._compute_meta_gradient`.
 
     Parameters
     ----------
@@ -520,6 +520,10 @@ class MetaInnerStepCarry:
         Policy agent optimizer state
     v_opt_state : optax.OptState
         Value agent optimizer state
+    adv_ema : EMAState
+        Advantage EMA state
+    td_ema : EMAState
+        TD-error EMA state
     """
 
     p_params: optax.Params
@@ -528,9 +532,65 @@ class MetaInnerStepCarry:
     meta_h: chex.Array
     p_opt_state: optax.OptState
     v_opt_state: optax.OptState
+    adv_ema: EMAState
+    td_ema: EMAState
 
 
-class LossStatistics(NamedTuple):
+@struct.dataclass
+class MetaGradOutput:
+    """
+    Outputs from a single meta-gradient computation.
+
+    Parameters
+    ----------
+    meta_grad : ArrayTree
+        Meta-gradient with respect to the DiscoAgent parameters
+    disco_h : chex.Array
+        Updated DiscoNetwork hidden state
+    meta_h : chex.Array
+        Updated Meta-LNN hidden state
+    p_params : optax.Params
+        Policy parameters after N inner updates
+    v_params : optax.Params
+        Value parameters after N inner updates
+    v_opt_state : optax.OptState
+        Value optimizer state after N inner updates
+    pg_loss : chex.Array
+        Policy gradient loss on the validation rollout
+    entropy_loss : chex.Array
+        Entropy regularisation loss
+    reg_loss : chex.Array
+        Meta-regularisation loss (KL + entropy on predictions)
+    meta_loss : chex.Array
+        Total meta-loss (pg + entropy + reg)
+    advantages : chex.Array
+        Raw advantages from the validation rollout
+    normalized_advantages : chex.Array
+        EMA-normalised advantages from the validation rollout
+    adv_ema : EMAState
+        Advantage EMA state after all N inner steps
+    td_ema : EMAState
+        TD-error EMA state after all N inner steps
+    """
+
+    meta_grad: chex.ArrayTree
+    disco_h: chex.Array
+    meta_h: chex.Array
+    p_params: optax.Params
+    v_params: optax.Params
+    v_opt_state: optax.OptState
+    pg_loss: chex.Array
+    entropy_loss: chex.Array
+    reg_loss: chex.Array
+    meta_loss: chex.Array
+    advantages: chex.Array
+    normalized_advantages: chex.Array
+    adv_ema: EMAState
+    td_ema: EMAState
+
+
+@struct.dataclass
+class LossStatistics:
     """
     Loss statistics for meta-training.
 
@@ -560,7 +620,8 @@ class LossStatistics(NamedTuple):
         }
 
 
-class RewardStatistics(NamedTuple):
+@struct.dataclass
+class RewardStatistics:
     """
     Per-trainer episodic rewards and lengths.
 
@@ -654,16 +715,16 @@ class MetaStepStats:
 
     Parameters
     ----------
-    num_envs : int
-        Number of vectorized environments
+    num_trainers : int
+        Number of agent trainers
     """
 
-    def __init__(self, num_envs: int) -> None:
-        self._num_envs = num_envs
+    def __init__(self, num_trainers: int) -> None:
+        self._num_trainers = num_trainers
         self._idx = 0
         self._reward_count = 0
 
-        zero = jnp.zeros((num_envs,), dtype=jnp.float32)
+        zero = jnp.zeros((num_trainers,), dtype=jnp.float32)
 
         # Pre-allocate fixed-size buffers
         self._reward_buf: chex.Array = zero
@@ -682,7 +743,8 @@ class MetaStepStats:
         n = self._reward_count
 
         return RewardStatistics(
-            rewards=self._reward_buf[:n], lengths=self._length_buf[:n]
+            rewards=self._reward_buf[:n],  # type: ignore
+            lengths=self._length_buf[:n],  # type: ignore
         )
 
     def record(
@@ -706,8 +768,8 @@ class MetaStepStats:
         i = self._idx
 
         if ep_return is not None:
-            self._reward_buf = self._reward_buf.at[i].set(jnp.float32(ep_return))
-            self._length_buf = self._length_buf.at[i].set(jnp.float32(ep_length))
+            self._reward_buf = self._reward_buf.at[i].set(jnp.float32(ep_return))  # type: ignore
+            self._length_buf = self._length_buf.at[i].set(jnp.float32(ep_length))  # type: ignore
             self._reward_count += 1
 
         # Write all four loss fields in one tree operation

@@ -364,7 +364,7 @@ class EMASettings:
         Exponential moving average (EMA) decay rate for normalizing
         advantages and TD errors during policy agent value learning.
         Higher values give more weight to historical statistics.
-        Default is `0.999`
+        Default is `0.99`
     eps : float (optional)
         Epsilon for numerical stability when normalizing by EMA
         variance during policy agent training. Default is `1e-6`
@@ -372,7 +372,7 @@ class EMASettings:
         Epsilon value for standard deviation. Default is `1e-12`
     """
 
-    decay: float = 0.999
+    decay: float = 0.99
     eps: float = 1e-6
     root_eps: float = 1e-12
 
@@ -392,8 +392,6 @@ class AgentTrainerSettings:
         Configuration for Exponential Moving Averages (EMAs)
     loss_cost : LossCostSettings
         Loss component weights
-    num_vec_envs : int
-        Number of vectorized environments for throughput
     tau : float
         EMA coefficient for target network updates
     seq_len : int
@@ -408,7 +406,6 @@ class AgentTrainerSettings:
     ema: EMASettings
     loss_costs: LossCostSettings
 
-    num_vec_envs: int
     tau: float
     seq_len: int
     n_updates: int
@@ -455,29 +452,26 @@ class RuleTrainerSettings:
         KL divergence regularization scale between meta-network targets and
         current policy. Encourages stability by keeping targets close to the
         agent's current predictions. Default is `0.01`
-    n_steps : int (optional)
-        Total number of meta-training steps. Used per environment. Default is `1_000_000`
+    total_env_steps : int (optional)
+        Total environment step budget across all trainers. Default is `500M`
     n_updates : int (optional)
         Number of agent updates to backpropagate through for meta-gradient
-        computation (sliding window size). Default is `15`
+        computation (sliding window size). Default is `20`
     seq_len : int (optional)
         Number of timesteps per trajectory (rollout size; `T`).
         Default is `29`
-    num_vec_envs : int (optional)
-        Number of vectorized environments. Acts as the rollout batch size.
-        Default is `4`
     tau : float (optional)
-        Soft update coefficient for target network updates. Default is `0.9`
+        Soft update coefficient for target network updates. Default is `0.995`
     """
 
-    agent: PolicyAgentSettings = PolicyAgentSettings()
-    disco_agent: DiscoAgentSettings = DiscoAgentSettings()
-    disco_value: DiscoValueSettings = DiscoValueSettings()
-    ema: EMASettings = EMASettings()
+    agent: PolicyAgentSettings = struct.field(default_factory=PolicyAgentSettings)
+    disco_agent: DiscoAgentSettings = struct.field(default_factory=DiscoAgentSettings)
+    disco_value: DiscoValueSettings = struct.field(default_factory=DiscoValueSettings)
+    ema: EMASettings = struct.field(default_factory=EMASettings)
 
-    loss_cost: LossCostSettings = LossCostSettings()
-    checkpoint: CheckpointSettings = CheckpointSettings()
-    logger: MetricLoggerSettings = MetricLoggerSettings()
+    loss_cost: LossCostSettings = struct.field(default_factory=LossCostSettings)
+    checkpoint: CheckpointSettings = struct.field(default_factory=CheckpointSettings)
+    logger: MetricLoggerSettings = struct.field(default_factory=MetricLoggerSettings)
 
     meta_lr: float = 0.001
     meta_grad_clip: float = 1.0
@@ -485,12 +479,60 @@ class RuleTrainerSettings:
     reg_scale: float = 1e-3
     kl_reg: float = 1e-2
 
-    n_steps: int = 1_000_000
-    n_updates: int = 15
+    total_env_steps: int = 500_000_000
+    n_updates: int = 20
     seq_len: int = 29
 
-    num_vec_envs: int = 4
-    tau: float = 0.9
+    tau: float = 0.995
+
+    @property
+    def steps_per_meta(self) -> int:
+        """
+        Environment steps consumed per trainer per meta-step.
+
+        Formula: `N * T + 2T` (inner loop + validation rollout).
+        """
+        return self.n_updates * self.seq_len + self.seq_len * 2
+
+    def n_meta_steps(self, num_trainers: int) -> int:
+        """
+        Computes the number of meta-steps to run.
+
+        Formula: `n_steps = total_env_steps // (num_trainers * steps_per_meta)`
+
+        Parameters
+        ----------
+        num_trainers : int
+            Total number of active trainer slots
+
+        Returns
+        -------
+        meta_steps : int
+            Total number of meta-steps to run
+        """
+        return max(1, self.total_env_steps // (num_trainers * self.steps_per_meta))
+
+    def estimate_total_env_steps(self, n_steps: int, num_trainers: int) -> int:
+        """
+        Computes a total environment step count budget, given a population size.
+
+        Useful for estimating how much experience a run will consume before
+        committing to it:
+            `total_env_steps = n_steps * num_trainers * steps_per_meta`
+
+        Parameters
+        ----------
+        n_steps : int
+            Number of meta-steps
+        num_trainers : int
+            Total number of active trainer slots
+
+        Returns
+        -------
+        total_env_steps : int
+            Total environment steps that will be consumed
+        """
+        return n_steps * num_trainers * self.steps_per_meta
 
     def verify_params(self) -> None:
         """
@@ -498,7 +540,7 @@ class RuleTrainerSettings:
 
         Raises
         ------
-        invalid : ValueError
+        param_mismatch : ValueError
             When `PolicyAgentSettings` and `DiscoAgentSettings` have mismatches of: `prediction_size` or `q_size`.
         """
         pred_valid = self.agent.prediction_size == self.disco_agent.prediction_size
@@ -528,7 +570,6 @@ class RuleTrainerSettings:
             value=self.disco_value,
             ema=self.ema,
             loss_costs=self.loss_cost,
-            num_vec_envs=self.num_vec_envs,
             tau=self.tau,
             seq_len=self.seq_len,
             n_updates=self.n_updates,

@@ -97,7 +97,7 @@ class AgentTrainerHiddenStates:
             Updated state
         """
         # Squeeze to (B,) for broadcasting against hidden states (B, H)
-        mask = jnp.squeeze(discounts)  # (B,)
+        mask = jnp.squeeze(discounts, axis=-1)  # (B,)
         mask_expanded = jnp.repeat(mask, n_actions)  # (B*A,)
 
         def _apply_mask(h: chex.Array | None, m: chex.Array) -> chex.Array | None:
@@ -176,7 +176,7 @@ class RuleTrainerHiddenStates:
     @classmethod
     def create(
         cls,
-        num_envs: int,
+        num_trainers: int,
         batch_size: int,
         disco_h_size: int,
         meta_h_size: int,
@@ -186,8 +186,8 @@ class RuleTrainerHiddenStates:
 
         Parameters
         ----------
-        num_envs : int
-            Number of environments in the population
+        num_trainers : int
+            Number of agent trainers in the population
         batch_size : int
             Batch size (num_vec_envs)
         disco_h_size : int
@@ -204,8 +204,8 @@ class RuleTrainerHiddenStates:
         meta_zero = jnp.zeros((batch_size, meta_h_size))
 
         return cls(
-            disco=tuple(disco_zero for _ in range(num_envs)),
-            meta=tuple(meta_zero for _ in range(num_envs)),
+            disco=tuple(disco_zero for _ in range(num_trainers)),
+            meta=tuple(meta_zero for _ in range(num_trainers)),
             disco_zero=disco_zero,
             meta_zero=meta_zero,
         )
@@ -452,7 +452,7 @@ class RuleTrainerState:
     def create(
         cls,
         meta_opt_state: optax.OptState,
-        num_envs: int,
+        num_trainers: int,
         batch_size: int,
         disco_h_size: int,
         meta_h_size: int,
@@ -464,8 +464,8 @@ class RuleTrainerState:
         ----------
         meta_opt_state : optax.OptState
             Disco network optimizer state
-        num_envs : int
-            Number of environments
+        num_trainers : int
+            Number of agent trainers
         batch_size : int
             Batch size (num_vec_envs)
         disco_h_size : int
@@ -481,7 +481,7 @@ class RuleTrainerState:
         return cls(
             meta_opt_state=meta_opt_state,
             hidden=RuleTrainerHiddenStates.create(
-                num_envs,
+                num_trainers,
                 batch_size,
                 disco_h_size,
                 meta_h_size,
@@ -510,17 +510,17 @@ class RuleTrainerState:
 
     def update_hidden(
         self,
-        env_idx: int,
+        trainer_idx: int,
         disco_h: HiddenState,
         meta_h: HiddenState,
     ) -> Self:
         """
-        Update hidden states for specific environment.
+        Update hidden states for specific trainer.
 
         Parameters
         ----------
-        env_idx : int
-            Index of the environment to update
+        trainer_idx : int
+            Index of the trainer to update
         disco_h : HiddenState
             Updated Disco Network hidden state
         meta_h : HiddenState
@@ -532,5 +532,5 @@ class RuleTrainerState:
             New state with updated `hidden`
         """
         return self.__replace__(
-            hidden=self.hidden.update(env_idx, disco_h, meta_h),
+            hidden=self.hidden.update(trainer_idx, disco_h, meta_h),
         )
