@@ -379,6 +379,13 @@ class RolloutBuffer:
         p = preds.to_numpy()
         tp = target_preds.to_numpy()
 
+        # Broadcast incoming (B, 1) or (1,) to match buffer slice (B, 1)
+        target_shape = self.actions[n, :, t].shape  # (B, 1)
+        actions = np.broadcast_to(actions, target_shape)
+        rewards = np.broadcast_to(rewards, target_shape)
+        discounts = np.broadcast_to(discounts, target_shape)
+        values = np.broadcast_to(values, target_shape)
+
         # Core
         np.copyto(self.actions[n, :, t], actions)
         np.copyto(self.rewards[n, :, t], rewards)
