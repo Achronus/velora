@@ -984,25 +984,35 @@ class RuleTrainer:
         for group in self.action_groups:
             fn = self._build_batch_grad_fn(group)
 
-            # Warm-up with a size-1 dummy call to trigger XLA compile
+            # Warm-up with the real chunk size to pre-compile vmap batch shapes
             t = self.trainers[group.indices[0]]
             dummy_train = t.train_buffer.to_rollout_zeros()
             dummy_valid = t.valid_buffer.to_rollout_zeros()[0]
             disco_h, meta_h = self.state.hidden.get(group.indices[0])
 
-            _ = fn(
-                self.meta_agent.get_params(),
-                jax.tree.map(lambda x: x[None], t.policy_agent.get_params()),
-                jax.tree.map(lambda x: x[None], t.value_agent.get_params()),
-                disco_h[None],  # type: ignore
-                meta_h[None],  # type: ignore
-                jax.tree.map(lambda x: x[None], t.state.policy_opt_state),
-                jax.tree.map(lambda x: x[None], t.state.value_opt_state),
-                jax.tree.map(lambda x: x[None], t.state.adv_ema),
-                jax.tree.map(lambda x: x[None], t.state.td_ema),
-                jax.tree.map(lambda x: x[None], dummy_train),
-                jax.tree.map(lambda x: x[None], dummy_valid),
-            )
+            # Collect the distinct chunk sizes this group will produce
+            n = len(group.indices)
+            chunk_sizes: set[int] = set()
+
+            for start in range(0, n, self.max_group_size):
+                chunk_sizes.add(min(self.max_group_size, n - start))
+
+            for chunk_size in chunk_sizes:
+                stack = lambda x, b=chunk_size: jnp.stack([x] * b)  # noqa: E731
+
+                _ = fn(
+                    self.meta_agent.get_params(),
+                    jax.tree.map(stack, t.policy_agent.get_params()),
+                    jax.tree.map(stack, t.value_agent.get_params()),
+                    jnp.stack([disco_h] * chunk_size),  # type: ignore
+                    jnp.stack([meta_h] * chunk_size),  # type: ignore
+                    jax.tree.map(stack, t.state.policy_opt_state),
+                    jax.tree.map(stack, t.state.value_opt_state),
+                    jax.tree.map(stack, t.state.adv_ema),
+                    jax.tree.map(stack, t.state.td_ema),
+                    jax.tree.map(stack, dummy_train),
+                    jax.tree.map(stack, dummy_valid),
+                )
 
             self._batch_grad_fns[group.n_actions] = fn
             self.console.update_setup()
