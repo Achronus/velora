@@ -29,9 +29,9 @@ import numpy as np
 import optax
 import orbax.checkpoint as ocp
 
-from velora.cli.base.simple import SimpleDashboard
 from velora.cli.disco.dashboard import DiscoConsoleDashboard
 from velora.cli.disco.settings import DiscoParamsSettings
+from velora.cli.disco.simple import SimpleDashboard
 from velora.disco.agent import DiscoAgent, DiscoValueAgent, PolicyAgent
 from velora.disco.config.settings import AgentTrainerSettings, RuleTrainerSettings
 from velora.disco.config.state import AgentTrainerState, RuleTrainerState
@@ -759,7 +759,7 @@ class RuleTrainer:
         self.rule_path = Path(self.cp_manager.cp_dir, "final_disco").resolve()
 
         # Per-action group batch gradient functions
-        self.action_groups: List[ActionGroup] = []
+        self.action_groups: List[ActionGroup] = self._prebuild_action_groups()
         self._batch_grad_fns: Dict[int, Callable[..., MetaGradOutput]] = {}
 
         # Sebulba actor infrastructure
@@ -784,6 +784,7 @@ class RuleTrainer:
                 self.config.console_config(
                     envs=envs.env_categories(),
                     num_trainers=self.num_trainers,
+                    action_groups=self.action_groups,
                     params=self._dummy_params(trainer_keys[0]),
                     complete_path=str(self.rule_path),
                     jit_compile=jit_compile,
@@ -836,6 +837,36 @@ class RuleTrainer:
             value=value.param_count,
             disco=self.meta_agent.param_count,
         )
+
+    def _prebuild_action_groups(self) -> List[ActionGroup]:
+        """
+        Build action groups from env specs before trainers are created.
+
+        Probes each unique environment once to determine its action space
+        size, then constructs `ActionGroup` objects with placeholder
+        indices. `_initial_setup` replaces `self.action_groups` with
+        the real groups.
+
+        Returns
+        -------
+        groups : List[ActionGroup]
+            Preliminary action groups sorted largest-first
+        """
+        buckets: Dict[int, int] = defaultdict(int)
+
+        for env_name, make_fn in self._unique_env_specs:
+            env = make_fn(env_name, 1)
+            action_space: gym.spaces.Discrete = env.single_action_space  # type: ignore
+            n = action_space.n.item()
+            buckets[n] += self.agents_per_env
+            env.close()
+
+        groups = [
+            ActionGroup(n_actions=n, indices=list(range(count)))
+            for n, count in buckets.items()
+        ]
+        groups.sort(key=lambda g: (-len(g.indices), g.n_actions))
+        return groups
 
     def _count_batch_groups(self) -> int:
         """
@@ -1622,11 +1653,6 @@ class RuleTrainer:
 
             # Post-batch: apply updates and accumulate gradients
             for i, (idx, trainer) in enumerate(zip(chunk_idx, chunk_trainers)):
-                self.console.update_progress(
-                    "Inner Updates",
-                    env_name=trainer.env_name,
-                )
-
                 p_params_i = unstack_pytree(chunk_out.p_params, i)
                 v_params_i = unstack_pytree(chunk_out.v_params, i)
                 v_opt_i = unstack_pytree(chunk_out.v_opt_state, i)
@@ -1720,6 +1746,8 @@ class RuleTrainer:
 
                 # Iterate through each action group
                 for group in self.action_groups:
+                    self.console.update_progress("Inner Updates", group=group)
+
                     train_rollouts, valid_rollouts = self._get_rollouts(group)
 
                     # Compute gradients for this agent

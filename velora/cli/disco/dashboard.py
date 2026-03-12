@@ -56,7 +56,7 @@ class DiscoConsoleDashboard(ConsoleDashboard):
         progress = TrainingProgressCard(
             tasks=[
                 ("Meta Steps", config.meta_steps),
-                ("Inner Updates", config.env_total()),
+                ("Inner Updates", config.n_action_groups()),
             ],
             total=config.meta_steps,
             complete_path=self.config.complete_path,

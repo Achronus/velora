@@ -5,6 +5,7 @@ from velora.cli.disco.settings import (
     DiscoParamsSettings,
     DiscoStats,
 )
+from velora.cli.disco.simple import SimpleDashboard
 
 __all__ = [
     "DiscoConsoleDashboard",
@@ -12,4 +13,5 @@ __all__ = [
     "DiscoLosses",
     "DiscoParamsSettings",
     "DiscoStats",
+    "SimpleDashboard",
 ]

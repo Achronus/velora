@@ -17,7 +17,7 @@ import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Generic, List, Tuple, Type, TypeVar
+from typing import TYPE_CHECKING, Generic, List, Tuple, Type, TypeVar
 
 from rich.console import Group, RenderableType
 from rich.padding import Padding
@@ -35,6 +35,9 @@ from rich.progress import (
 from rich.rule import Rule
 from rich.table import Table
 from rich.text import Text
+
+if TYPE_CHECKING:
+    from velora.disco.inputs import ActionGroup
 
 from velora.cli.base.constant import VELORA_LOGO, Colour
 from velora.utils.format import (
@@ -447,7 +450,7 @@ class TrainingProgressCard(ProgressComponent):
 
         self._tasks = tasks
         self._task_ids: dict[str, TaskID] = {}
-        self._current_env: str | None = None
+        self._current_group: "ActionGroup | None" = None
 
         self._inner_total: int = tasks[1][1]
         self._inner_count: int = 0
@@ -467,7 +470,7 @@ class TrainingProgressCard(ProgressComponent):
         description: str,
         *,
         advance: int = 1,
-        env_name: str | None = None,
+        group: "ActionGroup | None" = None,
     ) -> None:
         """
         Advance the progress card.
@@ -478,8 +481,9 @@ class TrainingProgressCard(ProgressComponent):
             Task to update
         advance : int (optional)
             Number to increment bar by. Default is `1`
-        env_name : str (optional)
-            Environment name being trained on. Default is `None`
+        group : ActionGroup (optional)
+            The action group that just completed.
+            Default is `None`
         """
         task_id = self._task_ids.get(description)
 
@@ -492,8 +496,8 @@ class TrainingProgressCard(ProgressComponent):
             # Second task
             self._inner_count = min(self._inner_count + advance, self._inner_total)
 
-        if env_name is not None:
-            self._current_env = env_name
+        if group is not None:
+            self._current_group = group
 
     def reset(self, description: str) -> None:
         """
@@ -506,7 +510,7 @@ class TrainingProgressCard(ProgressComponent):
         """
         if description == self._tasks[1][0]:
             self._inner_count = 0
-            self._current_env = None
+            self._current_group = None
 
     def _render_in_progress(self) -> Panel:
         table = Table.grid(expand=True)
@@ -514,15 +518,16 @@ class TrainingProgressCard(ProgressComponent):
         table.add_row(self.progress)
 
         # Update second task
-        if self._current_env:
-            display_name = (
-                self._current_env.split("/")[-1]
-                if "/" in self._current_env
-                else self._current_env
-            )
+        if self._current_group:
+            n_envs = len(self._current_group.indices)
+            n_actions = self._current_group.n_actions
+
             table.add_row(
                 Text(
-                    f"    ↳  {display_name} ({self._inner_count}/{self._inner_total})",
+                    f"    ↳  {n_actions} Actions Group"
+                    f" | {n_envs} Environment{'s' if n_envs != 1 else ''}"
+                    f" (groups remaining this step:"
+                    f" {self._inner_count}/{self._inner_total})",
                     style="dim",
                 )
             )

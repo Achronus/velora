@@ -14,7 +14,7 @@
 # ==============================================================================
 
 import os
-from typing import List
+from typing import TYPE_CHECKING, List
 
 from rich.console import Console, Group
 from rich.live import Live
@@ -26,6 +26,9 @@ from velora.cli.base.component import (
     TitleCard,
     TrainingProgressCard,
 )
+
+if TYPE_CHECKING:
+    from velora.disco.inputs import ActionGroup
 
 
 class ConsoleDashboard:
@@ -122,7 +125,7 @@ class ConsoleDashboard:
         Parameters
         ----------
         total : int (optional)
-            Total number of setup steps (e.g., environments to create).
+            Total number of setup steps (e.g., agents to create).
             If provided, shows determinate progress `x/N`
         """
         self._is_setting_up = True
@@ -207,7 +210,7 @@ class ConsoleDashboard:
         description: str,
         *,
         advance: int = 1,
-        env_name: str | None = None,
+        group: "ActionGroup | None" = None,
     ) -> None:
         """
         Update the progress bar.
@@ -218,11 +221,12 @@ class ConsoleDashboard:
             Progress bar to update
         advance : int (optional)
             Advancement progress count. Default is `1`
-        env_name : str (optional)
-            Environment name being trained on. Default is `None`
+        group : ActionGroup (optional)
+            The action group that just completed.
+            Default is `None`
         """
         if self.training:
-            self.training.update(description, advance=advance, env_name=env_name)
+            self.training.update(description, advance=advance, group=group)
             self._refresh_training()
 
     def stop(self) -> None:

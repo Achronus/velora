@@ -14,8 +14,12 @@
 # ==============================================================================
 
 import time
+from typing import TYPE_CHECKING
 
 from tqdm import tqdm
+
+if TYPE_CHECKING:
+    from velora.disco.inputs import ActionGroup
 
 
 class SimpleDashboard:
@@ -75,13 +79,13 @@ class SimpleDashboard:
         description: str,
         *,
         advance: int = 1,
-        env_name: str | None = None,
+        group: "ActionGroup | None" = None,
     ) -> None:
         """
         Update training progress.
 
         ``"Meta Steps"`` advances the training bar by one step.
-        ``"Inner Updates"`` sets the current environment name as a postfix.
+        ``"Inner Updates"`` sets the current group label as a postfix.
         """
         if not self._train_bar:
             return
@@ -94,10 +98,13 @@ class SimpleDashboard:
             if self._postfix:
                 self._train_bar.set_postfix(self._postfix, refresh=False)
             self._train_bar.update(advance)
-        elif description == "Inner Updates" and env_name:
+        elif description == "Inner Updates" and group is not None:
             if self._step_start is None:
                 self._step_start = time.perf_counter()
-            self._train_bar.set_postfix_str(env_name, refresh=False)
+
+            n_envs = len(group.indices)
+            label = f"{group.n_actions} Action Group | {n_envs} Environment{'s' if n_envs != 1 else ''}"
+            self._train_bar.set_postfix_str(label, refresh=False)
 
     def update_stats(self, **kwargs) -> None:
         """Accumulate reward stats to display as postfix on the next meta-step tick."""
