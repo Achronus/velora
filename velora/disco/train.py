@@ -913,8 +913,7 @@ class RuleTrainer:
 
     def _initial_setup(self, trainer_keys: List[chex.PRNGKey]) -> None:
         """
-        Build all trainers, warm networks, compile gradient functions, and
-        pre-compile batch-grad functions for each action group.
+        Build all trainers, warm networks and compile their gradient functions.
 
         Parameters
         ----------
@@ -941,41 +940,10 @@ class RuleTrainer:
             self.trainers.append(trainer)
             self.console.update_setup()
 
-        # Warm networks and compile per-trainer grad functions
-        seen_shapes: set[int] = set()
-
-        for trainer_idx, trainer in enumerate(self.trainers):
+        for trainer in self.trainers:
             trainer._init_meta_optim(self.meta_agent.get_params())
-
-            if trainer.n_actions not in seen_shapes:
-                dummy_train = trainer.train_buffer.to_rollout_zeros()
-                dummy_valid = trainer.valid_buffer.to_rollout_zeros()[0]
-
-                # Trigger JIT compile for inference networks
-                _ = self.meta_agent(dummy_train[0])
-                trainer.warm()
-
-                # Build and cache grad fn; triggering compile with dummy data
-                self._build_trainer_grad_fn(trainer)
-                disco_h, meta_h = self.state.hidden.get(trainer_idx)
-                dummy_inputs = MetaLossFnInputs(
-                    policy_params=trainer.policy_agent.get_params(),
-                    value_params=trainer.value_agent.get_params(),
-                    disco_h=disco_h,
-                    meta_h=meta_h,
-                    p_opt_state=trainer.state.policy_opt_state,
-                    v_opt_state=trainer.state.value_opt_state,
-                    adv_ema=trainer.state.adv_ema,
-                    td_ema=trainer.state.td_ema,
-                    train_rollouts=dummy_train,
-                    valid_rollout=dummy_valid,
-                )
-                _ = trainer._grad_fn(self.meta_agent.get_params(), dummy_inputs)
-                seen_shapes.add(trainer.n_actions)
-            else:
-                trainer.warm()
-                self._build_trainer_grad_fn(trainer)
-
+            trainer.warm()
+            self._build_trainer_grad_fn(trainer)
             self.console.update_setup()
 
         # Build action groups and compile batch-grad functions
@@ -983,37 +951,6 @@ class RuleTrainer:
 
         for group in self.action_groups:
             fn = self._build_batch_grad_fn(group)
-
-            # Warm-up with the real chunk size to pre-compile vmap batch shapes
-            t = self.trainers[group.indices[0]]
-            dummy_train = t.train_buffer.to_rollout_zeros()
-            dummy_valid = t.valid_buffer.to_rollout_zeros()[0]
-            disco_h, meta_h = self.state.hidden.get(group.indices[0])
-
-            # Collect the distinct chunk sizes this group will produce
-            n = len(group.indices)
-            chunk_sizes: set[int] = set()
-
-            for start in range(0, n, self.max_group_size):
-                chunk_sizes.add(min(self.max_group_size, n - start))
-
-            for chunk_size in chunk_sizes:
-                stack = lambda x, b=chunk_size: jnp.stack([x] * b)  # noqa: E731
-
-                _ = fn(
-                    self.meta_agent.get_params(),
-                    jax.tree.map(stack, t.policy_agent.get_params()),
-                    jax.tree.map(stack, t.value_agent.get_params()),
-                    jnp.stack([disco_h] * chunk_size),  # type: ignore
-                    jnp.stack([meta_h] * chunk_size),  # type: ignore
-                    jax.tree.map(stack, t.state.policy_opt_state),
-                    jax.tree.map(stack, t.state.value_opt_state),
-                    jax.tree.map(stack, t.state.adv_ema),
-                    jax.tree.map(stack, t.state.td_ema),
-                    jax.tree.map(stack, dummy_train),
-                    jax.tree.map(stack, dummy_valid),
-                )
-
             self._batch_grad_fns[group.n_actions] = fn
             self.console.update_setup()
 
@@ -1733,7 +1670,8 @@ class RuleTrainer:
         All actor threads run concurrently, so CPU environment stepping for every
         trainer overlaps with accelerator gradient computations.
 
-        Includes -
+        Includes
+        --------
         1. For each meta-step:
 
             a. Iterate through all agent trainers sequentially
@@ -1742,6 +1680,10 @@ class RuleTrainer:
             d. Average gradients across all environments and update meta-network
 
         2. Log metrics and checkpoints periodically
+
+        First Run
+        ---------
+        On first `train()` call, the first meta-step performs JIT compilation and caches it. This may take some time to complete. Subsequent steps will be more efficient on wall-clock time.
         """
         self.console.start_training()
         self._start_actors()
