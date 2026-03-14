@@ -525,7 +525,7 @@ class TrainingProgressCard(ProgressComponent):
             table.add_row(
                 Text(
                     f"    ↳  {n_actions} Actions Group"
-                    f" | {n_envs} Environment{'s' if n_envs != 1 else ''}"
+                    f" | {n_envs} Agent{'s' if n_envs != 1 else ''}"
                     f" (groups remaining this step:"
                     f" {self._inner_count}/{self._inner_total})",
                     style="dim",

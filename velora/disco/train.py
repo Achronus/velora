@@ -721,6 +721,8 @@ class RuleTrainer:
         self.cache_dir = cache_dir
         self.use_bfloat16 = use_bfloat16
 
+        self._cpu = jax.devices("cpu")[0]
+
         # Init logger - one writer per unique env
         self.logger = MetricsLogger(self.config.logger)
         self.logger.add_writer("meta")
@@ -886,15 +888,16 @@ class RuleTrainer:
 
     def _initial_setup(self, trainer_keys: List[chex.PRNGKey]) -> None:
         """
-        Build all trainers, warm networks and compile their gradient functions.
+        Builds all agent trainers, initializes meta-optimizers, compiles inference on
+        accelerator and CPU, builds per-trainer gradient functions, and builds
+        vmapped batch-grad functions per action group.
 
         Parameters
         ----------
         trainer_keys : List[chex.PRNGKey]
             List of trainer random number generated keys
         """
-        n_batch_groups = self._count_batch_groups()
-        setup_total = 2 * self.num_trainers + n_batch_groups
+        setup_total = 2 * self.num_trainers + len(self.action_groups)
         self.console.start_setup(setup_total)
 
         # Build trainers
@@ -913,9 +916,23 @@ class RuleTrainer:
             self.trainers.append(trainer)
             self.console.update_setup()
 
+        # Handle accelerator (GPU or TPU) and CPU compiling per action group
+        seen_acl: set[int] = set()
+        seen_cpu: set[int] = set()
+
         for trainer in self.trainers:
             trainer._init_meta_optim(self.meta_agent.get_params())
-            trainer.warm()
+
+            if trainer.n_actions not in seen_acl:
+                trainer.warm()
+                seen_acl.add(trainer.n_actions)
+
+            with jax.default_device(self._cpu):
+                if trainer.n_actions not in seen_cpu:
+                    trainer.warm()
+                    _ = trainer.collect_stack(self.config.n_updates)
+                    _ = trainer.collect_valid()
+                    seen_cpu.add(trainer.n_actions)
 
             self.console.update_setup()
 
@@ -1214,8 +1231,11 @@ class RuleTrainer:
                 q.put(_RESET_SENTINEL)
                 continue
 
-            train_rollout = trainer.collect_stack(self.config.n_updates)
-            valid_rollout = trainer.collect_valid()
+            # Force rollout threading on CPU
+            with jax.default_device(self._cpu):
+                train_rollout = trainer.collect_stack(self.config.n_updates)
+                valid_rollout = trainer.collect_valid()
+
             q.put((train_rollout, valid_rollout))
 
     def _start_actors(self) -> None:
