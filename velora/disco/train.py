@@ -1984,8 +1984,8 @@ class RuleTrainer:
             use_bfloat16=self.use_bfloat16,
         )
 
-        # Rebuild grad_fn closure
-        self._build_trainer_grad_fn(new_trainer)
+        # Reuse existing compiled _grad_fn from old trainer
+        new_trainer._grad_fn = self.trainers[trainer_idx]._grad_fn
 
         # Init fresh per-trainer meta-gradient optimizer
         new_trainer._init_meta_optim(self.meta_agent.get_params())
