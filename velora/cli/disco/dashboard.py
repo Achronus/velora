@@ -107,6 +107,7 @@ class DiscoConsoleDashboard(ConsoleDashboard):
                 Metric("Agent Population Size", self.config.n_agents),
                 Metric("Inner Updates", self.config.n_updates),
                 Metric("Trajectory Size", self.config.seq_len),
+                Metric("Batch Size", self.config.batch_size),
                 Spacer(),
                 Divider(),
                 Metric("Compile Cache", self.config.cache_status),

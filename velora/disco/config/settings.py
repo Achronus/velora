@@ -402,6 +402,8 @@ class AgentTrainerSettings:
     n_updates : int
         Number of agent updates to backpropagate through for meta-gradient
         computation (sliding window size)
+    batch_size : int
+        Trajectory batch size (number of vectorized environments)
     """
 
     agent: PolicyAgentSettings
@@ -412,6 +414,7 @@ class AgentTrainerSettings:
     tau: float
     seq_len: int
     n_updates: int
+    batch_size: int
 
 
 @struct.dataclass(frozen=True)
@@ -457,6 +460,9 @@ class RuleTrainerSettings:
         agent's current predictions. Default is `0.01`
     total_env_steps : int (optional)
         Total environment step budget across all trainers. Default is `500M`
+    batch_size : int (optional)
+        Trajectory batch size. Controls the number of vectorized environments used per agent.
+        Default is `1`
     n_updates : int (optional)
         Number of agent updates to backpropagate through for meta-gradient
         computation (sliding window size). Default is `20`
@@ -484,6 +490,7 @@ class RuleTrainerSettings:
 
     total_env_steps: int = 500_000_000
     n_updates: int = 20
+    batch_size: int = 1
     seq_len: int = 29
 
     tau: float = 0.995
@@ -576,6 +583,7 @@ class RuleTrainerSettings:
             tau=self.tau,
             seq_len=self.seq_len,
             n_updates=self.n_updates,
+            batch_size=self.batch_size,
         )
 
     def console_config(
@@ -617,6 +625,7 @@ class RuleTrainerSettings:
             meta_steps=self.n_meta_steps(num_trainers),
             n_updates=self.n_updates,
             seq_len=self.seq_len,
+            batch_size=self.batch_size,
             n_agents=num_trainers,
             total_steps=self.total_env_steps,
             action_groups=action_groups,

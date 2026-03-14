@@ -107,6 +107,8 @@ class DiscoDashboardSettings:
         Number of inner loop agent updates per meta-step
     seq_len : int
         Trajectory sequence length (timesteps per rollout)
+    batch_size : int
+        Trajectory batch size
     n_agents : int
         Number of agents in the population
     total_steps : int
@@ -132,6 +134,7 @@ class DiscoDashboardSettings:
     meta_steps: int
     n_updates: int
     seq_len: int
+    batch_size: int
     n_agents: int
     total_steps: int
     action_groups: List["ActionGroup"]

@@ -135,7 +135,7 @@ class AgentTrainer:
         self.config = config
         self.env_name = env_name
 
-        self.envs = make_fn(self.env_name, 1)  # B=1
+        self.envs = make_fn(self.env_name, self.config.batch_size)
 
         self.logger = logger
         self.writer_name = writer_name
@@ -184,7 +184,7 @@ class AgentTrainer:
             self.policy_optim.init(self.policy_agent.get_params()),
             self.value_optim.init(self.value_agent.get_params()),
             current_obs=current_obs,
-        )  # (1, H)
+        )  # (B, H)
 
         self.meta_optim: optax.GradientTransformation = None  # type: ignore
         self.meta_opt_state: optax.OptState = None  # type: ignore
@@ -194,13 +194,13 @@ class AgentTrainer:
         self._step_budget: int = sample_budget(budget_rng)
 
         # Episode tracking
-        self.episode_tracker = EpisodeTracker(1)
+        self.episode_tracker = EpisodeTracker(self.config.batch_size)
         self._collection_step = 0
 
         # Pre-allocated buffers
         self.train_buffer = RolloutBuffer(
             n_rollouts=self.config.n_updates,
-            n_envs=1,
+            n_envs=self.config.batch_size,
             seq_len=self.config.seq_len,
             n_actions=self.n_actions,
             encoding_dim=self.policy_agent.encoding_dim,
@@ -210,7 +210,7 @@ class AgentTrainer:
         )
         self.valid_buffer = RolloutBuffer(
             n_rollouts=1,
-            n_envs=1,
+            n_envs=self.config.batch_size,
             seq_len=self.config.seq_len * 2,
             n_actions=self.n_actions,
             encoding_dim=self.policy_agent.encoding_dim,
@@ -270,7 +270,7 @@ class AgentTrainer:
             2. JIT compile caching
         """
         dummy_obs = jnp.zeros(
-            (1, *self.obs_space.shape),
+            (self.config.batch_size, *self.obs_space.shape),
             dtype=self.obs_space.dtype,
         )
         _ = self.policy_agent(dummy_obs)
@@ -556,7 +556,7 @@ class AgentTrainer:
         Collect a stack of `N` rollout training trajectories.
 
         Writes each rollout directly into `train_buffer` and returns a single
-        stacked `Rollout` with shape `(N, 1, T, ...)`.
+        stacked `Rollout` with shape `(N, B, T, ...)`.
 
         Parameters
         ----------
@@ -567,7 +567,7 @@ class AgentTrainer:
         Returns
         -------
         stack : Rollout
-            Stacked rollouts with shape `(N, 1, T, ...)`.
+            Stacked rollouts with shape `(N, B, T, ...)`.
             All arrays are Jax arrays loaded onto the default device
         """
         self.episode_tracker.reset()
@@ -746,7 +746,7 @@ class RuleTrainer:
         self.state = RuleTrainerState.create(
             self.meta_optim.init(self.meta_agent.get_params()),
             self.num_trainers,
-            1,
+            self.config.batch_size,
             *self.meta_agent.hidden_sizes,
         )
         self.trainers: List[AgentTrainer] = []
@@ -811,7 +811,7 @@ class RuleTrainer:
         """
         config = self.config.agent_trainer_config()
         env_name, make_fn = self._env_specs[0]
-        envs = make_fn(env_name, 1)
+        envs = make_fn(env_name, self.config.batch_size)
 
         policy = PolicyAgent(
             envs.single_observation_space,  # type: ignore
@@ -852,7 +852,7 @@ class RuleTrainer:
         buckets: Dict[int, int] = defaultdict(int)
 
         for env_name, make_fn in self._unique_env_specs:
-            env = make_fn(env_name, 1)
+            env = make_fn(env_name, self.config.batch_size)
             action_space: gym.spaces.Discrete = env.single_action_space  # type: ignore
             n = action_space.n.item()
             buckets[n] += self.agents_per_env
@@ -1011,9 +1011,9 @@ class RuleTrainer:
         v_params : ArrayTree
             Value network parameters for this trainer
         disco_h : chex.Array
-            Disco network hidden state `(1, H)`
+            Disco network hidden state `(B, H)`
         meta_h : chex.Array
-            Meta-LNN hidden state `(1, H_meta)`
+            Meta-LNN hidden state `(B, H_meta)`
         p_opt_state : ArrayTree
             Policy optimizer state.
         v_opt_state : ArrayTree
@@ -1023,7 +1023,7 @@ class RuleTrainer:
         td_ema : EMAState
             TD-error EMA state.
         train_rollouts : Rollout
-            Training rollouts `(N, 1, T, ...)`
+            Training rollouts `(N, B, T, ...)`
         valid_rollout : Rollout
             Validation rollout `(1, T, ...)`
 
