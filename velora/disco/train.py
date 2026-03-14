@@ -36,11 +36,9 @@ from velora.disco.agent import DiscoAgent, DiscoValueAgent, PolicyAgent
 from velora.disco.config.settings import AgentTrainerSettings, RuleTrainerSettings
 from velora.disco.config.state import AgentTrainerState, RuleTrainerState
 from velora.disco.ema import EMAState, MovingAverage
-from velora.disco.inputs import ActionGroup, MetaLossFnInputs
+from velora.disco.inputs import ActionGroup
 from velora.disco.outputs import (
     AgentLossAux,
-    AgentLosses,
-    DiscoAgentOutput,
     LossStatistics,
     MetaGradOutput,
     MetaInnerStepCarry,
@@ -190,9 +188,6 @@ class AgentTrainer:
 
         self.meta_optim: optax.GradientTransformation = None  # type: ignore
         self.meta_opt_state: optax.OptState = None  # type: ignore
-
-        # Cached JIT-compiled meta-gradient function (built once on first use)
-        self._grad_fn: Callable = None  # type: ignore
 
         # Lifetime tracking
         self._env_steps: int = 0
@@ -868,28 +863,6 @@ class RuleTrainer:
         groups.sort(key=lambda g: (-len(g.indices), g.n_actions))
         return groups
 
-    def _count_batch_groups(self) -> int:
-        """
-        Computes the number of action groups that need batch-grad compilation.
-
-        Uses unique environments only - duplicate trainer slots for the same
-        game share an action space and don't require additional compilations.
-
-        Returns
-        -------
-        count : int
-            Action group count for batch-grad compilation
-        """
-        buckets: Dict[int, int] = defaultdict(int)
-
-        for env_name, make_fn in self._unique_env_specs:
-            env = make_fn(env_name, 1)
-            action_space: gym.spaces.Discrete = env.single_action_space  # type: ignore
-            buckets[action_space.n.item()] += self.agents_per_env
-            env.close()
-
-        return sum(1 for count in buckets.values() if count > 1)
-
     def _build_action_groups(self) -> List[ActionGroup]:
         """
         Groups trainers by `n_actions` for vmap batching.
@@ -943,7 +916,7 @@ class RuleTrainer:
         for trainer in self.trainers:
             trainer._init_meta_optim(self.meta_agent.get_params())
             trainer.warm()
-            self._build_trainer_grad_fn(trainer)
+
             self.console.update_setup()
 
         # Build action groups and compile batch-grad functions
@@ -990,191 +963,6 @@ class RuleTrainer:
             )
 
         return jax.jit(jax.vmap(_pure_fn, in_axes=(None, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)))
-
-    def _build_trainer_grad_fn(self, trainer: AgentTrainer) -> None:
-        """
-        Build and cache the JIT-compiled meta-gradient function for a trainer.
-        Stored on `trainer._grad_fn`.
-
-        Parameters
-        ----------
-        trainer : AgentTrainer
-            The agent trainer to build the gradient function for
-        """
-
-        def meta_loss_fn(
-            meta_params,
-            inputs: MetaLossFnInputs,
-        ) -> Tuple[chex.Array, MetaLossAux]:
-            """
-            Meta-loss function.
-
-            Runs inner loop with MixFlow-MG reparameterization, then
-            computes policy gradient on validation data.
-
-            Parameters
-            ----------
-            meta_params : optax.Params
-                Meta agent parameters (differentiated)
-            inputs : MetaLossFnInputs
-                All non-differentiated JAX inputs for this step
-
-            Returns
-            -------
-            meta_loss : chex.Array
-                Meta loss
-            aux : MetaLossAux
-                Meta loss auxiliary values
-            """
-
-            def _inner_step(
-                carry: MetaInnerStepCarry,
-                rollout: Rollout,
-            ) -> Tuple[MetaInnerStepCarry, Tuple[DiscoAgentOutput, chex.Array]]:
-                """
-                Single inner loop update step (MixFlow-MG reparameterized).
-
-                Parameters
-                ----------
-                carry : MetaInnerStepCarry
-                    Carry values
-                rollout : Rollout
-                    A trajectory of experience
-
-                Returns
-                -------
-                new_carry : MetaInnerStepCarry
-                    Carry values
-                targets : Tuple[DiscoAgentOutput, chex.Array]
-                    - Disco agent predictions
-                    - Policy target pi predictions
-                """
-                # Generate targets from disco agent
-                targets, d_h, m_h = self.meta_agent(
-                    rollout,
-                    disco_h_state=carry.disco_h,
-                    meta_h_state=carry.meta_h,
-                    params=meta_params,
-                )
-
-                encoding = rollout.preds.encoding
-                actions, discounts = rollout.actions, rollout.discounts
-
-                # Policy update
-                def inner_policy_loss(
-                    p, enc, tgt, act, disc
-                ) -> Tuple[chex.Array, AgentLosses]:
-                    new_preds = trainer.policy_agent.functional_forward(enc, p)
-
-                    return compute_policy_loss(
-                        tgt,
-                        new_preds.pi,
-                        new_preds.y,
-                        new_preds.z,
-                        new_preds.aux_pi,
-                        act,
-                        disc,
-                        self.config.loss_cost,
-                    )
-
-                (_, _), p_grads = fwdrev_value_and_grad(
-                    inner_policy_loss,
-                    has_aux=True,
-                )(carry.p_params, encoding, targets, actions, discounts)
-
-                # Apply inner update
-                p_updates, new_p_opt = trainer.policy_optim.update(
-                    p_grads,
-                    carry.p_opt_state,
-                    carry.p_params,
-                )
-                new_p_params = optax.apply_updates(carry.p_params, p_updates)
-
-                # Value update
-                _, new_adv_ema, new_td_ema = trainer.compute_value_outs(
-                    rollout,
-                    carry.adv_ema,
-                    carry.td_ema,
-                )
-                _, new_v_params, new_v_opt = trainer.update_value(
-                    rollout,
-                    value_params=carry.v_params,
-                    value_opt_state=carry.v_opt_state,
-                    adv_ema=carry.adv_ema,
-                    td_ema=carry.td_ema,
-                )
-
-                new_carry = MetaInnerStepCarry(
-                    p_params=new_p_params,
-                    v_params=new_v_params,
-                    disco_h=d_h,
-                    meta_h=m_h,
-                    p_opt_state=new_p_opt,
-                    v_opt_state=new_v_opt,
-                    adv_ema=new_adv_ema,
-                    td_ema=new_td_ema,
-                )
-                return new_carry, (targets, rollout.target_preds.pi)
-
-            # Run inner loop
-            init_carry = MetaInnerStepCarry(
-                p_params=inputs.policy_params,
-                v_params=inputs.value_params,
-                disco_h=inputs.disco_h,
-                meta_h=inputs.meta_h,
-                p_opt_state=inputs.p_opt_state,
-                v_opt_state=inputs.v_opt_state,
-                adv_ema=inputs.adv_ema,
-                td_ema=inputs.td_ema,
-            )
-
-            final_out, (all_targets, all_targets_pi) = jax.lax.scan(
-                jax.checkpoint(_inner_step),  # type: ignore
-                init_carry,
-                inputs.train_rollouts,
-            )
-
-            # Compute value outputs on validation rollout
-            value_outs, _, _ = trainer.compute_value_outs(
-                inputs.valid_rollout,
-                final_out.adv_ema,
-                final_out.td_ema,
-            )
-            adv = jax.lax.stop_gradient(value_outs.normalized_advantages)
-
-            pg_loss = compute_policy_gradient_loss(
-                inputs.valid_rollout.preds.pi,
-                inputs.valid_rollout.actions,
-                adv,
-            ).mean()
-            entropy_loss = compute_entropy_loss(
-                inputs.valid_rollout.preds.pi,
-                self.config.entropy_coef,
-            )
-            reg_loss = compute_meta_reg_loss(
-                jax.tree.map(lambda x: x[-1], all_targets),  # last targets
-                jax.tree.map(lambda x: x[-1], all_targets_pi),
-                self.config.reg_scale,
-                self.config.kl_reg,
-            )
-            meta_loss = pg_loss + entropy_loss + reg_loss
-
-            aux = MetaLossAux(
-                pg_loss=pg_loss,
-                entropy_loss=entropy_loss,
-                reg_loss=reg_loss,
-                disco_h=final_out.disco_h,  # type: ignore
-                meta_h=final_out.meta_h,  # type: ignore
-                p_params=final_out.p_params,
-                value_outs=value_outs,
-                v_params=final_out.v_params,
-                v_opt_state=final_out.v_opt_state,
-            )
-            return meta_loss, aux
-
-        trainer._grad_fn = jax.jit(
-            jax.value_and_grad(meta_loss_fn, argnums=0, has_aux=True)
-        )
 
     def _compute_meta_gradient(
         self,
@@ -1926,9 +1714,6 @@ class RuleTrainer:
             jit_compile=self.jit_compile,
             use_bfloat16=self.use_bfloat16,
         )
-
-        # Reuse existing compiled _grad_fn from old trainer
-        new_trainer._grad_fn = self.trainers[trainer_idx]._grad_fn
 
         # Init fresh per-trainer meta-gradient optimizer
         new_trainer._init_meta_optim(self.meta_agent.get_params())
