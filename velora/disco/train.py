@@ -1615,10 +1615,11 @@ class RuleTrainer:
             Updated gradient accumulator
         """
         vmapped_fn = self._batch_grad_fns[group.n_actions]
-        chunk_starts = range(0, len(group.indices), self.max_group_size)
+        n = len(group.indices)
+        chunk_starts = range(0, n, self.max_group_size)
 
         for start in chunk_starts:
-            end = start + self.max_group_size
+            end = min(start + self.max_group_size, n)
             chunk_idx = group.indices[start:end]
 
             chunk_trainers = [self.trainers[i] for i in chunk_idx]
