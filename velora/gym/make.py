@@ -18,7 +18,7 @@ from typing import Literal
 
 import gymnasium as gym
 from gymnasium.vector import VectorEnv
-from gymnasium.wrappers import AtariPreprocessing, FrameStackObservation
+from gymnasium.wrappers import AtariPreprocessing, FrameStackObservation, TimeLimit
 from gymnasium.wrappers.vector import RecordEpisodeStatistics
 
 from velora.gym.error import MissingPackageError
@@ -29,7 +29,8 @@ VectorMode = Literal["sync", "async", "vector_entry_point"]
 
 def make_atari_env(
     name: str,
-    num_envs: int = 1,
+    num_envs: int = 4,
+    max_episode_steps: int = 2000,
     vec_mode: VectorMode = "sync",
     render_mode: str = "rgb_array",
     **kwargs,
@@ -42,6 +43,7 @@ def make_atari_env(
     - `gymnasium.wrappers.AtariPreprocessing`
     - `gymnasium.wrappers.FrameStackObservation`
     - `velora.gym.wrappers.FrameStackReshape`
+    - `gymnasium.wrappers.TimeLimit`
     - `gymnasium.wrappers.vector.RecordEpisodeStatistics`
 
     Parameters
@@ -49,7 +51,9 @@ def make_atari_env(
     name : str
         Name of the environment (e.g., "ALE/Breakout-v5")
     num_envs : int (optional)
-        The number of vectorized environments to make. Default is `1`
+        The number of vectorized environments to make. Default is `4`
+    max_episode_steps : int (optional)
+        Maximum number of episode steps. Default is `2000`
     vec_mode : Literal["sync", "async", "vector_entry_point"] (optional)
         The type of vector environment to make. Default is `sync`
     render_mode : str (optional)
@@ -63,16 +67,6 @@ def make_atari_env(
     envs : JaxConversion
         A set of wrapped vectorized environments
     """
-    preprocess = partial(
-        AtariPreprocessing,
-        noop_max=10,
-        frame_skip=4,
-        screen_size=84,  # (84, 84)
-        grayscale_obs=True,
-        grayscale_newaxis=True,  # (84, 84, 1)
-    )
-    framestack = partial(FrameStackObservation, stack_size=4)  # (84, 84, 4))
-
     try:
         import ale_py
 
@@ -83,12 +77,32 @@ def make_atari_env(
             "Install with: pip install 'gymnasium[atari]'"
         ) from e
 
+    # Compute effective step limit - use smaller than max where possible
+    spec = gym.spec(name)
+    natural_limit = spec.max_episode_steps
+    effective_limit = (
+        min(natural_limit, max_episode_steps)
+        if natural_limit is not None
+        else max_episode_steps
+    )
+
+    preprocess = partial(
+        AtariPreprocessing,
+        noop_max=10,
+        frame_skip=4,
+        screen_size=84,  # (84, 84)
+        grayscale_obs=True,
+        grayscale_newaxis=True,  # (84, 84, 1)
+    )
+    framestack = partial(FrameStackObservation, stack_size=4)  # (84, 84, 4))
+    time_limit = partial(TimeLimit, max_episode_steps=effective_limit)
+
     envs = gym.make_vec(
         name,
         num_envs=num_envs,
         vectorization_mode=vec_mode,
         render_mode=render_mode,
-        wrappers=[preprocess, framestack, FrameStackReshape],
+        wrappers=[preprocess, framestack, FrameStackReshape, time_limit],
         frameskip=1,  # Handled by AtariPreprocessing
         **kwargs,
     )
