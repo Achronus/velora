@@ -13,13 +13,14 @@
 # limitations under the License.
 # ==============================================================================
 
+import json
 import queue
 import random
 import shutil
 import threading
 from collections import defaultdict
 from pathlib import Path
-from typing import Callable, Dict, List, Tuple
+from typing import Callable, Dict, List, Self, Tuple
 
 import chex
 import gymnasium as gym
@@ -61,6 +62,7 @@ from velora.nn.optim import scale_by_adan_no_denom
 from velora.tracking.episode import EpisodeTracker
 from velora.tracking.logger import MetricsLogger
 from velora.tracking.manager import CheckpointManager
+from velora.utils.config import dump_config, load_config
 from velora.utils.format import cache_status
 from velora.utils.transforms import stack_pytrees, unstack_pytree
 
@@ -721,6 +723,8 @@ class RuleTrainer:
         self.cache_dir = cache_dir
         self.use_bfloat16 = use_bfloat16
 
+        self._seed = seed
+        self._env_groups = envs.groups
         self._cpu = jax.devices("cpu")[0]
 
         # Init logger - one writer per unique env
@@ -1497,7 +1501,7 @@ class RuleTrainer:
         self._start_actors()
 
         try:
-            for step in range(self.n_steps):
+            for step in range(self.state.meta_step, self.n_steps):
                 accumulated_grad = jax.tree.map(
                     jnp.zeros_like,
                     self.meta_agent.get_params(),
@@ -1563,6 +1567,86 @@ class RuleTrainer:
 
         self.close()
         self.console.finish_training()
+
+    @classmethod
+    def resume(
+        cls,
+        checkpoint_dir: str,
+        additional_steps: int,
+        *,
+        jit_compile: bool = True,
+        cache_dir: str | None = ".cache/jax",
+        verbose: bool = True,
+    ) -> Self:
+        """
+        Resume training from a checkpoint.
+
+        Parameters
+        ----------
+        checkpoint_dir : str
+            Path to the checkpoint directory containing `meta_run.json`
+            and the Orbax checkpoint subdirectories
+        additional_steps : int
+            Number of additional meta-training steps to train the rule on
+        jit_compile : bool (optional)
+            Flag to enable/disable JIT compilation. Default is `True`
+        cache_dir : str | None (optional)
+            Directory path for JAX's persistent XLA compilation cache.
+            Set to `None` to disable. Default is `".cache/jax"`
+        verbose : bool (optional)
+            Dashboard display settings. Default is `True`.
+                - If `True` - renders the full Rich dashboard
+                - If `False` - uses a lightweight `tqdm` progress bar instead
+
+        Returns
+        -------
+        trainer : RuleTrainer
+            A restored `RuleTrainer` ready to use normally
+
+        Raises
+        ------
+        file_error : FileNotFoundError
+            If `meta_run.json` is not found in `checkpoint_dir`
+        checkpoint_error : ValueError
+            If no checkpoint exists in `checkpoint_dir`
+        """
+        cp_dir = Path(checkpoint_dir)
+        meta_run_path = cp_dir / "meta_run.json"
+
+        if not meta_run_path.exists():
+            raise FileNotFoundError(
+                f"No 'meta_run.json' found in '{checkpoint_dir}'."
+                "Ensure the checkpoint was saved by 'RuleTrainer'."
+            )
+
+        meta_run = json.loads(meta_run_path.read_text())
+
+        # Reconstruct environment groups from saved serialized data
+        envs = EnvSet(*[EnvGroup.load(g) for g in meta_run["envs"]])
+        config = load_config(RuleTrainerSettings, meta_run["config"])
+
+        # Construct trainer
+        trainer = cls(
+            envs,
+            config=config,
+            agents_per_env=meta_run["agents_per_env"],
+            max_group_size=meta_run["max_group_size"],
+            seed=meta_run["seed"],
+            jit_compile=jit_compile,
+            cache_dir=cache_dir,
+            verbose=verbose,
+        )
+
+        # Restore meta-agent params and RuleTrainerState (includes meta_step)
+        if not trainer.load_checkpoint():
+            raise ValueError(
+                f"No checkpoint found in '{checkpoint_dir}'. "
+                "Ensure the directory contains valid orbax checkpoint files."
+            )
+
+        # Extend restored steps to include additional
+        trainer.n_steps = trainer.state.meta_step + additional_steps
+        return trainer
 
     def _log_meta_metrics(
         self,
@@ -1637,6 +1721,7 @@ class RuleTrainer:
         Includes -
             - Meta agent parameters
             - Trainer state
+            - `meta_run.json` - config and environment set
 
         Parameters
         ----------
@@ -1657,6 +1742,18 @@ class RuleTrainer:
         }
 
         self.cp_manager.save(self.state.meta_step, checkpoint, force=True)
+
+        meta_run = {
+            "config": dump_config(self.config),
+            "agents_per_env": self.agents_per_env,
+            "max_group_size": self.max_group_size,
+            "seed": self._seed,
+            "envs": [g.dump() for g in self._env_groups],
+        }
+
+        meta_run_path = Path(self.cp_manager.cp_dir, "meta_run.json")
+        meta_run_path.write_text(json.dumps(meta_run, indent=2))
+
         return True
 
     def load_checkpoint(self, step: int | None = None) -> bool:
