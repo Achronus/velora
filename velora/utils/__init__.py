@@ -1,3 +1,4 @@
+from velora.utils.config import dump_config, load_config
 from velora.utils.format import (
     create_directory,
     field_to_title,
@@ -24,4 +25,6 @@ __all__ = [
     "squeeze_time",
     "to_batch_first",
     "to_time_first",
+    "dump_config",
+    "load_config",
 ]
