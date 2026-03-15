@@ -184,6 +184,69 @@ class EnvGroup:
             for env_name, make_fn in self
         ]
 
+    def dump(self) -> Dict[str, object]:
+        """
+        Serialize this group to a JSON-compatible dictionary.
+
+        Captures the class name and module path so the exact subclass
+        can be reconstructed via `load` regardless of where the
+        class lives in the package hierarchy.
+
+        Returns
+        -------
+        data : Dict[str, object]
+            Serialized representation containing keys -
+            `[class, module, prefix, category, version, required_packages, envs]`
+        """
+        return {
+            "class": self.__class__.__name__,
+            "module": self.__class__.__module__,
+            "prefix": self.prefix,
+            "category": self.category,
+            "version": self.version,
+            "required_packages": self.required_packages,
+            "envs": self.envs,
+        }
+
+    @classmethod
+    def load(cls, data: Dict[str, object]) -> Self:
+        """
+        Reconstruct an `EnvGroup` subclass from a serialized dictionary.
+
+        Uses the saved `module` and `class` keys to dynamically import
+        and instantiate the correct subclass, so the exact environment
+        group is restored even if its module path changes between versions.
+
+        Parameters
+        ----------
+        data : Dict[str, object]
+            Dictionary produced by `dump`
+
+        Returns
+        -------
+        group : EnvGroup
+            Reconstructed environment group instance
+
+        Raises
+        ------
+        import_error : ImportError
+            If the saved module cannot be imported
+        module_error : AttributeError
+            If the saved class is not found in the module
+        """
+        import importlib
+
+        module = importlib.import_module(str(data["module"]))
+        group_cls = getattr(module, data["class"])  # type: ignore
+
+        return group_cls(
+            prefix=data["prefix"],
+            category=data["category"],
+            version=data["version"],
+            required_packages=data["required_packages"],
+            envs=data["envs"],
+        )
+
 
 @dataclass
 class AtariEnvs(EnvGroup):
