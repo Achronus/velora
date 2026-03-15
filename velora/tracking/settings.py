@@ -33,14 +33,14 @@ class CheckpointSettings:
     name : str (optional)
         Name of the checkpoint sub-directory in `base_dir`. Default is `rule_trainer`
     freq : int (optional)
-        Checkpoint save frequency between timesteps. Default is `1000`
+        Checkpoint save frequency between timesteps. Default is `100`
     max : int (optional)
         Maximum number of checkpoints to store. Default is `20`
     """
 
     base_dir: Path | str = "checkpoints"
     name: str = "rule_trainer"
-    freq: int = 1000
+    freq: int = 100
     max: int = 20
 
     @property
