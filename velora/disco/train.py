@@ -1107,8 +1107,8 @@ class RuleTrainer:
                     v_params=new_v_params,
                     disco_h=d_h,
                     meta_h=m_h,
-                    p_opt_state=new_p_opt,
-                    v_opt_state=new_v_opt,
+                    p_opt_state=jax.lax.stop_gradient(new_p_opt),
+                    v_opt_state=jax.lax.stop_gradient(new_v_opt),
                     adv_ema=new_adv_ema,
                     td_ema=new_td_ema,
                 )
