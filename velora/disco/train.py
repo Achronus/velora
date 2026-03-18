@@ -1126,7 +1126,10 @@ class RuleTrainer:
             )
 
             final_out, (all_targets, all_targets_pi) = jax.lax.scan(
-                jax.checkpoint(_inner_step),  # type: ignore
+                jax.checkpoint(  # type: ignore
+                    _inner_step,
+                    policy=jax.checkpoint_policies.dots_with_no_batch_dims_saveable,
+                ),
                 init_carry,  # type: ignore
                 train_rollouts,  # type: ignore
             )
