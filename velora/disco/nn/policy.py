@@ -16,8 +16,6 @@
 from typing import Optional, Tuple
 
 import chex
-import jax
-import jax.numpy as jnp
 
 from velora.disco.config.spec import ACMHeadSpec, OCMHeadSpec
 from velora.disco.outputs import ACMPredictions, OCMPredictions
@@ -46,8 +44,6 @@ class ACM(BaseCfC):
         Number of decision nodes (inter + command nodes)
     prediction_size : int
         Size of the action-conditioned prediction vector
-    n_actions : int
-        Number of discrete actions
     q_dim : int
         Dimension of action-value prediction head. Uses distributional Q-values
     key : chex.PRNGKey
@@ -69,18 +65,17 @@ class ACM(BaseCfC):
         obs_dim: int,
         n_neurons: int,
         prediction_size: int,
-        n_actions: int,
         q_dim: int,
         *,
         key: chex.PRNGKey,
         sparsity: float = 0.5,
     ) -> None:
         self.z_dim = prediction_size
-        self.n_actions = n_actions  # aux_pi
+        self.aux_pi_dim = prediction_size
         self.q_dim = q_dim
 
         super().__init__(
-            obs_dim + self.n_actions,
+            obs_dim,
             n_neurons,
             key=key,
             sparsity=sparsity,
@@ -97,143 +92,11 @@ class ACM(BaseCfC):
             .add_output_heads(
                 ACMHeadSpec,
                 z=self.z_dim,
-                aux_pi=self.n_actions,
+                aux_pi=self.aux_pi_dim,
                 q=self.q_dim,
             )
             .build()
         )
-
-    def _encode_obs_with_actions(self, state: chex.Array) -> chex.Array:
-        """
-        Helper method. Expands the input observation with one-hot
-        encoded actions (A) using an identity matrix for all batches.
-
-        Parameters
-        ----------
-        state : chex.Array
-            State embedding with shape `(B, T, F)`
-
-        Returns
-        -------
-        state_with_actions : chex.Array
-            Obs with batched one-hot encoded actions in the shape `(B*A, T, F+A)`
-        """
-        B, T, F = jnp.shape(state)
-
-        # Expand state for all actions: (B, T, F) -> (BA, T, F)
-        state_expanded = jnp.repeat(state, self.n_actions, axis=0)
-
-        # Create one-hot actions: (A,) -> (BA, T, A)
-        one_hot_actions = jnp.eye(self.n_actions)  # (A, A)
-        one_hot_actions = jnp.tile(one_hot_actions, [B, 1])  # (BA, A)
-        one_hot_actions = jnp.expand_dims(one_hot_actions, axis=1)  # (BA, 1, A)
-        one_hot_actions = jnp.tile(one_hot_actions, [1, T, 1])  # (BA, T, A)
-
-        return jnp.concatenate(
-            [state_expanded, one_hot_actions],
-            axis=-1,
-        )  # (BA, T, F+A)
-
-    def _split_action_dim(self, x: chex.Array) -> chex.Array:
-        """
-        Helper method. Reshapes action-expanded array to
-        separate batch and action dimensions.
-
-        Converts from flattened `(B*A, T, F)` format back to
-        `(B, T, A, F)` format after scan operations.
-
-        Parameters
-        ----------
-        x : chex.Array
-            Input array with shape `(B*A, T, F)`
-
-        Returns
-        -------
-        new_x : chex.Array
-            A reshaped `x` with shape `(B, T, A, F)`
-        """
-        BA, T, F = jnp.shape(x)
-        B = BA // self.n_actions
-
-        # (B*A, T, F) -> (B, A, T, F) -> (B, T, A, F)
-        x = x.reshape(B, self.n_actions, T, F)
-        x = jnp.transpose(x, axes=(0, 2, 1, 3))
-        return x
-
-    def _preprocess(
-        self,
-        x: chex.Array,
-        h_state: Optional[chex.Array] = None,
-        timespans: Optional[chex.Array] = None,
-    ) -> Tuple[chex.Array, chex.Array, chex.Array]:
-        """
-        Preprocesses `__call__` method inputs.
-
-        Includes -
-        - `x` dimension expansion from `(B, F)` -> `(B, T, F)` (if needed)
-        - `x` is then one-hot action encoded to `(B*A, T, F+A)`
-        - `h_state` initialized to `(B*A, H)` when set to `None`
-        - `timespans` initialized to `(T,)` of `1s` when set to `None`
-
-        Parameters
-        ----------
-        x : jax.Array
-            An input array of shape: `(B, F)` or `(B, T, F)`
-
-            - `batch_size (B)` the number of samples per timestep
-            - `seq_length (T)` the number of sequences (e.g., trajectories, channels)
-            - `features (F)` the features at each timestep
-
-        h_state : jax.Array (optional)
-            Initial hidden state of the RNN with shape: `(B, H)`
-
-            - `batch_size (B)` the number of samples per timestep
-            - `n_hidden (H)` the total number of hidden neurons
-
-        timespans : jax.Array (optional)
-            Time elapsed since previous timestep.
-            For fixed intervals set to `None`. For varying timesteps shape
-            should be `(T,)`
-
-        Returns
-        -------
-        x : chex.Array
-            Preprocessed input with shape `(B*A, T, F+A)`
-        h_state : chex.Array
-            Hidden state with shape `(B*A, H)`
-        timespans : chex.Array
-            Time intervals with shape `(T,)`
-        """
-        x, _, timespans = super()._preprocess(x, h_state, timespans)
-
-        B, T, F = jnp.shape(x)
-        x = self._encode_obs_with_actions(x)
-
-        if h_state is None:
-            h_state = jnp.zeros((B * self.n_actions, self.hidden_size))
-
-        return x, h_state, timespans
-
-    def _postprocess(self, preds: Tuple[chex.Array, ...]) -> Tuple[chex.Array, ...]:
-        """
-        Postprocess network predictions by applying -
-            1. Batch-first transformations to all predictions
-            2. Reshapes batch-first transforms from `(B*A, T, F)` to `(B, T, A, F)`
-
-        Should be used in the `__call__` method after `_scan`.
-
-        Parameters
-        ----------
-        preds : Tuple[chex.Array, ...]
-            Raw predictions from scan `(T, B, F)`
-
-        Returns
-        -------
-        outputs : Tuple[chex.Array, ...]
-            Transformed predictions `(B, T, F)`
-        """
-        batch_first = super()._postprocess(preds)
-        return jax.tree.map(self._split_action_dim, batch_first)
 
     def __call__(
         self,
@@ -267,9 +130,10 @@ class ACM(BaseCfC):
         Returns
         -------
         acm_preds : ACMPredictions
-            Network predictions for the command layer (`embedding`) and each head `(z, aux_pi, q)`
+            Network predictions for the command layer (`embedding`)
+            and each head `(z, aux_pi, q)`
         h_state : chex.Array
-            Final hidden state with shape `(B*A, H)`
+            Final hidden state with shape `(B, H)`
         """
         x, h_state, timespans = self._preprocess(state_embedding, h_state, timespans)
         h_state, preds = self._scan(x, h_state, timespans)
@@ -298,8 +162,6 @@ class OCM(BaseCfC):
         Number of decision nodes (inter + command nodes)
     prediction_size : int
         Size of the observation-conditioned prediction vector
-    n_actions : int
-        Number of discrete actions
     key : chex.PRNGKey
         Random number generator key
     sparsity : float (optional)
@@ -319,13 +181,12 @@ class OCM(BaseCfC):
         obs_dim: int,
         n_neurons: int,
         prediction_size: int,
-        n_actions: int,
         *,
         key: chex.PRNGKey,
         sparsity: float = 0.5,
     ) -> None:
         self.y_dim = prediction_size
-        self.n_actions = n_actions  # pi
+        self.pi_hidden_dim = prediction_size
 
         super().__init__(
             obs_dim,
@@ -346,7 +207,7 @@ class OCM(BaseCfC):
             )
             .add_output_heads(
                 OCMHeadSpec,
-                pi=self.n_actions,
+                pi=self.pi_hidden_dim,
                 y=self.y_dim,
             )
             .build()
@@ -384,7 +245,8 @@ class OCM(BaseCfC):
         Returns
         -------
         ocm_preds : OCMPredictions
-            Network predictions for the command layer (`embedding`) and each head `(pi, y)`
+            Network predictions for the command layer (`embedding`)
+            and each head `(pi, y)`
         h_state : chex.Array
             Final hidden state with shape `(B, H)`
         """

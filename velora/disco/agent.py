@@ -33,10 +33,16 @@ from velora.disco.config.settings import (
     PolicyAgentSettings,
 )
 from velora.disco.config.state import PolicyAgentHiddenStates
+from velora.disco.nn.decoder import ActionDecoder
 from velora.disco.nn.encoder import DiscoInputEncoder, ImageEncoder
 from velora.disco.nn.meta import DiscoNetwork
 from velora.disco.nn.policy import ACM, OCM
-from velora.disco.outputs import DiscoAgentOutput, PolicyAgentOutput
+from velora.disco.outputs import (
+    ACMPredictions,
+    DiscoAgentOutput,
+    OCMPredictions,
+    PolicyAgentOutput,
+)
 from velora.disco.rollouts import Rollout
 from velora.lnn.ncp import LNN
 from velora.utils.format import create_directory
@@ -59,6 +65,8 @@ class PolicyAgent:
         3. Action-Conditional Model (ACM) - takes OCM embeddings and produces
            action-conditioned predictions (z), auxiliary policy (aux_π),
            and Q-values (q) for all actions
+        4. Action Decoder - decodes concatenated OCM and ACM hidden
+           representations into per-action outputs
 
     Output Shapes:
         - π (policy): `(B, A, T)`
@@ -81,6 +89,9 @@ class PolicyAgent:
         Configuration for the policy agent
     key : jax.random.PRNGKey
         Random number generator key
+    max_actions : int
+        Maximum number of discrete actions across all environments in the
+        training set
     jit_compile : bool (optional)
         Flag to enable/disable JIT compilation. Default is `False`
     """
@@ -92,6 +103,7 @@ class PolicyAgent:
         *,
         config: PolicyAgentSettings,
         key: chex.PRNGKey,
+        max_actions: int,
         jit_compile: bool = False,
     ) -> None:
         self.obs_spec = obs_spec
@@ -100,8 +112,12 @@ class PolicyAgent:
         self.key = key
 
         self.n_actions = int(self.act_spec.n)
+        self.max_actions = max_actions
 
-        key_encoder, key_ocm, key_acm, key_actions = jax.random.split(self.key, 4)
+        key_encoder, key_ocm, key_acm, key_decoder, key_actions = jax.random.split(
+            self.key,
+            5,
+        )
         self.key_actions = key_actions
 
         # Categorical bins for Q-values
@@ -117,7 +133,6 @@ class PolicyAgent:
             self._encoder.output_dim,
             config.n_hidden,
             config.prediction_size,
-            self.n_actions,
             key=key_ocm,
             sparsity=config.sparsity,
         )
@@ -126,13 +141,22 @@ class PolicyAgent:
             self._ocm.embedding_size,
             config.n_hidden,
             config.prediction_size,
-            self.n_actions,
             self.categorical_bins.num_bins,
             key=key_acm,
             sparsity=config.sparsity,
         )
 
-        self.encoder, self.ocm, self.acm = self._compile(jit_compile)
+        self._decoder = ActionDecoder(
+            in_dim=config.prediction_size * 3 + self.categorical_bins.num_bins,
+            max_actions=self.max_actions,
+            pi_dim=1,
+            z_dim=config.prediction_size,
+            aux_pi_dim=self.max_actions,
+            q_dim=self.categorical_bins.num_bins,
+            key=key_decoder,
+        )
+
+        self.encoder, self.ocm, self.acm, self.decoder = self._compile(jit_compile)
 
     @property
     def active_params(self) -> int:
@@ -141,13 +165,17 @@ class PolicyAgent:
             self._encoder.active_params
             + self._ocm.active_params
             + self._acm.active_params
+            + self._decoder.active_params
         )
 
     @property
     def total_params(self) -> int:
         """Get the agents total parameters."""
         return (
-            self._encoder.total_params + self._ocm.total_params + self._acm.total_params
+            self._encoder.total_params
+            + self._ocm.total_params
+            + self._acm.total_params
+            + self._decoder.total_params
         )
 
     @property
@@ -160,7 +188,9 @@ class PolicyAgent:
         """Output feature dimensionality of the encoder."""
         return self._encoder.encoding_dim
 
-    def _compile(self, jit_compile: bool) -> Tuple[ImageEncoder, OCM, ACM]:
+    def _compile(
+        self, jit_compile: bool
+    ) -> Tuple[ImageEncoder, OCM, ACM, ActionDecoder]:
         """
         Returns JIT-compiled or original modules based on compilation flag.
 
@@ -177,15 +207,23 @@ class PolicyAgent:
             Observation-Conditional Model (possibly JIT-wrapped)
         acm : ACM
             Action-Conditional Model (possibly JIT-wrapped)
+        decoder : ActionDecoder
+            Action decoder (possibly JIT-wrapped)
         """
         # Cache graphdef + non-param state for functional forward pass
         self._ocm_graphdef, _, self._ocm_rest = nnx.split(self._ocm, nnx.Param, ...)
         self._acm_graphdef, _, self._acm_rest = nnx.split(self._acm, nnx.Param, ...)
+        self._dec_graphdef, _, self._dec_rest = nnx.split(self._decoder, nnx.Param, ...)
 
         if jit_compile:
-            return nnx.jit(self._encoder), nnx.jit(self._ocm), nnx.jit(self._acm)  # type: ignore
+            return (
+                nnx.jit(self._encoder),
+                nnx.jit(self._ocm),
+                nnx.jit(self._acm),
+                nnx.jit(self._decoder),
+            )  # type: ignore
 
-        return self._encoder, self._ocm, self._acm
+        return self._encoder, self._ocm, self._acm, self._decoder
 
     def __call__(
         self,
@@ -217,11 +255,10 @@ class PolicyAgent:
             - `n_units (HS)` the total number of OCM hidden neurons
 
         acm_h_state : jax.Array (optional)
-            Hidden state for the ACM `(B*A, HS)`. If `None`, initializes to zeros.
+            Hidden state for the ACM `(B, HS)`. If `None`, initializes to zeros.
             Default is `None`
 
             - `batch_size (B)` the number of samples per timestep
-            - `n_actions (A)` the number of discrete actions
             - `n_units (HS)` the total number of ACM hidden neurons
 
         timespans : jax.Array (optional)
@@ -255,13 +292,67 @@ class PolicyAgent:
             timespans=timespans,
         )
 
+        # Decode to per-action outputs at env n_actions
+        preds = self._decode_to_actions(encoding, ocm_preds, acm_preds, self.n_actions)
+
         return (
-            PolicyAgentOutput.create(
-                encoding,
-                *ocm_preds.output_values(),
-                *acm_preds.output_values(),
-            ),
+            preds,
             PolicyAgentHiddenStates(ocm=ocm_h_state, acm=acm_h_state),
+        )
+
+    def _decode_to_actions(
+        self,
+        encoding: chex.Array,
+        ocm_preds: OCMPredictions,
+        acm_preds: ACMPredictions,
+        n_actions: int | None = None,
+    ) -> PolicyAgentOutput:
+        """
+        Decode fixed-size hidden representations to per-action outputs via
+        shared ActionDecoders.
+
+        Parameters
+        ----------
+        encoding : chex.Array
+            Encoder embeddings `(B, T, F)`
+        ocm_preds : OCMPredictions
+            OCM output with fixed-size `pi` and `y` heads
+        acm_preds : ACMPredictions
+            ACM output with fixed-size `z`, `aux_pi`, `q` heads
+        n_actions : int (optional)
+            Number of actions to decode. When `None`, uses `max_actions`
+            (for vmapped gradient path). Pass real `n_actions` during
+            collection. Default is `None`
+
+        Returns
+        -------
+        preds : PolicyAgentOutput
+            Per-action agent predictions
+        """
+        n = n_actions
+
+        heads = self._decoder(
+            ocm_preds.pi,
+            acm_preds.z,
+            acm_preds.aux_pi,
+            acm_preds.q,
+            n_actions=n,
+        )
+
+        pi = jnp.squeeze(heads.pi, axis=-1)  # (B, T, A, 1) -> (B, T, A)
+
+        # Mask invalid actions when decoding at max_actions
+        if n is None or n == self.max_actions:
+            action_mask = jnp.arange(self.max_actions) < self.n_actions
+            pi = jnp.where(action_mask, pi, -1e9)
+
+        return PolicyAgentOutput.create(
+            encoding,
+            pi,
+            ocm_preds.y,
+            heads.z,
+            heads.aux_pi,
+            heads.q,
         )
 
     def functional_forward(
@@ -270,7 +361,11 @@ class PolicyAgent:
         params: nnx.State,
     ) -> PolicyAgentOutput:
         """
-        Pure functional forward through OCM + ACM with explicit params. Safe for use inside `jax.grad`.
+        Pure functional forward through OCM + ACM + ActionDecoder
+        with explicit params. Safe for use inside `jax.grad`.
+
+        Decodes at `max_actions` so output shapes are uniform across
+        all trainers for vmap.
 
         Parameters
         ----------
@@ -281,22 +376,33 @@ class PolicyAgent:
             - `seq_length (T)` the number of sequences (e.g., trajectories)
             - `features (F)` number of features in the embedding
         params : nnx.State
-            OCM and ACM parameters
+            OCM, ACM and decoder parameters
 
         Returns
         -------
         preds : AgentOutput
-            An object of agent predictions
+            Agent predictions at `max_actions` dimension
         """
-        ocm, acm = self.merge_params(params)
+        ocm, acm, decoder = self.merge_params(params)
 
         ocm_preds, _ = ocm(encoding)
         acm_preds, _ = acm(ocm_preds.embedding)
 
+        heads = decoder(
+            ocm_preds.pi,
+            acm_preds.z,
+            acm_preds.aux_pi,
+            acm_preds.q,
+        )
+        pi = jnp.squeeze(heads.pi, axis=-1)  # (B, T, max_A, 1) -> (B, T, max_A)
+
         return PolicyAgentOutput.create(
             encoding,
-            *ocm_preds.output_values(),
-            *acm_preds.output_values(),
+            pi,
+            ocm_preds.y,
+            heads.z,
+            heads.aux_pi,
+            heads.q,
         )
 
     def act(self, logits: chex.Array) -> chex.Array:
@@ -331,13 +437,14 @@ class PolicyAgent:
         Returns
         -------
         params : nnx.State
-            Combined parameter states from `(encoder, ocm, acm)`
+            Combined parameter states from `(encoder, ocm, acm, decoder)`
         """
         return nnx.State(
             {
                 "encoder": nnx.state(self._encoder, nnx.Param),
                 "ocm": nnx.state(self._ocm, nnx.Param),
                 "acm": nnx.state(self._acm, nnx.Param),
+                "decoder": nnx.state(self._decoder, nnx.Param),
             }
         )
 
@@ -353,10 +460,11 @@ class PolicyAgent:
         nnx.update(self._encoder, params["encoder"])
         nnx.update(self._ocm, params["ocm"])
         nnx.update(self._acm, params["acm"])
+        nnx.update(self._decoder, params["decoder"])
 
-    def merge_params(self, params: nnx.State) -> Tuple[OCM, ACM]:
+    def merge_params(self, params: nnx.State) -> Tuple[OCM, ACM, ActionDecoder]:
         """
-        Reconstruct OCM and ACM modules from explicit parameters.
+        Reconstruct OCM, ACM, and ActionDecoder modules from explicit parameters.
         Note: ignores encoder module for simplicity.
 
         Parameters
@@ -370,10 +478,13 @@ class PolicyAgent:
             An updated OCM with the given parameters
         acm : ACM
             An updated ACM with the given parameters
+        decoder : ActionDecoder
+            An updated decoder with the given parameters
         """
         ocm = nnx.merge(self._ocm_graphdef, params["ocm"], self._ocm_rest)
         acm = nnx.merge(self._acm_graphdef, params["acm"], self._acm_rest)
-        return ocm, acm
+        decoder = nnx.merge(self._dec_graphdef, params["decoder"], self._dec_rest)
+        return ocm, acm, decoder
 
     def soft_param_update(self, tau: float, new_params: nnx.State) -> None:
         """
@@ -565,6 +676,7 @@ class DiscoAgent:
         disco_h_state: chex.Array | None = None,
         meta_h_state: chex.Array | None = None,
         params: nnx.State | None = None,
+        action_mask: chex.Array | None = None,
     ) -> Tuple[DiscoAgentOutput, chex.Array, chex.Array]:
         """
         Generate targets for agent training.
@@ -580,7 +692,11 @@ class DiscoAgent:
             Hidden state for MetaLNN. Shape: `(B, H_meta)`.
             Default is `None`
         params : nnx.State (optional)
-            Meta-agent parameters from `get_params()`. Only required if using a functional approach for `jax.grad`. Default is `None`
+            Meta-agent parameters from `get_params()`. Only required if
+            using a functional approach for `jax.grad`. Default is `None`
+        action_mask : chex.Array (optional)
+            Boolean mask `(max_actions,)` for valid actions. Passed to encoder
+            for masked mean over action embeddings. Default is `None`
 
         Returns
         -------
@@ -603,7 +719,7 @@ class DiscoAgent:
             )
 
         # embed: (B, T, E), act_embed: (B, T, A, C)
-        embedding, action_embed = encoder(rollout)
+        embedding, action_embed = encoder(rollout, action_mask=action_mask)
         disco_input = embedding
 
         # Apply meta conditioning from previous update (if available)

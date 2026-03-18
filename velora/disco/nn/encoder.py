@@ -99,7 +99,12 @@ class DiscoInputEncoder(nnx.Module):
         """
         return self._total_params
 
-    def __call__(self, rollout: Rollout) -> Tuple[chex.Array, chex.Array]:
+    def __call__(
+        self,
+        rollout: Rollout,
+        *,
+        action_mask: chex.Array | None = None,
+    ) -> Tuple[chex.Array, chex.Array]:
         """
         Performs a forward pass through the encoding.
 
@@ -113,6 +118,10 @@ class DiscoInputEncoder(nnx.Module):
                 - `values` : State value estimates. Shape `(B, T, 1)`
                 - `preds`: Agent predictions
                 - `target_preds`: Target network predictions
+        action_mask : chex.Array (optional)
+            Boolean mask of shape `(max_actions,)` where `True` indicates a
+            valid action. Used for masked mean over action embeddings when
+            rollouts are padded to `max_actions`. Default is `None`
 
         Returns
         -------
@@ -137,6 +146,7 @@ class DiscoInputEncoder(nnx.Module):
             rollout.preds,
             rollout.target_preds,
             rollout.actions,
+            action_mask=action_mask,
         )
 
         scalar = self._encode_scalars(rollout.rewards, rollout.discounts)
@@ -165,7 +175,9 @@ class DiscoInputEncoder(nnx.Module):
         return nnx.softmax(x, axis=-1)
 
     def _encode_states(
-        self, y: chex.Array, y_target: chex.Array
+        self,
+        y: chex.Array,
+        y_target: chex.Array,
     ) -> Tuple[chex.Array, chex.Array]:
         """
         Encode state-conditional predictions.
@@ -193,6 +205,8 @@ class DiscoInputEncoder(nnx.Module):
         preds: PolicyAgentOutput,
         targets: PolicyAgentOutput,
         actions: chex.Array,
+        *,
+        action_mask: chex.Array | None = None,
     ) -> Tuple[chex.Array, chex.Array, chex.Array]:
         """
         Encode action-conditional inputs with shared weights across actions.
@@ -212,6 +226,10 @@ class DiscoInputEncoder(nnx.Module):
 
             - batch_size (`B`) - the number of samples per timestep.
             - seq_length (`T`) - the number of timesteps in the trajectory.
+        action_mask : chex.Array (optional)
+            Boolean mask `(max_actions,)` for valid actions. When provided,
+            computes a masked mean over action embeddings to avoid dilution
+            from zero-padded action slots. Default is `None`
 
         Returns
         -------
@@ -250,7 +268,14 @@ class DiscoInputEncoder(nnx.Module):
 
         # Compute outputs
         action_embedding = self.action_encoder(action_inputs)  # (B, T, A, C)
-        action_emb_avg = jnp.mean(action_embedding, axis=2)  # (B, T, C)
+
+        if action_mask is not None:
+            mask = action_mask[None, None, :, None]  # (1, 1, A, 1); # type: ignore
+            action_emb_avg = (action_embedding * mask).sum(axis=2) / jnp.maximum(
+                mask.sum(axis=2), 1
+            )
+        else:
+            action_emb_avg = jnp.mean(action_embedding, axis=2)  # (B, T, C)
 
         # Select embedding for action taken
         idx = jnp.expand_dims(actions, axis=(2, 3))  # (B, T, 1, 1)
@@ -264,7 +289,8 @@ class DiscoInputEncoder(nnx.Module):
         """
         Encode scalar inputs (rewards, discounts).
 
-        Applies sign-preserving log transform to rewards before encoding: `sign(r) * log(1 + |r|)`.
+        Applies sign-preserving log transform to rewards before encoding:
+        `sign(r) * log(1 + |r|)`.
 
         Parameters
         ----------

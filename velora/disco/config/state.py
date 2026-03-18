@@ -39,10 +39,9 @@ class PolicyAgentHiddenStates:
         - `n_units (H)` the total number of OCM hidden neurons
 
     acm : jax.Array
-        Action-Conditional Model (ACM) hidden states `(B * A, H)`
+        Action-Conditional Model (ACM) hidden states `(B, H)`
 
         - `batch_size (B)` the number of samples per timestep
-        - `n_actions (A)` the number of discrete actions
         - `n_units (H)` the total number of ACM hidden neurons
     """
 
@@ -60,11 +59,11 @@ class AgentTrainerHiddenStates:
     policy_ocm : chex.Array (optional)
         Policy network OCM hidden state. Shape: `(B, H)`. Default is `None`
     policy_acm : chex.Array (optional)
-        Policy network ACM hidden state. Shape: `(B*A, H)`. Default is `None`
+        Policy network ACM hidden state. Shape: `(B, H)`. Default is `None`
     target_ocm : chex.Array (optional)
         Target network OCM hidden state. Shape: `(B, H)`. Default is `None`
     target_acm : chex.Array (optional)
-        Target network ACM hidden state. Shape: `(B*A, H)`. Default is `None`
+        Target network ACM hidden state. Shape: `(B, H)`. Default is `None`
     value : chex.Array (optional)
         Value network hidden state. Shape: `(B, H)`. Default is `None`
     """
@@ -75,7 +74,7 @@ class AgentTrainerHiddenStates:
     target_acm: HiddenState = None
     value: HiddenState = None
 
-    def reset_on_done(self, discounts: chex.Array, n_actions: int) -> Self:
+    def reset_on_done(self, discounts: chex.Array) -> Self:
         """
         Reset hidden states where episodes terminated (`discount=0`).
 
@@ -88,8 +87,6 @@ class AgentTrainerHiddenStates:
         ----------
         discounts : chex.Array
             Episode dones from the environment `(B, 1)`
-        n_actions : int
-            Number of actions agent can take
 
         Returns
         -------
@@ -98,18 +95,15 @@ class AgentTrainerHiddenStates:
         """
         # Squeeze to (B,) for broadcasting against hidden states (B, H)
         mask = jnp.squeeze(discounts, axis=-1)  # (B,)
-        mask_expanded = jnp.repeat(mask, n_actions)  # (B*A,)
 
         def _apply_mask(h: chex.Array | None, m: chex.Array) -> chex.Array | None:
             return h * m[:, None] if h is not None else None  # type: ignore
 
-        mask_expanded = jnp.repeat(mask, n_actions)
-
         return self.__class__(
             policy_ocm=_apply_mask(self.policy_ocm, mask),
-            policy_acm=_apply_mask(self.policy_acm, mask_expanded),
+            policy_acm=_apply_mask(self.policy_acm, mask),
             target_ocm=_apply_mask(self.target_ocm, mask),
-            target_acm=_apply_mask(self.target_acm, mask_expanded),
+            target_acm=_apply_mask(self.target_acm, mask),
             value=_apply_mask(self.value, mask),
         )
 

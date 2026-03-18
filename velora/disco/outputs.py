@@ -41,13 +41,12 @@ class OCMPredictions:
         - batch_size (`B`) - the number of samples per timestep.
         - seq_length (`T`) - the number of timesteps in the trajectory (can be more than one episode)
         - n_features (`F`) - the number of features.
-
     pi : jax.Array
-        Policy logits with shape `(B, T, A)` or `(B, A)`:
+        Policy logits with shape `(B, T, H)` or `(B, H)`:
 
         - batch_size (`B`) - the number of samples per timestep.
         - seq_length (`T`) - the number of timesteps in the trajectory (can be more than one episode)
-        - n_actions (`A`) - the number of discrete actions in the action space.
+        - hidden_dim (`H`) - the policy hidden representation size (prediction_size)
     y : jax.Array
         Observation-conditioned prediction vector with shape `(B, T, Y)` or `(B, Y)`:
 
@@ -93,26 +92,22 @@ class ACMPredictions:
         - seq_length (`T`) - the number of timesteps in the trajectory (can be more than one episode)
         - n_features (`F`) - the number of features.
     z : jax.Array
-        Action-conditioned prediction vector with shape `(B, T, A, Z)` or `(B, A, Z)`:
+        Action-conditioned prediction vector with shape `(B, T, Z)` or `(B, Z)`:
 
         - batch_size (`B`) - the number of samples per timestep.
         - seq_length (`T`) - the number of timesteps in the trajectory (can be more than one episode)
-        - n_actions (`A`) - the number of discrete actions in the action space.
         - z_dim (`Z`) - the size of the action-conditioned prediction vector.
-
     aux_pi : jax.Array
-        Auxiliary policy logits with shape `(B, T, A, A)` or `(B, A, A)`:
+        Auxiliary policy logits with shape `(B, T, H)` or `(B, H)`:
 
         - batch_size (`B`) - the number of samples per timestep.
         - seq_length (`T`) - the number of timesteps in the trajectory (can be more than one episode)
-        - n_actions (`A`) - the number of discrete actions in the action space.
-
+        - hidden_dim (`H`) - the policy hidden representation size (prediction_size)
     q : jax.Array
-        Action-value predictions with shape `(B, T, A, Q)` or `(B, A, Q)`:
+        Action-value predictions with shape `(B, T, Q)` or `(B, Q)`:
 
         - batch_size (`B`) - the number of samples per timestep.
         - seq_length (`T`) - the number of timesteps in the trajectory (can be more than one episode)
-        - n_actions (`A`) - the number of discrete actions in the action space.
         - q_dim (`Q`) - the size of the action-value prediction head.
     """
 
@@ -153,7 +148,6 @@ class DiscoPredictions:
         - batch_size (`B`) - the number of samples per timestep.
         - seq_length (`T`) - the number of timesteps in the trajectory (can be more than one episode)
         - n_features (`F`) - the number of features.
-
     pi : jax.Array
         Policy targets (`π̂,`) with shape `(B, T, A)`:
 
@@ -322,6 +316,36 @@ class DiscoAgentOutput:
     pi: chex.Array
     y: chex.Array
     z: chex.Array
+
+
+@struct.dataclass
+class ActionDecoderOutput:
+    """
+    Dataclass for `ActionDecoder` per-action outputs.
+
+    All fields have a leading action dimension `A` which is either the
+    environment's real `n_actions` (during collection) or `max_actions`
+    (during the vmapped meta-gradient computation).
+
+    Parameters
+    ----------
+    pi : chex.Array
+        Policy logits with shape `(B, T, A, 1)` or `(B, A, 1)`
+    z : chex.Array
+        Action-conditioned prediction with shape
+        `(B, T, A, Z)` or `(B, A, Z)`
+    aux_pi : chex.Array
+        Auxiliary policy prediction with shape
+        `(B, T, A, max_A)` or `(B, A, max_A)`
+    q : chex.Array
+        Action-value prediction with shape
+        `(B, T, A, Q)` or `(B, A, Q)`
+    """
+
+    pi: chex.Array
+    z: chex.Array
+    aux_pi: chex.Array
+    q: chex.Array
 
 
 @struct.dataclass
