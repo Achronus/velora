@@ -14,11 +14,11 @@
 # ==============================================================================
 
 import json
+import math
 import queue
 import random
 import shutil
 import threading
-from collections import defaultdict
 from pathlib import Path
 from typing import Callable, Dict, List, Self, Tuple
 
@@ -112,6 +112,9 @@ class AgentTrainer:
         Python RNG used to sample the initial step budget. Passed in from
         `RuleTrainer` so all trainers share a single seeded RNG, keeping
         budget draws reproducible
+    max_actions : int
+        Maximum number of discrete actions across all environments in the
+        training set
     jit_compile : bool (optional)
         Flag to enable/disable JIT compilation. Default is `False`
     use_bfloat16 : bool (optional)
@@ -131,6 +134,7 @@ class AgentTrainer:
         writer_name: str,
         make_fn: MakeFn,
         budget_rng: random.Random,
+        max_actions: int,
         jit_compile: bool = False,
         use_bfloat16: bool = True,
     ) -> None:
@@ -143,6 +147,7 @@ class AgentTrainer:
         self.writer_name = writer_name
         self.jit_compile = jit_compile
         self.use_bfloat16 = use_bfloat16
+        self.max_actions = max_actions
 
         self.action_space: gym.spaces.Discrete = self.envs.single_action_space  # type: ignore
         self.obs_space: gym.spaces.Box = self.envs.single_observation_space  # type: ignore
@@ -155,6 +160,7 @@ class AgentTrainer:
             self.action_space,
             config=self.config.agent,
             key=agent_key,
+            max_actions=self.max_actions,
             jit_compile=self.jit_compile,
         )
 
@@ -163,6 +169,7 @@ class AgentTrainer:
             self.action_space,
             config=self.config.agent,
             key=target_key,
+            max_actions=self.max_actions,
             jit_compile=self.jit_compile,
         )
 
@@ -190,6 +197,7 @@ class AgentTrainer:
 
         self.meta_optim: optax.GradientTransformation = None  # type: ignore
         self.meta_opt_state: optax.OptState = None  # type: ignore
+        self.meta_optim_update: Callable = None  # type: ignore
 
         # Lifetime tracking
         self._env_steps: int = 0
@@ -262,6 +270,13 @@ class AgentTrainer:
             optax.clip(self.config.agent.max_grad_norm),
         )
         self.meta_opt_state = self.meta_optim.init(meta_params)
+
+        # JIT compile update fn (if needed)
+        self.meta_optim_update = (
+            jax.jit(self.meta_optim.update)
+            if self.jit_compile
+            else self.meta_optim.update
+        )
 
     def warm(self) -> None:
         """
@@ -545,7 +560,7 @@ class AgentTrainer:
 
             # Update and reset hidden states on episode boundaries
             hidden = hidden.update(h_policy, h_target, h_value)
-            hidden = hidden.reset_on_done(discounts, self.n_actions)
+            hidden = hidden.reset_on_done(discounts)
 
             obs = next_obs
 
@@ -650,8 +665,9 @@ class RuleTrainer:
         budget, giving the meta-learner diverse gradient signals: agents at different
         stages of learning and with different random initializations. Default is `2`
     max_group_size : int (optional)
-        Maximum number of trainers to `vmap` simultaneously. Reduce if accelerator
-        is out of memory (OOM). Default is `8`
+        Maximum number of trainers to `vmap` simultaneously. Higher values
+        improve GPU utilization but increase VRAM usage. Reduce if
+        out of memory (OOM). Default is `8`
     seed : int (optional)
         Random number generator seed. Default is `42`
     jit_compile : bool (optional)
@@ -759,9 +775,11 @@ class RuleTrainer:
         self.cp_manager = CheckpointManager(self.config.checkpoint)
         self.rule_path = Path(self.cp_manager.cp_dir, "final_disco").resolve()
 
-        # Per-action group batch gradient functions
-        self.action_groups: List[ActionGroup] = self._prebuild_action_groups()
-        self._batch_grad_fns: Dict[int, Callable[..., MetaGradOutput]] = {}
+        # Batch gradient functions
+        self.max_actions = self._compute_max_actions()
+        self._batch_grad_fn: Callable[..., MetaGradOutput] = None  # type: ignore
+
+        self._meta_optim_update: Callable = None  # type: ignore
 
         # Sebulba actor infrastructure
         # One queue per trainer - actors stay exactly one step ahead of the learner
@@ -822,6 +840,7 @@ class RuleTrainer:
             envs.single_action_space,  # type: ignore
             config=config.agent,
             key=rng_key,
+            max_actions=self.max_actions,
         )
 
         value = DiscoValueAgent(
@@ -839,69 +858,108 @@ class RuleTrainer:
             disco=self.meta_agent.param_count,
         )
 
-    def _prebuild_action_groups(self) -> List[ActionGroup]:
+    def _compute_max_actions(self) -> int:
         """
-        Build action groups from env specs before trainers are created.
-
-        Probes each unique environment once to determine its action space
-        size, then constructs `ActionGroup` objects with placeholder
-        indices. `_initial_setup` replaces `self.action_groups` with
-        the real groups.
+        Probe each unique environment to determine the maximum action count.
 
         Returns
         -------
-        groups : List[ActionGroup]
-            Preliminary action groups sorted largest-first
+        max_actions : int
+            Maximum number of discrete actions across all environments
         """
-        buckets: Dict[int, int] = defaultdict(int)
+        max_actions = 0
 
         for env_name, make_fn in self._unique_env_specs:
             env = make_fn(env_name, self.config.batch_size)
             action_space: gym.spaces.Discrete = env.single_action_space  # type: ignore
-            n = action_space.n.item()
-            buckets[n] += self.agents_per_env
+            max_actions = max(max_actions, action_space.n.item())
             env.close()
 
-        groups = [
-            ActionGroup(n_actions=n, indices=list(range(count)))
-            for n, count in buckets.items()
-        ]
-        groups.sort(key=lambda g: (-len(g.indices), g.n_actions))
-        return groups
+        return max_actions
 
-    def _build_action_groups(self) -> List[ActionGroup]:
+    def _warm_compile(self) -> None:
         """
-        Groups trainers by `n_actions` for vmap batching.
+        Pre-compile all gradient functions before training begins.
 
-        Groups are sorted largest-first so the most impactful `vmap` runs
-        are first each step.
-
-        Returns
-        -------
-        groups : List[ActionGroup]
-            A list of grouped action trainers
+        Compiles for every distinct chunk size based on `num_trainers` and `max_group_size`.
         """
-        buckets: Dict[int, List[int]] = defaultdict(list)
+        meta_params = self.meta_agent.get_params()
 
-        for idx, trainer in enumerate(self.trainers):
-            buckets[trainer.n_actions].append(idx)
+        # Compile meta optimizer update fn (if needed)
+        self._meta_optim_update = (
+            self.meta_optim.update
+            if not self.jit_compile
+            else jax.jit(self.meta_optim.update)
+        )
 
-        groups = [ActionGroup(n_actions=n, indices=idxs) for n, idxs in buckets.items()]
-        groups.sort(key=lambda g: (-len(g.indices), g.n_actions))
-        return groups
+        def _stack(x, n):
+            """Stack `n` copies of PyTree `x` along a new leading axis."""
+            return jax.tree.map(lambda t: jnp.stack([t] * n), x)
+
+        # Use any trainer — all have identical shapes
+        trainer = self.trainers[0]
+
+        # Collect real rollouts so shapes match exactly what training uses
+        with jax.default_device(self._cpu):
+            train_rollout = trainer.collect_stack(self.config.n_updates)
+            valid_rollout = trainer.collect_valid()
+
+        # Pad rollouts to max_actions for uniform shapes
+        train_rollout = self._pad_rollout(train_rollout)
+        valid_rollout = self._pad_rollout(valid_rollout)
+
+        p_params, v_params, p_opt, v_opt, adv_ema, td_ema = trainer.get_vmap_inputs()
+        disco_h, meta_h = self.state.hidden.get(0)
+        action_mask = jnp.arange(self.max_actions) < trainer.n_actions
+
+        # Compile for every distinct chunk size
+        chunk_sizes = {min(self.max_group_size, self.num_trainers)}
+        remainder = self.num_trainers % self.max_group_size
+
+        if remainder and remainder != min(self.max_group_size, self.num_trainers):
+            chunk_sizes.add(remainder)  # Include remainder chunks
+
+        for chunk_size in chunk_sizes:
+            _ = self._batch_grad_fn(
+                meta_params,
+                _stack(p_params, chunk_size),
+                _stack(v_params, chunk_size),
+                jnp.stack([disco_h] * chunk_size),
+                jnp.stack([meta_h] * chunk_size),
+                _stack(p_opt, chunk_size),
+                _stack(v_opt, chunk_size),
+                _stack(adv_ema, chunk_size),
+                _stack(td_ema, chunk_size),
+                _stack(train_rollout, chunk_size),
+                _stack(valid_rollout, chunk_size),
+                jnp.stack([action_mask] * chunk_size),
+            )
+
+        # Block until compilations are complete
+        jax.effects_barrier()
+
+        # Warm per-trainer meta-optim JIT
+        dummy_grad = jax.tree.map(jnp.zeros_like, meta_params)
+        for t in self.trainers:
+            _ = t.meta_optim_update(
+                dummy_grad,
+                t.meta_opt_state,
+                meta_params,
+            )
+        jax.effects_barrier()
 
     def _initial_setup(self, trainer_keys: List[chex.PRNGKey]) -> None:
         """
         Builds all agent trainers, initializes meta-optimizers, compiles inference on
-        accelerator and CPU, builds per-trainer gradient functions, and builds
-        vmapped batch-grad functions per action group.
+        accelerator and CPU, builds vmapped batch-grad function, and pre-compiles
+        for all chunk sizes.
 
         Parameters
         ----------
         trainer_keys : List[chex.PRNGKey]
             List of trainer random number generated keys
         """
-        setup_total = 2 * self.num_trainers + len(self.action_groups)
+        setup_total = 2 * self.num_trainers + 3
         self.console.start_setup(setup_total)
 
         # Build trainers
@@ -914,60 +972,74 @@ class RuleTrainer:
                 writer_name=f"envs/{env_name}",
                 make_fn=make_fn,
                 budget_rng=self._budget_rng,
+                max_actions=self.max_actions,
                 jit_compile=self.jit_compile,
                 use_bfloat16=self.use_bfloat16,
             )
             self.trainers.append(trainer)
             self.console.update_setup()
 
-        # Handle accelerator (GPU or TPU) and CPU compiling per action group
-        seen_acl: set[int] = set()
-        seen_cpu: set[int] = set()
+        # Init meta-optimizers and warm one trainer on each device
+        warmed_acl = False
+        warmed_cpu = False
 
         for trainer in self.trainers:
             trainer._init_meta_optim(self.meta_agent.get_params())
 
-            if trainer.n_actions not in seen_acl:
+            if not warmed_acl:
                 trainer.warm()
-                seen_acl.add(trainer.n_actions)
+                warmed_acl = True
 
             with jax.default_device(self._cpu):
-                if trainer.n_actions not in seen_cpu:
+                if not warmed_cpu:
                     trainer.warm()
                     _ = trainer.collect_stack(self.config.n_updates)
                     _ = trainer.collect_valid()
-                    seen_cpu.add(trainer.n_actions)
+                    warmed_cpu = True
 
             self.console.update_setup()
 
-        # Build action groups and compile batch-grad functions
-        self.action_groups = self._build_action_groups()
+        # Build single batch-grad function
+        self._batch_grad_fn = self._build_batch_grad_fn()
+        self.console.update_setup()
 
-        for group in self.action_groups:
-            fn = self._build_batch_grad_fn(group)
-            self._batch_grad_fns[group.n_actions] = fn
-            self.console.update_setup()
+        # Pre-compile all chunk sizes so train() starts warm
+        self._warm_compile()
+        self.console.update_setup()
 
-    def _build_batch_grad_fn(self, group: ActionGroup) -> Callable:
+        # Warm all remaining eager JAX ops that run outside vmapped_fn
+        _meta_params = self.meta_agent.get_params()
+        _dummy_grad = jax.tree.map(jnp.zeros_like, _meta_params)
+
+        _updates, _ = self._meta_optim_update(
+            _dummy_grad,
+            self.state.meta_opt_state,
+            _meta_params,
+        )
+        _ = optax.apply_updates(_meta_params, _updates)
+        _ = jax.tree.map(lambda g: g / self.num_trainers, _dummy_grad)
+        _ = optax.global_norm(_dummy_grad)
+
+        self.console.update_setup()
+        jax.effects_barrier()
+
+    def _build_batch_grad_fn(self) -> Callable:
         """
-        Build a JIT + `vmap` compiled meta-gradient function for a trainer group.
+        Build a JIT + `vmap` compiled meta-gradient function.
 
-        `meta_params` is shared across the group (`in_axes=None`). All per-trainer
-        inputs are batched along the leading group dimension.
-
-        Parameters
-        ----------
-        group : ActionGroup
-            The trainer group to build the function for
+        `meta_params` is shared across the chunk (`in_axes=None`). All per-trainer
+        inputs are batched along the leading chunk dimension.
 
         Returns
         -------
         fn : Callable
-            JIT + `vmap` compiled gradient functions
+            JIT + `vmap` compiled gradient function
         """
-        t = self.trainers[group.indices[0]]
+        t = self.trainers[0]
 
-        def _pure_fn(meta_p, p_p, v_p, d_h, m_h, p_opt, v_opt, adv_e, td_e, tr, vr):
+        def _pure_fn(
+            meta_p, p_p, v_p, d_h, m_h, p_opt, v_opt, adv_e, td_e, tr, vr, a_mask
+        ):
             return self._compute_meta_gradient(
                 t,
                 meta_p,
@@ -981,9 +1053,15 @@ class RuleTrainer:
                 td_e,
                 tr,
                 vr,
+                a_mask,
             )
 
-        return jax.jit(jax.vmap(_pure_fn, in_axes=(None, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)))
+        return jax.jit(
+            jax.vmap(
+                _pure_fn,
+                in_axes=(None, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+            )
+        )
 
     def _compute_meta_gradient(
         self,
@@ -999,6 +1077,7 @@ class RuleTrainer:
         td_ema: EMAState,
         train_rollouts: Rollout,
         valid_rollout: Rollout,
+        action_mask: chex.Array,
     ) -> MetaGradOutput:
         """
         Compute meta-gradient for a single agent through the inner loop.
@@ -1019,17 +1098,19 @@ class RuleTrainer:
         meta_h : chex.Array
             Meta-LNN hidden state `(B, H_meta)`
         p_opt_state : ArrayTree
-            Policy optimizer state.
+            Policy optimizer state
         v_opt_state : ArrayTree
-            Value optimizer state.
+            Value optimizer state
         adv_ema : EMAState
-            Advantage EMA state.
+            Advantage EMA state
         td_ema : EMAState
-            TD-error EMA state.
+            TD-error EMA state
         train_rollouts : Rollout
             Training rollouts `(N, B, T, ...)`
         valid_rollout : Rollout
             Validation rollout `(1, T, ...)`
+        action_mask : chex.Array
+            Boolean mask `(max_actions,)` for valid actions
 
         Returns
         -------
@@ -1048,6 +1129,7 @@ class RuleTrainer:
                     disco_h_state=carry.disco_h,
                     meta_h_state=carry.meta_h,
                     params=meta_params,
+                    action_mask=action_mask,
                 )
 
                 encoding = rollout.preds.encoding
@@ -1287,10 +1369,9 @@ class RuleTrainer:
         for t in self._actor_threads:
             t.join(timeout=1)
 
-    def _get_rollouts(self, group: ActionGroup) -> Tuple[List[Rollout], List[Rollout]]:
+    def _get_rollouts(self, indices: List[int]) -> Tuple[List[Rollout], List[Rollout]]:
         """
-        Pull one rollout pair per trainer from the actor queues for all
-        trainers in `group`.
+        Pull one rollout pair per trainer from the actor queues.
 
         Blocks until each trainer's queue has an item. Handles reset
         sentinels inline — calls `reset_trainer` on the main thread
@@ -1298,8 +1379,8 @@ class RuleTrainer:
 
         Parameters
         ----------
-        group : ActionGroup
-            The trainer group whose rollouts to collect
+        indices : List[int]
+            Trainer indices to collect rollouts for
 
         Returns
         -------
@@ -1311,7 +1392,7 @@ class RuleTrainer:
         train_rollouts: List[Rollout] = []
         valid_rollouts: List[Rollout] = []
 
-        for idx in group.indices:
+        for idx in indices:
             q = self._rollout_queues[idx]
             resume = self._resume_events[idx]
 
@@ -1331,9 +1412,38 @@ class RuleTrainer:
 
         return train_rollouts, valid_rollouts
 
-    def _process_group_batch(
+    def _pad_rollout(self, rollout: Rollout) -> Rollout:
+        """
+        Pad action dimensions in a rollout from `n_actions` to `max_actions`.
+
+        Only pads array leaves whose 3rd dimension (`axis=2`) differs from
+        `max_actions`. Leaves without an action dimension pass through unchanged.
+
+        Parameters
+        ----------
+        rollout : Rollout
+            Rollout with action-dimensioned arrays at real `n_actions`
+
+        Returns
+        -------
+        padded : Rollout
+            Rollout with action dims padded to `max_actions`
+        """
+        max_a = self.max_actions
+
+        def _pad(x: chex.Array) -> chex.Array:
+            if x.ndim >= 3 and jnp.shape(x)[2] != max_a:
+                pad_width = [(0, 0)] * x.ndim
+                pad_width[2] = (0, max_a - jnp.shape(x)[2])
+                return jnp.pad(x, pad_width)
+
+            return x
+
+        return jax.tree.map(_pad, rollout)
+
+    def _process_chunk(
         self,
-        group: ActionGroup,
+        chunk_indices: List[int],
         train_rollouts: List[Rollout],
         valid_rollouts: List[Rollout],
         meta_params: chex.ArrayTree,
@@ -1341,19 +1451,19 @@ class RuleTrainer:
         stats: MetaStepStats,
     ) -> chex.ArrayTree:
         """
-        Compute meta-gradients for all trainers in a group.
+        Compute meta-gradients for a chunk of trainers.
 
-        All trainers in the group (including singletons) are processed via
-        the vmapped function in chunks of at most `max_group_size`.
+        Rollouts are padded from `n_actions` to `max_actions` before stacking,
+        and an action mask is threaded through for masked operations.
 
         Parameters
         ----------
-        group : ActionGroup
-            The trainer group to process
+        chunk_indices : List[int]
+            Trainer indices in this chunk
         train_rollouts : List[Rollout]
-            Pre-collected training rollouts, one per trainer in group order
+            Pre-collected training rollouts, one per trainer in chunk order
         valid_rollouts : List[Rollout]
-            Pre-collected validation rollouts, one per trainer in group order
+            Pre-collected validation rollouts, one per trainer in chunk order
         meta_params : chex.ArrayTree
             Current shared meta-network parameters
         accumulated_grad : chex.ArrayTree
@@ -1366,109 +1476,110 @@ class RuleTrainer:
         accumulated_grad : chex.ArrayTree
             Updated gradient accumulator
         """
-        vmapped_fn = self._batch_grad_fns[group.n_actions]
-        n = len(group.indices)
-        chunk_starts = range(0, n, self.max_group_size)
+        vmapped_fn = self._batch_grad_fn
+        chunk_trainers = [self.trainers[i] for i in chunk_indices]
 
-        for start in chunk_starts:
-            end = min(start + self.max_group_size, n)
-            chunk_idx = group.indices[start:end]
+        # Pad rollouts to max_actions before stacking
+        padded_train = [self._pad_rollout(tr) for tr in train_rollouts]
+        padded_valid = [self._pad_rollout(vr) for vr in valid_rollouts]
 
-            chunk_trainers = [self.trainers[i] for i in chunk_idx]
-            chunk_train = train_rollouts[start:end]
-            chunk_valid = valid_rollouts[start:end]
+        # Stack chunk inputs along a leading group dimension for vmap
+        stacked_train = stack_pytrees(padded_train)
+        stacked_valid = stack_pytrees(padded_valid)
 
-            # Stack chunk inputs along a leading group dimension for vmap
-            stacked_train = stack_pytrees(chunk_train)
-            stacked_valid = stack_pytrees(chunk_valid)
+        (
+            stacked_p_params,
+            stacked_v_params,
+            stacked_p_opt,
+            stacked_v_opt,
+            stacked_adv_ema,
+            stacked_td_ema,
+        ) = [
+            stack_pytrees(field)  # type: ignore
+            for field in zip(*[t.get_vmap_inputs() for t in chunk_trainers])
+        ]
 
-            (
-                stacked_p_params,
-                stacked_v_params,
-                stacked_p_opt,
-                stacked_v_opt,
-                stacked_adv_ema,
-                stacked_td_ema,
-            ) = [
-                stack_pytrees(field)  # type: ignore
-                for field in zip(*[t.get_vmap_inputs() for t in chunk_trainers])
-            ]
+        stacked_disco_h, stacked_meta_h = [
+            jnp.stack(hs)
+            for hs in zip(*[self.state.hidden.get(i) for i in chunk_indices])
+        ]
 
-            stacked_disco_h, stacked_meta_h = [
-                jnp.stack(hs)
-                for hs in zip(*[self.state.hidden.get(i) for i in chunk_idx])
-            ]
+        # Build per-trainer action masks: (chunk, max_actions)
+        stacked_action_masks = jnp.stack(
+            [jnp.arange(self.max_actions) < t.n_actions for t in chunk_trainers]
+        )
 
-            # Single accelerator call for entire chunk
-            chunk_out: MetaGradOutput = vmapped_fn(
-                meta_params,
-                stacked_p_params,
-                stacked_v_params,
-                stacked_disco_h,
-                stacked_meta_h,
-                stacked_p_opt,
-                stacked_v_opt,
-                stacked_adv_ema,
-                stacked_td_ema,
-                stacked_train,
-                stacked_valid,
+        # Single accelerator call for entire chunk
+        chunk_out: MetaGradOutput = vmapped_fn(
+            meta_params,
+            stacked_p_params,
+            stacked_v_params,
+            stacked_disco_h,
+            stacked_meta_h,
+            stacked_p_opt,
+            stacked_v_opt,
+            stacked_adv_ema,
+            stacked_td_ema,
+            stacked_train,
+            stacked_valid,
+            stacked_action_masks,
+        )
+
+        # Post-batch: apply updates and accumulate gradients
+        for i, (idx, trainer) in enumerate(zip(chunk_indices, chunk_trainers)):
+            p_params_i = unstack_pytree(chunk_out.p_params, i)
+            v_params_i = unstack_pytree(chunk_out.v_params, i)
+            v_opt_i = unstack_pytree(chunk_out.v_opt_state, i)
+            meta_grad_i = unstack_pytree(chunk_out.meta_grad, i)
+
+            trainer.policy_agent.update_params(p_params_i)  # type: ignore
+            trainer.target_agent.update_params(p_params_i)  # type: ignore
+            trainer.value_agent.update_params(v_params_i)  # type: ignore
+            trainer.state = trainer.state.update_value_opt(v_opt_i)
+
+            # Write updated EMA states back to trainer for next meta-step
+            adv_ema_i: EMAState = unstack_pytree(chunk_out.adv_ema, i)  # type: ignore
+            td_ema_i: EMAState = unstack_pytree(chunk_out.td_ema, i)  # type: ignore
+            trainer.state = trainer.state.update_ema(adv_ema_i, td_ema_i)
+
+            self.state = self.state.update_hidden(
+                idx,
+                chunk_out.disco_h[i],  # type: ignore
+                chunk_out.meta_h[i],  # type: ignore
             )
 
-            # Post-batch: apply updates and accumulate gradients
-            for i, (idx, trainer) in enumerate(zip(chunk_idx, chunk_trainers)):
-                p_params_i = unstack_pytree(chunk_out.p_params, i)
-                v_params_i = unstack_pytree(chunk_out.v_params, i)
-                v_opt_i = unstack_pytree(chunk_out.v_opt_state, i)
-                meta_grad_i = unstack_pytree(chunk_out.meta_grad, i)
+            # Norm gradient magnitude via per trainer optim before accumulating
+            normed_grad, new_meta_opt_state = trainer.meta_optim_update(
+                meta_grad_i,
+                trainer.meta_opt_state,
+                meta_params,
+            )
+            trainer.meta_opt_state = new_meta_opt_state
 
-                trainer.policy_agent.update_params(p_params_i)  # type: ignore
-                trainer.target_agent.update_params(p_params_i)  # type: ignore
-                trainer.value_agent.update_params(v_params_i)  # type: ignore
-                trainer.state = trainer.state.update_value_opt(v_opt_i)
+            accumulated_grad = jax.tree.map(
+                lambda acc, g: acc + g,
+                accumulated_grad,
+                normed_grad,
+            )
 
-                # Write updated EMA states back to trainer for next meta-step
-                adv_ema_i: EMAState = unstack_pytree(chunk_out.adv_ema, i)  # type: ignore
-                td_ema_i: EMAState = unstack_pytree(chunk_out.td_ema, i)  # type: ignore
-                trainer.state = trainer.state.update_ema(adv_ema_i, td_ema_i)
+            # Log metrics
+            self._log_meta_metrics(
+                idx,
+                chunk_out.pg_loss[i],  # type: ignore
+                chunk_out.entropy_loss[i],  # type: ignore
+                chunk_out.reg_loss[i],  # type: ignore
+                chunk_out.meta_loss[i],  # type: ignore
+                chunk_out.advantages[i],  # type: ignore
+                chunk_out.normalized_advantages[i],  # type: ignore
+            )
 
-                self.state = self.state.update_hidden(
-                    idx,
-                    chunk_out.disco_h[i],  # type: ignore
-                    chunk_out.meta_h[i],  # type: ignore
-                )
-
-                # Norm gradient magnitude via per trainer optim before accumulating
-                normed_grad, new_meta_opt_state = trainer.meta_optim.update(
-                    meta_grad_i,
-                    trainer.meta_opt_state,
-                    meta_params,
-                )
-                trainer.meta_opt_state = new_meta_opt_state
-
-                accumulated_grad = jax.tree.map(
-                    lambda acc, g: acc + g,
-                    accumulated_grad,
-                    normed_grad,
-                )
-
-                # Log metrics
-                self._log_meta_metrics(
-                    idx,
-                    chunk_out.pg_loss[i],  # type: ignore
-                    chunk_out.entropy_loss[i],  # type: ignore
-                    chunk_out.reg_loss[i],  # type: ignore
-                    chunk_out.meta_loss[i],  # type: ignore
-                    chunk_out.advantages[i],  # type: ignore
-                    chunk_out.normalized_advantages[i],  # type: ignore
-                )
-
-                losses_i = LossStatistics(
-                    meta=chunk_out.meta_loss[i],  # type: ignore
-                    policy_gradient=chunk_out.pg_loss[i],  # type: ignore
-                    entropy=chunk_out.entropy_loss[i],  # type: ignore
-                    regularization=chunk_out.reg_loss[i],  # type: ignore
-                )
-                stats.record(trainer.ep_return(), trainer.ep_length(), losses_i)
+            losses_i = LossStatistics(
+                meta=chunk_out.meta_loss[i],  # type: ignore
+                policy_gradient=chunk_out.pg_loss[i],  # type: ignore
+                entropy=chunk_out.entropy_loss[i],  # type: ignore
+                regularization=chunk_out.reg_loss[i],  # type: ignore
+            )
+            stats.record(trainer.ep_return(), trainer.ep_length(), losses_i)
 
         return accumulated_grad
 
@@ -1495,10 +1606,6 @@ class RuleTrainer:
             d. Average gradients across all environments and update meta-network
 
         2. Log metrics and checkpoints periodically
-
-        First Run
-        ---------
-        On first `train()` call, the first meta-step performs JIT compilation and caches it. This may take some time to complete. Subsequent steps will be more efficient on wall-clock time.
         """
         self.console.start_training()
         self._start_actors()
@@ -1512,17 +1619,26 @@ class RuleTrainer:
                 stats = MetaStepStats(self.num_trainers)
                 meta_params = self.meta_agent.get_params()
 
-                # Iterate through each action group
-                for group in self.action_groups:
-                    self.console.update_progress("Inner Updates", group=group)
+                # Flat chunking over all trainers
+                all_indices = list(range(self.num_trainers))
+                train_rollouts, valid_rollouts = self._get_rollouts(all_indices)
 
-                    train_rollouts, valid_rollouts = self._get_rollouts(group)
+                for start in range(0, self.num_trainers, self.max_group_size):
+                    end = min(start + self.max_group_size, self.num_trainers)
+                    chunk_indices = all_indices[start:end]
+                    chunk_train = train_rollouts[start:end]
+                    chunk_valid = valid_rollouts[start:end]
+
+                    self.console.update_progress(
+                        "Inner Updates",
+                        chunk_size=len(chunk_indices),
+                    )
 
                     # Compute gradients for this agent
-                    accumulated_grad = self._process_group_batch(
-                        group,
-                        train_rollouts,
-                        valid_rollouts,
+                    accumulated_grad = self._process_chunk(
+                        chunk_indices,
+                        chunk_train,
+                        chunk_valid,
                         meta_params,
                         accumulated_grad,
                         stats,
@@ -1556,11 +1672,9 @@ class RuleTrainer:
 
                 self.console.update_progress("Meta Steps")
 
-        except KeyboardInterrupt:
-            self._stop_actors()
-            self.close()
-            self.console.finish_training()
-            return
+        except (KeyboardInterrupt, SystemExit):
+            jax.debug.print("Terminating.")
+            exit()
         finally:
             self._stop_actors()
 
@@ -1706,7 +1820,7 @@ class RuleTrainer:
         """
         meta_params = self.meta_agent.get_params()
 
-        updates, new_opt_state = self.meta_optim.update(
+        updates, new_opt_state = self._meta_optim_update(
             avg_grad,
             self.state.meta_opt_state,
             meta_params,
@@ -1831,6 +1945,7 @@ class RuleTrainer:
             writer_name=f"envs/{env_name}",
             make_fn=make_fn,
             budget_rng=self._budget_rng,
+            max_actions=self.max_actions,
             jit_compile=self.jit_compile,
             use_bfloat16=self.use_bfloat16,
         )
