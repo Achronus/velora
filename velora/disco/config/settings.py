@@ -462,7 +462,7 @@ class RuleTrainerSettings:
         Total environment step budget across all trainers. Default is `500M`
     batch_size : int (optional)
         Trajectory batch size. Controls the number of vectorized environments used per agent.
-        Default is `1`
+        Default is `32`
     n_updates : int (optional)
         Number of agent updates to backpropagate through for meta-gradient
         computation (sliding window size). Default is `20`
@@ -490,7 +490,7 @@ class RuleTrainerSettings:
 
     total_env_steps: int = 500_000_000
     n_updates: int = 20
-    batch_size: int = 1
+    batch_size: int = 32
     seq_len: int = 29
 
     tau: float = 0.995
