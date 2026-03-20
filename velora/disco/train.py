@@ -15,10 +15,11 @@
 
 import json
 import math
-import queue
+import os
 import random
 import shutil
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Callable, Dict, List, Self, Tuple
 
@@ -64,11 +65,6 @@ from velora.tracking.manager import CheckpointManager
 from velora.utils.config import dump_config, load_config
 from velora.utils.format import cache_status
 from velora.utils.transforms import stack_pytrees, unstack_pytree
-
-_RESET_SENTINEL = object()
-"""Sentinel pushed by actor thread to signal that trainer has
-exhausted its lifetime budget and needs a main-thread reset
-before next rollout can be collected."""
 
 
 class AgentTrainer:
@@ -667,6 +663,11 @@ class RuleTrainer:
         Maximum number of trainers to `vmap` simultaneously. Higher values
         improve GPU utilization but increase VRAM usage. Reduce if
         out of memory (OOM). Default is `8`
+    num_collection_workers : int (optional)
+        Maximum number of concurrent threads for rollout collection.
+        Higher values increase CPU parallelism for env stepping but add
+        GIL contention during JAX dispatch. 8-16 is recommended for most
+        setups. Default is `8`
     seed : int (optional)
         Random number generator seed. Default is `42`
     jit_compile : bool (optional)
@@ -695,6 +696,7 @@ class RuleTrainer:
         config: RuleTrainerSettings,
         agents_per_env: int = 2,
         max_group_size: int = 8,
+        num_collection_workers: int = 8,
         seed: int = 42,
         jit_compile: bool = True,
         cache_dir: str | None = ".cache/jax",
@@ -783,21 +785,16 @@ class RuleTrainer:
         # Pre-computed constants
         self._action_masks: Dict[int, chex.Array] = {}
 
-        # Sebulba actor infrastructure
-        # One queue per trainer - actors stay exactly one step ahead of the learner
-        # One resume event per trainer - main thread unblocks actor after reset
-        self._rollout_queues: List[queue.Queue] = [
-            queue.Queue(maxsize=1) for _ in range(self.num_trainers)
-        ]
-        self._resume_events: List[threading.Event] = [
-            threading.Event() for _ in range(self.num_trainers)
-        ]
-        self._stop_event = threading.Event()
-        self._actor_threads: List[threading.Thread] = []
-
-        # Init events so actors start collecting immediately
-        for ev in self._resume_events:
-            ev.set()
+        # Bounded thread pool for concurrent rollout collection
+        self._collection_pool = ThreadPoolExecutor(
+            max_workers=min(num_collection_workers, self.num_trainers),
+            thread_name_prefix="collector",
+        )
+        self._prefetch_pool = ThreadPoolExecutor(
+            max_workers=1,
+            thread_name_prefix="prefetch",
+        )
+        self._collection_lock = threading.Lock()
 
         # init console dashboard
         _n_chunks = math.ceil(self.num_trainers / self.max_group_size)
@@ -1283,101 +1280,17 @@ class RuleTrainer:
             td_ema=final_td_ema,
         )
 
-    def _actor_loop(self, trainer_idx: int) -> None:
-        """
-        Persistent actor thread for a single trainer.
-
-        Runs continuously until `_stop_event` is set. On each iteration:
-
-            1. Wait for `_resume_events[trainer_idx]` - cleared by main thread
-               during a reset and re-set once the reset is complete.
-            2. Check `needs_reset` - if `True`, push `_RESET_SENTINEL` onto
-               the queue and wait for the main thread to handle the reset.
-            3. Otherwise, collect `train` + `valid` rollouts and push them as a tuple.
-
-        The queue has `maxsize=1`, so this thread blocks automatically when the
-        trainer hasn't yet consumed the previous rollout, keeping actors exactly
-        one meta-step ahead.
-
-        Parameters
-        ----------
-        trainer_idx : int
-            Trainer index for `self.trainers` and `self._rollout_queues`
-        """
-        q = self._rollout_queues[trainer_idx]
-        resume = self._resume_events[trainer_idx]
-
-        while not self._stop_event.is_set():
-            # Wait for main thread to handle a reset
-            resume.wait()
-
-            if self._stop_event.is_set():
-                break
-
-            trainer = self.trainers[trainer_idx]
-
-            # Signal main thread to reset
-            if trainer.needs_reset:
-                resume.clear()
-                q.put(_RESET_SENTINEL)
-                continue
-
-            # Force rollout threading on CPU
-            with jax.default_device(self._cpu):
-                train_rollout = trainer.collect_stack(self.config.n_updates)
-                valid_rollout = trainer.collect_valid()
-
-            q.put((train_rollout, valid_rollout))
-
-    def _start_actors(self) -> None:
-        """
-        Spawn one persistent daemon actor thread per trainer.
-
-        Called once at the start of `train()`. Daemon threads are
-        automatically killed if the main process exists.
-        """
-        self._stop_event.clear()
-        self._actor_threads = []
-
-        for i in range(self.num_trainers):
-            t = threading.Thread(
-                target=self._actor_loop,
-                args=(i,),
-                name=f"actor-{i}",
-                daemon=True,
-            )
-            t.start()
-            self._actor_threads.append(t)
-
-    def _stop_actors(self) -> None:
-        """
-        Signal all actor threads to stop running, waitings for thread completion
-        and then terminates them.
-        """
-        # Signal all actors to stop looping
-        self._stop_event.set()
-
-        # Unblock any threads waiting on resume or a full queue
-        for ev in self._resume_events:
-            ev.set()
-
-        for q in self._rollout_queues:
-            try:
-                q.get_nowait()
-            except queue.Empty:
-                pass
-
-        # Wait for each thread to naturally terminate
-        for t in self._actor_threads:
-            t.join(timeout=1)
-
     def _get_rollouts(self, indices: List[int]) -> Tuple[List[Rollout], List[Rollout]]:
         """
-        Pull one rollout pair per trainer from the actor queues.
+        Collect rollouts from all trainers using a bounded thread pool.
 
-        Blocks until each trainer's queue has an item. Handles reset
-        sentinels inline — calls `reset_trainer` on the main thread
-        then sets the actor's resume event so it can continue collecting.
+        Limits concurrent CPU work to `num_collection_workers` threads,
+        avoiding GIL contention from one-thread-per-trainer while still
+        overlapping CPU collection with accelerator gradient computation.
+
+        Handles trainer resets inline — if a trainer has exhausted its
+        lifetime budget, it is reset on the submitting thread before
+        collection begins.
 
         Parameters
         ----------
@@ -1391,26 +1304,26 @@ class RuleTrainer:
         valid_rollouts : List[Rollout]
             Validation rollouts in group-index order
         """
-        train_rollouts: List[Rollout] = []
-        valid_rollouts: List[Rollout] = []
 
-        for idx in indices:
-            q = self._rollout_queues[idx]
-            resume = self._resume_events[idx]
+        def _collect_one(idx: int) -> Tuple[Rollout, Rollout]:
+            trainer = self.trainers[idx]
 
-            while True:
-                item = q.get()
-
-                if item is _RESET_SENTINEL:
-                    # Actor is blocked on resume - safe to mutate trainer slot
+            if trainer.needs_reset:
+                with self._collection_lock:
                     self.reset_trainer(idx)
-                    resume.set()  # Unblock actor to collect fresh rollout
-                    continue  # Loop to get the rollout
+                    trainer = self.trainers[idx]
 
-                tr, vr = item
-                train_rollouts.append(tr)
-                valid_rollouts.append(vr)
-                break
+            with jax.default_device(self._cpu):
+                tr = trainer.collect_stack(self.config.n_updates)
+                vr = trainer.collect_valid()
+
+            return tr, vr
+
+        futures = [self._collection_pool.submit(_collect_one, idx) for idx in indices]
+        results = [f.result() for f in futures]
+
+        train_rollouts = [r[0] for r in results]
+        valid_rollouts = [r[1] for r in results]
 
         return train_rollouts, valid_rollouts
 
@@ -1577,21 +1490,23 @@ class RuleTrainer:
         2. Log metrics and checkpoints periodically
         """
         self.console.start_training()
-        self._start_actors()
+        all_indices = list(range(self.num_trainers))
+        prefetch_future = None
 
         try:
             for step in range(self.state.meta_step, self.n_steps):
-                accumulated_grad = jax.tree.map(
-                    jnp.zeros_like,
-                    self.meta_agent.get_params(),
-                )
                 stats = MetaStepStats(self.num_trainers)
                 meta_params = self.meta_agent.get_params()
 
-                # Flat chunking over all trainers
-                all_indices = list(range(self.num_trainers))
-                train_rollouts, valid_rollouts = self._get_rollouts(all_indices)
+                accumulated_grad = jax.tree.map(jnp.zeros_like, meta_params)
 
+                # Wait for prefetched rollouts, or collect if first step
+                if prefetch_future is not None:
+                    train_rollouts, valid_rollouts = prefetch_future.result()
+                else:
+                    train_rollouts, valid_rollouts = self._get_rollouts(all_indices)
+
+                # Process all chunks and update trainer params
                 for start in range(0, self.num_trainers, self.max_group_size):
                     end = min(start + self.max_group_size, self.num_trainers)
                     chunk_indices = all_indices[start:end]
@@ -1613,6 +1528,14 @@ class RuleTrainer:
                         meta_params,
                         accumulated_grad,
                         stats,
+                    )
+
+                # Trainers have updated params — safe to prefetch next step
+                # Collection overlaps with meta-update, logging, and checkpointing
+                if step < self.n_steps - 1:
+                    prefetch_future = self._prefetch_pool.submit(
+                        self._get_rollouts,
+                        all_indices,
                     )
 
                 # Apply average gradients through single shared optimizer
@@ -1644,10 +1567,7 @@ class RuleTrainer:
                 self.console.update_progress("Meta Steps")
 
         except (KeyboardInterrupt, SystemExit):
-            jax.debug.print("Terminating.")
-            exit()
-        finally:
-            self._stop_actors()
+            os._exit(1)
 
         # Final cleanup
         self.save_checkpoint(force=True)
@@ -1662,6 +1582,7 @@ class RuleTrainer:
         checkpoint_dir: str,
         *,
         additional_steps: int | None = None,
+        num_collection_workers: int = 8,
         jit_compile: bool = True,
         cache_dir: str | None = ".cache/jax",
         verbose: bool = True,
@@ -1683,6 +1604,9 @@ class RuleTrainer:
             Number of additional meta-training steps beyond the restored
             `meta_step`. When `None`, continues to the original
             `n_meta_steps` target from config. Default is `None`
+        num_collection_workers : int (optional)
+            Maximum number of concurrent threads for rollout collection.
+            Default is `8`
         jit_compile : bool (optional)
             Flag to enable/disable JIT compilation. Default is `True`
         cache_dir : str | None (optional)
@@ -1726,6 +1650,7 @@ class RuleTrainer:
             config=config,
             agents_per_env=meta_run["agents_per_env"],
             max_group_size=meta_run["max_group_size"],
+            num_collection_workers=num_collection_workers,
             seed=meta_run["seed"],
             jit_compile=jit_compile,
             cache_dir=cache_dir,
@@ -1945,6 +1870,8 @@ class RuleTrainer:
 
     def close(self) -> None:
         """Clean up resources."""
+        self._collection_pool.shutdown(wait=False)
+        self._prefetch_pool.shutdown(wait=False)
         self.cp_manager.close()
 
         for trainer in self.trainers:
