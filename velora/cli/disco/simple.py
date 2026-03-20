@@ -14,12 +14,8 @@
 # ==============================================================================
 
 import time
-from typing import TYPE_CHECKING
 
 from tqdm import tqdm
-
-if TYPE_CHECKING:
-    from velora.disco.inputs import ActionGroup
 
 
 class SimpleDashboard:
@@ -79,13 +75,14 @@ class SimpleDashboard:
         description: str,
         *,
         advance: int = 1,
-        group: "ActionGroup | None" = None,
+        chunk_size: int | None = None,
+        env_names: list[str] | None = None,
     ) -> None:
         """
         Update training progress.
 
-        ``"Meta Steps"`` advances the training bar by one step.
-        ``"Inner Updates"`` sets the current group label as a postfix.
+        `"Meta Steps"` advances the training bar by one step.
+        `"Inner Updates"` sets the current group label as a postfix.
         """
         if not self._train_bar:
             return
@@ -95,20 +92,33 @@ class SimpleDashboard:
                 elapsed = time.perf_counter() - self._step_start
                 self._postfix["step"] = f"{elapsed:.1f}s"
                 self._step_start = None
+
             if self._postfix:
                 self._train_bar.set_postfix(self._postfix, refresh=False)
             self._train_bar.update(advance)
-        elif description == "Inner Updates" and group is not None:
+
+        elif description == "Inner Updates" and chunk_size is not None:
             if self._step_start is None:
                 self._step_start = time.perf_counter()
 
-            n_envs = len(group.indices)
-            label = f"{group.n_actions} Action Group | {n_envs} Environment{'s' if n_envs != 1 else ''}"
+            envs_str = self._format_env_names(env_names or [])
+            label = (
+                f"{chunk_size} Agent{'s' if chunk_size != 1 else ''} | Envs: {envs_str}"
+            )
             self._train_bar.set_postfix_str(label, refresh=False)
+
+    @staticmethod
+    def _format_env_names(names: list[str], max_shown: int = 3) -> str:
+        """Format environment names for display, capping at `max_shown`."""
+        unique = sorted(set(names))
+        if len(unique) <= max_shown:
+            return ", ".join(unique)
+        return ", ".join(unique[:max_shown]) + f", +{len(unique) - max_shown} more"
 
     def update_stats(self, **kwargs) -> None:
         """Accumulate reward stats to display as postfix on the next meta-step tick."""
         avg_reward = kwargs.get("avg_reward")
+
         if avg_reward is not None:
             self._postfix["reward"] = f"{avg_reward:.3f}"
 
@@ -116,6 +126,7 @@ class SimpleDashboard:
         """Accumulate loss metrics to display as postfix on the next meta-step tick."""
         meta = kwargs.get("meta")
         grad_norm = kwargs.get("gradient_norm")
+
         if meta is not None:
             self._postfix["loss"] = f"{meta:.3f}"
         if grad_norm is not None:

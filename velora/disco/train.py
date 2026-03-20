@@ -37,7 +37,6 @@ from velora.disco.agent import DiscoAgent, DiscoValueAgent, PolicyAgent
 from velora.disco.config.settings import AgentTrainerSettings, RuleTrainerSettings
 from velora.disco.config.state import AgentTrainerState, RuleTrainerState
 from velora.disco.ema import EMAState, MovingAverage
-from velora.disco.inputs import ActionGroup
 from velora.disco.outputs import (
     AgentLossAux,
     LossStatistics,
@@ -798,12 +797,14 @@ class RuleTrainer:
             ev.set()
 
         # init console dashboard
+        _n_chunks = math.ceil(self.num_trainers / self.max_group_size)
+
         if verbose:
             self.console = DiscoConsoleDashboard(
                 self.config.console_config(
                     envs=envs.env_categories(),
                     num_trainers=self.num_trainers,
-                    action_groups=self.action_groups,
+                    n_chunks=_n_chunks,
                     params=self._dummy_params(trainer_keys[0]),
                     complete_path=str(self.rule_path),
                     jit_compile=jit_compile,
@@ -1629,9 +1630,11 @@ class RuleTrainer:
                     chunk_train = train_rollouts[start:end]
                     chunk_valid = valid_rollouts[start:end]
 
+                    chunk_envs = [self.trainers[i].env_name for i in chunk_indices]
                     self.console.update_progress(
                         "Inner Updates",
                         chunk_size=len(chunk_indices),
+                        env_names=chunk_envs,
                     )
 
                     # Compute gradients for this agent

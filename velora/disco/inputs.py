@@ -13,7 +13,7 @@
 # limitations under the License.
 # ==============================================================================
 
-from typing import List, NamedTuple
+from typing import NamedTuple
 
 import chex
 import optax
@@ -60,19 +60,3 @@ class MetaLossFnInputs(NamedTuple):
     td_ema: EMAState
     train_rollouts: Rollout
     valid_rollout: Rollout
-
-
-class ActionGroup(NamedTuple):
-    """
-    A group of trainers sharing the same `n_actions` value.
-
-    Parameters
-    ----------
-    n_actions : int
-        Shared action space size for all trainers in the group
-    indices : List[int]
-        Global trainer indices
-    """
-
-    n_actions: int
-    indices: List[int]

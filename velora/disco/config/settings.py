@@ -15,7 +15,7 @@
 
 import json
 from dataclasses import fields
-from typing import TYPE_CHECKING, Dict, List, Self
+from typing import Dict, Self
 
 import jax.numpy as jnp
 from flax import struct
@@ -23,9 +23,6 @@ from flax import struct
 from velora.cli.disco.settings import DiscoDashboardSettings, DiscoParamsSettings
 from velora.disco.distributions import CategoricalBins
 from velora.tracking.settings import CheckpointSettings, MetricLoggerSettings
-
-if TYPE_CHECKING:
-    from velora.disco.inputs import ActionGroup
 
 
 @struct.dataclass(frozen=True)
@@ -590,7 +587,7 @@ class RuleTrainerSettings:
         self,
         envs: Dict[str, int],
         num_trainers: int,
-        action_groups: List["ActionGroup"],
+        n_chunks: int,
         params: DiscoParamsSettings,
         complete_path: str,
         jit_compile: bool,
@@ -605,8 +602,8 @@ class RuleTrainerSettings:
             Mapping of environment category names to counts
         num_trainers : int
             Number of agent trainers
-        action_groups : List[ActionGroup]
-            A list of action groups for the trainer population
+        n_chunks : int
+            Number of trainer chunks per meta-step
         params : DiscoParamsSettings
             Parameter counts for each agent type
         complete_path : str
@@ -628,7 +625,7 @@ class RuleTrainerSettings:
             batch_size=self.batch_size,
             n_agents=num_trainers,
             total_steps=self.total_env_steps,
-            action_groups=action_groups,
+            n_chunks=n_chunks,
             log_dir=str(self.logger.dirpath),
             cp_dir=str(self.checkpoint.dirpath),
             env_categories=envs,

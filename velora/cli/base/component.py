@@ -17,7 +17,7 @@ import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Generic, List, Tuple, Type, TypeVar
+from typing import Generic, List, Tuple, Type, TypeVar
 
 from rich.console import Group, RenderableType
 from rich.padding import Padding
@@ -35,9 +35,6 @@ from rich.progress import (
 from rich.rule import Rule
 from rich.table import Table
 from rich.text import Text
-
-if TYPE_CHECKING:
-    from velora.disco.inputs import ActionGroup
 
 from velora.cli.base.constant import VELORA_LOGO, Colour
 from velora.utils.format import (
@@ -450,7 +447,9 @@ class TrainingProgressCard(ProgressComponent):
 
         self._tasks = tasks
         self._task_ids: dict[str, TaskID] = {}
-        self._current_group: "ActionGroup | None" = None
+        self._current_chunk_size: int | None = None
+        self._current_chunk_index: int = 0
+        self._current_env_names: List[str] = []
 
         self._inner_total: int = tasks[1][1]
         self._inner_count: int = 0
@@ -470,7 +469,8 @@ class TrainingProgressCard(ProgressComponent):
         description: str,
         *,
         advance: int = 1,
-        group: "ActionGroup | None" = None,
+        chunk_size: int | None = None,
+        env_names: List[str] | None = None,
     ) -> None:
         """
         Advance the progress card.
@@ -481,9 +481,10 @@ class TrainingProgressCard(ProgressComponent):
             Task to update
         advance : int (optional)
             Number to increment bar by. Default is `1`
-        group : ActionGroup (optional)
-            The action group that just completed.
-            Default is `None`
+        chunk_size : int (optional)
+            Number of agents in the current chunk. Default is `None`
+        env_names : List[str] (optional)
+            Environment names in the current chunk. Default is `None`
         """
         task_id = self._task_ids.get(description)
 
@@ -496,8 +497,10 @@ class TrainingProgressCard(ProgressComponent):
             # Second task
             self._inner_count = min(self._inner_count + advance, self._inner_total)
 
-        if group is not None:
-            self._current_group = group
+        if chunk_size is not None:
+            self._current_chunk_size = chunk_size
+            self._current_chunk_index = self._inner_count
+            self._current_env_names = env_names or []
 
     def reset(self, description: str) -> None:
         """
@@ -510,7 +513,33 @@ class TrainingProgressCard(ProgressComponent):
         """
         if description == self._tasks[1][0]:
             self._inner_count = 0
-            self._current_group = None
+            self._current_chunk_size = None
+            self._current_chunk_index = 0
+            self._current_env_names = []
+
+    @staticmethod
+    def _format_env_names(names: List[str], max_shown: int = 3) -> str:
+        """
+        Format environment names for display, capping at `max_shown`.
+
+        Parameters
+        ----------
+        names : List[str]
+            Environment names to format
+        max_shown : int (optional)
+            Maximum number of names to show before summarizing.
+            Default is `3`
+
+        Returns
+        -------
+        formatted : str
+            Formatted environment names string
+        """
+        unique = sorted(set(names))
+        if len(unique) <= max_shown:
+            return ", ".join(unique)
+
+        return ", ".join(unique[:max_shown]) + f", +{len(unique) - max_shown} more"
 
     def _render_in_progress(self) -> Panel:
         table = Table.grid(expand=True)
@@ -518,16 +547,16 @@ class TrainingProgressCard(ProgressComponent):
         table.add_row(self.progress)
 
         # Update second task
-        if self._current_group:
-            n_envs = len(self._current_group.indices)
-            n_actions = self._current_group.n_actions
+        if self._current_chunk_size is not None:
+            n_agents = self._current_chunk_size
+            chunk_idx = self._current_chunk_index
+            envs_str = self._format_env_names(self._current_env_names)
 
             table.add_row(
                 Text(
-                    f"    ↳  {n_actions} Actions Group"
-                    f" | {n_envs} Agent{'s' if n_envs != 1 else ''}"
-                    f" (groups remaining this step:"
-                    f" {self._inner_count}/{self._inner_total})",
+                    f"    ↳  Chunk {chunk_idx}/{self._inner_total}"
+                    f" | {n_agents} Agent{'s' if n_agents != 1 else ''}"
+                    f" | Envs: {envs_str}",
                     style="dim",
                 )
             )

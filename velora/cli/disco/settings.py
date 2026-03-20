@@ -14,12 +14,9 @@
 # ==============================================================================
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Dict, List
+from typing import Dict
 
 from velora.base.outputs import ParamCount
-
-if TYPE_CHECKING:
-    from velora.disco.inputs import ActionGroup
 
 
 @dataclass
@@ -113,8 +110,8 @@ class DiscoDashboardSettings:
         Number of agents in the population
     total_steps : int
         Total number of training steps
-    action_groups : List[ActionGroup]
-        A list of action groups for the trainer population
+    n_chunks : int
+        Number of trainer chunks per meta-step
     log_dir : str
         Directory path for Tensorboard logs
     cp_dir : str
@@ -137,7 +134,7 @@ class DiscoDashboardSettings:
     batch_size: int
     n_agents: int
     total_steps: int
-    action_groups: List["ActionGroup"]
+    n_chunks: int
 
     log_dir: str
     cp_dir: str
@@ -159,14 +156,3 @@ class DiscoDashboardSettings:
             Environment training total
         """
         return sum(self.env_categories.values())
-
-    def n_action_groups(self) -> int:
-        """
-        Computes the total number of action groups.
-
-        Returns
-        -------
-        count : int
-            Number of action groups
-        """
-        return len(self.action_groups)
