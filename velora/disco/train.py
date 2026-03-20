@@ -211,7 +211,7 @@ class AgentTrainer:
             n_rollouts=self.config.n_updates,
             n_envs=self.config.batch_size,
             seq_len=self.config.seq_len,
-            n_actions=self.n_actions,
+            n_actions=self.max_actions,
             encoding_dim=self.policy_agent.encoding_dim,
             prediction_dim=self.config.agent.prediction_size,
             q_dim=self.config.agent.q_size,
@@ -221,7 +221,7 @@ class AgentTrainer:
             n_rollouts=1,
             n_envs=self.config.batch_size,
             seq_len=self.config.seq_len * 2,
-            n_actions=self.n_actions,
+            n_actions=self.max_actions,
             encoding_dim=self.policy_agent.encoding_dim,
             prediction_dim=self.config.agent.prediction_size,
             q_dim=self.config.agent.q_size,
@@ -905,10 +905,6 @@ class RuleTrainer:
             train_rollout = trainer.collect_stack(self.config.n_updates)
             valid_rollout = trainer.collect_valid()
 
-        # Pad rollouts to max_actions for uniform shapes
-        train_rollout = self._pad_rollout(train_rollout)
-        valid_rollout = self._pad_rollout(valid_rollout)
-
         p_params, v_params, p_opt, v_opt, adv_ema, td_ema = trainer.get_vmap_inputs()
         disco_h, meta_h = self.state.hidden.get(0)
         action_mask = jnp.arange(self.max_actions) < trainer.n_actions
@@ -1137,7 +1133,11 @@ class RuleTrainer:
                 actions, discounts = rollout.actions, rollout.discounts
 
                 def inner_policy_loss(p, enc, tgt, act, disc):
-                    new_preds = trainer.policy_agent.functional_forward(enc, p)
+                    new_preds = trainer.policy_agent.functional_forward(
+                        enc,
+                        p,
+                        action_mask=action_mask,
+                    )
                     return compute_policy_loss(
                         tgt,
                         new_preds.pi,
@@ -1413,35 +1413,6 @@ class RuleTrainer:
 
         return train_rollouts, valid_rollouts
 
-    def _pad_rollout(self, rollout: Rollout) -> Rollout:
-        """
-        Pad action dimensions in a rollout from `n_actions` to `max_actions`.
-
-        Only pads array leaves whose 3rd dimension (`axis=2`) differs from
-        `max_actions`. Leaves without an action dimension pass through unchanged.
-
-        Parameters
-        ----------
-        rollout : Rollout
-            Rollout with action-dimensioned arrays at real `n_actions`
-
-        Returns
-        -------
-        padded : Rollout
-            Rollout with action dims padded to `max_actions`
-        """
-        max_a = self.max_actions
-
-        def _pad(x: chex.Array) -> chex.Array:
-            if x.ndim >= 3 and jnp.shape(x)[2] != max_a:
-                pad_width = [(0, 0)] * x.ndim
-                pad_width[2] = (0, max_a - jnp.shape(x)[2])
-                return jnp.pad(x, pad_width)
-
-            return x
-
-        return jax.tree.map(_pad, rollout)
-
     def _process_chunk(
         self,
         chunk_indices: List[int],
@@ -1480,13 +1451,9 @@ class RuleTrainer:
         vmapped_fn = self._batch_grad_fn
         chunk_trainers = [self.trainers[i] for i in chunk_indices]
 
-        # Pad rollouts to max_actions before stacking
-        padded_train = [self._pad_rollout(tr) for tr in train_rollouts]
-        padded_valid = [self._pad_rollout(vr) for vr in valid_rollouts]
-
         # Stack chunk inputs along a leading group dimension for vmap
-        stacked_train = stack_pytrees(padded_train)
-        stacked_valid = stack_pytrees(padded_valid)
+        stacked_train = stack_pytrees(train_rollouts)
+        stacked_valid = stack_pytrees(valid_rollouts)
 
         (
             stacked_p_params,

@@ -74,10 +74,13 @@ class ActionDecoder(nnx.Module):
         self.max_actions = max_actions
 
         head_dims = {"pi": pi_dim, "z": z_dim, "aux_pi": aux_pi_dim, "q": q_dim}
-        self._slices = self._build_slices(head_dims)
-
         out_dim = sum(head_dims.values())
-        self.proj = nnx.Linear(in_dim + max_actions, out_dim, rngs=self.rngs)
+
+        self.proj = nnx.Linear(
+            in_dim + max_actions,
+            out_dim,
+            rngs=self.rngs,
+        )
 
         # Pre-compute slice boundaries for each head
         self._slices = self._build_slices(head_dims)
@@ -129,6 +132,7 @@ class ActionDecoder(nnx.Module):
         for name, dim in head_dims.items():
             slices[name] = (offset, offset + dim)
             offset += dim
+
         return slices
 
     def _fuse_hidden(self, *sources: chex.Array) -> chex.Array:
@@ -190,11 +194,7 @@ class ActionDecoder(nnx.Module):
 
         return jnp.concatenate([h_expanded, a_expanded], axis=-1)
 
-    def __call__(
-        self,
-        *sources: chex.Array,
-        n_actions: int | None = None,
-    ) -> ActionDecoderOutput:
+    def __call__(self, *sources: chex.Array) -> ActionDecoderOutput:
         """
         Decode fixed-size hidden representations to per-action outputs.
 
@@ -204,22 +204,14 @@ class ActionDecoder(nnx.Module):
             Hidden representations to fuse and decode. Typically
             `(ocm_preds.pi, acm_preds.z, acm_preds.aux_pi, acm_preds.q)`.
             All must share leading dimensions `(B, T)` or `(B,)`
-        n_actions : int (optional)
-            Number of actions to decode. Uses `max_actions` when
-            `None`. Pass the environment's real action count during
-            collection to produce correctly-sized outputs.
-            Default is `None`
 
         Returns
         -------
         output : ActionDecoderOutput
-            Per-action outputs. Each value has shape
-            `(B, T, A, head_dim)` or `(B, A, head_dim)`
+            Per-action outputs at `max_actions` dimension
         """
-        n = self.max_actions if n_actions is None else n_actions
-
         hidden = self._fuse_hidden(*sources)
-        combined = self._broadcast_with_action_ids(hidden, n)
+        combined = self._broadcast_with_action_ids(hidden, self.max_actions)
         raw = self.proj(combined)  # type: ignore
 
         s = self._slices

@@ -292,8 +292,8 @@ class PolicyAgent:
             timespans=timespans,
         )
 
-        # Decode to per-action outputs at env n_actions
-        preds = self._decode_to_actions(encoding, ocm_preds, acm_preds, self.n_actions)
+        # Decode to per-action outputs at max_actions
+        preds = self._decode_to_actions(encoding, ocm_preds, acm_preds)
 
         return (
             preds,
@@ -305,11 +305,17 @@ class PolicyAgent:
         encoding: chex.Array,
         ocm_preds: OCMPredictions,
         acm_preds: ACMPredictions,
-        n_actions: int | None = None,
+        *,
+        action_mask: chex.Array | None = None,
+        decoder: ActionDecoder | None = None,
     ) -> PolicyAgentOutput:
         """
-        Decode fixed-size hidden representations to per-action outputs via
-        shared ActionDecoders.
+        Decode fixed-size hidden representations to per-action outputs.
+
+        Always decodes at `max_actions` for identically-shaped outputs
+        regardless of environment action count. Invalid action slots
+        are masked to `-1e9`. Using Softmax will assign them to
+        zero-probability.
 
         Parameters
         ----------
@@ -319,39 +325,44 @@ class PolicyAgent:
             OCM output with fixed-size `pi` and `y` heads
         acm_preds : ACMPredictions
             ACM output with fixed-size `z`, `aux_pi`, `q` heads
-        n_actions : int (optional)
-            Number of actions to decode. When `None`, uses `max_actions`
-            (for vmapped gradient path). Pass real `n_actions` during
-            collection. Default is `None`
+        action_mask : chex.Array (optional)
+            Boolean mask `(max_actions,)` for valid actions.
+            Default is `None`
+        decoder : ActionDecoder (optional)
+        Reconstructed decoder from explicit params for the functional
+        gradient path. Uses `self.decoder` when `None`.
+        Default is `None`
 
         Returns
         -------
         preds : PolicyAgentOutput
-            Per-action agent predictions
+            Per-action agent predictions at `max_actions` dimension
         """
-        n = n_actions
+        d = decoder if decoder is not None else self.decoder
 
-        heads = self._decoder(
+        heads = d(
             ocm_preds.pi,
             acm_preds.z,
             acm_preds.aux_pi,
             acm_preds.q,
-            n_actions=n,
         )
 
-        pi = jnp.squeeze(heads.pi, axis=-1)  # (B, T, A, 1) -> (B, T, A)
+        pi = jnp.squeeze(heads.pi, axis=-1)  # (B, T, max_A, 1) -> (B, T, max_A)
+        aux_pi = heads.aux_pi  # (B, T, max_A, max_A)
 
-        # Mask invalid actions when decoding at max_actions
-        if n is None or n == self.max_actions:
-            action_mask = jnp.arange(self.max_actions) < self.n_actions
-            pi = jnp.where(action_mask, pi, -1e9)
+        # Mask padded action slots so softmax assigns zero probability
+        if action_mask is None:
+            action_mask = jnp.arange(self.max_actions) < self.n_actions  # (max_A,)
+
+        pi = jnp.where(action_mask, pi, -1e9)  # (B, T, max_A)
+        aux_pi = jnp.where(action_mask, aux_pi, -1e9)  # (B, T, max_A, max_A)
 
         return PolicyAgentOutput.create(
             encoding,
             pi,
             ocm_preds.y,
             heads.z,
-            heads.aux_pi,
+            aux_pi,
             heads.q,
         )
 
@@ -359,13 +370,16 @@ class PolicyAgent:
         self,
         encoding: chex.Array,
         params: nnx.State,
+        *,
+        action_mask: chex.Array | None = None,
     ) -> PolicyAgentOutput:
         """
         Pure functional forward through OCM + ACM + ActionDecoder
         with explicit params. Safe for use inside `jax.grad`.
 
-        Decodes at `max_actions` so output shapes are uniform across
-        all trainers for vmap.
+        Always decodes at `max_actions`. Padded action slots are masked
+        to `-1e9` using the provided `action_mask` (vmap path) or
+        `self.n_actions` (standalone).
 
         Parameters
         ----------
@@ -377,6 +391,10 @@ class PolicyAgent:
             - `features (F)` number of features in the embedding
         params : nnx.State
             OCM, ACM and decoder parameters
+        action_mask : chex.Array (optional)
+            Boolean mask `(max_actions,)` for valid actions. Required in
+            the vmap path where `self.n_actions` reflects the template
+            trainer, not the actual trainer. Default is `None`
 
         Returns
         -------
@@ -388,21 +406,12 @@ class PolicyAgent:
         ocm_preds, _ = ocm(encoding)
         acm_preds, _ = acm(ocm_preds.embedding)
 
-        heads = decoder(
-            ocm_preds.pi,
-            acm_preds.z,
-            acm_preds.aux_pi,
-            acm_preds.q,
-        )
-        pi = jnp.squeeze(heads.pi, axis=-1)  # (B, T, max_A, 1) -> (B, T, max_A)
-
-        return PolicyAgentOutput.create(
+        return self._decode_to_actions(
             encoding,
-            pi,
-            ocm_preds.y,
-            heads.z,
-            heads.aux_pi,
-            heads.q,
+            ocm_preds,
+            acm_preds,
+            action_mask=action_mask,
+            decoder=decoder,
         )
 
     def act(self, logits: chex.Array) -> chex.Array:
