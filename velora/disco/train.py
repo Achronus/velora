@@ -636,14 +636,11 @@ class RuleTrainer:
     a population of `AgentTrainer`s, computing meta-gradients from their learning
     progress, and updating the meta-network to improve collective agent performance.
 
-    Trainers are grouped by action-space size so that `jax.vmap` can compute
-    meta-gradients for an entire group in one batched accelerator (E.g., GPU) call.
-    A background thread pre-collects rollouts for the next group while the accelerator
-    processes the current group, overlapping CPU environment stepping with accelerator
-    gradient computation.
+    All trainers produce identically-shaped outputs (action-invariant architecture),
+    enabling `jax.vmap` to compute meta-gradients for an entire chunk in one batched
+    accelerator call. A bounded thread pool collects rollouts concurrently,
+    overlapping CPU environment stepping with accelerator gradient computation.
 
-    Follows a Sebulba actor infrastructure used in the paper
-    [Podracer architectures for scalable Reinforcement Learning](https://arxiv.org/abs/2104.06272).
 
     Parameters
     ----------
