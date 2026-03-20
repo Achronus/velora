@@ -1686,25 +1686,32 @@ class RuleTrainer:
         self.console.finish_training()
 
     @classmethod
-    def resume(
+    def restore(
         cls,
         checkpoint_dir: str,
-        additional_steps: int,
         *,
+        additional_steps: int | None = None,
         jit_compile: bool = True,
         cache_dir: str | None = ".cache/jax",
         verbose: bool = True,
     ) -> Self:
         """
-        Resume training from a checkpoint.
+        Restore meta-training state from the latest checkpoint.
+
+        Loads meta-agent parameters, optimizer state, and hidden states,
+        then resets all agent trainers.
+
+        Call `train()` after to continue training from the restored `meta_step`.
 
         Parameters
         ----------
         checkpoint_dir : str
             Path to the checkpoint directory containing `meta_run.json`
             and the Orbax checkpoint subdirectories
-        additional_steps : int
-            Number of additional meta-training steps to train the rule on
+        additional_steps : int (optional)
+            Number of additional meta-training steps beyond the restored
+            `meta_step`. When `None`, continues to the original
+            `n_meta_steps` target from config. Default is `None`
         jit_compile : bool (optional)
             Flag to enable/disable JIT compilation. Default is `True`
         cache_dir : str | None (optional)
@@ -1761,8 +1768,10 @@ class RuleTrainer:
                 "Ensure the directory contains valid orbax checkpoint files."
             )
 
-        # Extend restored steps to include additional
-        trainer.n_steps = trainer.state.meta_step + additional_steps
+        # Extend training if additional steps requested
+        if additional_steps is not None:
+            trainer.n_steps = trainer.state.meta_step + additional_steps
+
         return trainer
 
     def _log_meta_metrics(
