@@ -85,6 +85,8 @@ class ActionDecoder(nnx.Module):
         # Pre-compute slice boundaries for each head
         self._slices = self._build_slices(head_dims)
 
+        self._action_ids = jnp.eye(max_actions)
+
         self._total_params = total_parameters(self)
         self._active_params = active_parameters(self)
 
@@ -153,13 +155,13 @@ class ActionDecoder(nnx.Module):
         """
         return jnp.concatenate(sources, axis=-1)
 
-    def _broadcast_with_action_ids(self, hidden: chex.Array, n: int) -> chex.Array:
+    def _broadcast_with_action_ids(self, hidden: chex.Array) -> chex.Array:
         """
         Broadcast hidden state per-action and concatenate action identity
         embeddings.
 
         Each action receives the same hidden state plus a unique one-hot
-        identity vector (a row from `jnp.eye(max_actions)[:n]`), giving
+        identity vector (a row from `jnp.eye(max_actions)`), giving
         the shared projection layer enough information to produce
         action-specific outputs.
 
@@ -167,8 +169,6 @@ class ActionDecoder(nnx.Module):
         ----------
         hidden : chex.Array
             Fused hidden representation. Shape: `(B, T, H)` or `(B, H)`
-        n : int
-            Number of actions to decode for
 
         Returns
         -------
@@ -176,21 +176,17 @@ class ActionDecoder(nnx.Module):
             Per-action input. Shape: `(B, T, n, H + max_actions)`
             or `(B, n, H + max_actions)`
         """
-        action_ids = jnp.eye(self.max_actions)[:n]
+        n = self.max_actions
+        action_ids = self._action_ids
 
         if hidden.ndim == 3:
             B, T, H = jnp.shape(hidden)
             h_expanded = jnp.broadcast_to(hidden[:, :, None, :], (B, T, n, H))
-            a_expanded = jnp.broadcast_to(
-                action_ids[None, None, :, :],
-                (B, T, n, self.max_actions),
-            )
+            a_expanded = jnp.broadcast_to(action_ids[None, None, :, :], (B, T, n, n))
         else:
             B, H = jnp.shape(hidden)
             h_expanded = jnp.broadcast_to(hidden[:, None, :], (B, n, H))  # type: ignore
-            a_expanded = jnp.broadcast_to(
-                action_ids[None, :, :], (B, n, self.max_actions)
-            )
+            a_expanded = jnp.broadcast_to(action_ids[None, :, :], (B, n, n))
 
         return jnp.concatenate([h_expanded, a_expanded], axis=-1)
 
@@ -211,7 +207,7 @@ class ActionDecoder(nnx.Module):
             Per-action outputs at `max_actions` dimension
         """
         hidden = self._fuse_hidden(*sources)
-        combined = self._broadcast_with_action_ids(hidden, self.max_actions)
+        combined = self._broadcast_with_action_ids(hidden)
         raw = self.proj(combined)  # type: ignore
 
         s = self._slices

@@ -780,6 +780,9 @@ class RuleTrainer:
 
         self._meta_optim_update: Callable = None  # type: ignore
 
+        # Pre-computed constants
+        self._action_masks: Dict[int, chex.Array] = {}
+
         # Sebulba actor infrastructure
         # One queue per trainer - actors stay exactly one step ahead of the learner
         # One resume event per trainer - main thread unblocks actor after reset
@@ -907,7 +910,7 @@ class RuleTrainer:
 
         p_params, v_params, p_opt, v_opt, adv_ema, td_ema = trainer.get_vmap_inputs()
         disco_h, meta_h = self.state.hidden.get(0)
-        action_mask = jnp.arange(self.max_actions) < trainer.n_actions
+        action_mask = self._action_masks[trainer.n_actions]
 
         # Compile for every distinct chunk size
         chunk_sizes = {min(self.max_group_size, self.num_trainers)}
@@ -987,6 +990,12 @@ class RuleTrainer:
                 _ = trainer.collect_valid()
 
             self.console.update_setup()
+
+        # Pre-compute shared constants for the inner loop
+        self._action_masks = {
+            t.n_actions: jnp.arange(self.max_actions) < t.n_actions
+            for t in self.trainers
+        }
 
         # Build single batch-grad function
         self._batch_grad_fn = self._build_batch_grad_fn()
@@ -1466,7 +1475,7 @@ class RuleTrainer:
 
         # Build per-trainer action masks: (chunk, max_actions)
         stacked_action_masks = jnp.stack(
-            [jnp.arange(self.max_actions) < t.n_actions for t in chunk_trainers]
+            [self._action_masks[t.n_actions] for t in chunk_trainers]
         )
 
         # Single accelerator call for entire chunk
