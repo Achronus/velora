@@ -1468,24 +1468,21 @@ class RuleTrainer:
     def train(self) -> None:
         """
         Performs meta-training loop to discover an RL update rule.
-        Uses Sebulba-style decoupled actor/learner pipeline.
 
-        One persistent daemon thread per trainer (actor) continuously collects
-        rollouts and pushes them onto a depth-1 queue. The main thread (learner)
-        drains those queues group-by-group, runs accelerator gradient computation
-        for each group, then applies the averaged meta-update.
-
-        All actor threads run concurrently, so CPU environment stepping for every
-        trainer overlaps with accelerator gradient computations.
+        Each meta-step collects rollouts from all trainers via a bounded
+        thread pool, then computes vmapped meta-gradients in chunks on
+        the accelerator. Rollout collection for step N+1 is prefetched
+        in the background during step N's gradient computation, meta-update,
+        and logging — overlapping CPU collection with accelerator work.
 
         Includes
         --------
         1. For each meta-step:
 
-            a. Iterate through all agent trainers sequentially
-            b. For each trainer, collect rollouts and perform inner loop updates
-            c. Accumulate meta-gradients through the learning process
-            d. Average gradients across all environments and update meta-network
+            a. Wait for prefetched rollouts (or collect if first step)
+            b. Process trainers in chunks via vmapped gradient computation
+            c. Start prefetching next step's rollouts (background)
+            d. Average gradients and update meta-network (overlaps with prefetch)
 
         2. Log metrics and checkpoints periodically
         """
