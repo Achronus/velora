@@ -976,23 +976,15 @@ class RuleTrainer:
             self.trainers.append(trainer)
             self.console.update_setup()
 
-        # Init meta-optimizers and warm one trainer on each device
-        warmed_acl = False
-        warmed_cpu = False
-
+        # Init meta-optimizers and warm trainers on each device
         for trainer in self.trainers:
             trainer._init_meta_optim(self.meta_agent.get_params())
-
-            if not warmed_acl:
-                trainer.warm()
-                warmed_acl = True
+            trainer.warm()
 
             with jax.default_device(self._cpu):
-                if not warmed_cpu:
-                    trainer.warm()
-                    _ = trainer.collect_stack(self.config.n_updates)
-                    _ = trainer.collect_valid()
-                    warmed_cpu = True
+                trainer.warm()
+                _ = trainer.collect_stack(self.config.n_updates)
+                _ = trainer.collect_valid()
 
             self.console.update_setup()
 
