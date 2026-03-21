@@ -18,10 +18,10 @@ from pathlib import Path
 from typing import Optional, Self, Tuple
 
 import chex
-import distrax
 import gymnasium as gym
 import jax
 import jax.numpy as jnp
+import numpy as np
 import optax
 import orbax.checkpoint as ocp
 from flax import nnx
@@ -419,30 +419,35 @@ class PolicyAgent:
             decoder=decoder,
         )
 
-    def act(self, logits: chex.Array) -> chex.Array:
+    def act(self, logits: chex.Array) -> np.ndarray:
         """
         Samples agent actions from the policy logits predicted by the agent.
 
         Parameters
         ----------
-        logits : jax.Array
+        logits : chex.Array
             Policy logits with shape `(B, A)` or `(B, T, A)`
 
         Returns
         -------
-        actions : jax.Array
+        actions : np.Array
             Sampled actions `(B, 1)`
         """
+        logits = np.asarray(logits)
+
         # Handle both squeezed (B, A) and non-squeezed (B, T, A) inputs
         if logits.ndim == 3:
-            logits = jnp.squeeze(logits, axis=1)  # (B, 1, A) -> (B, A)
+            logits = logits.squeeze(axis=1)  # (B, 1, A) -> (B, A)
 
-        # Reset RNG key for sampling
-        self.key_actions, key_sample = jax.random.split(self.key_actions, 2)
+        def softmax(x: np.ndarray, axis: int = -1) -> np.ndarray:
+            e: np.ndarray = np.exp(x - np.max(x, axis=axis, keepdims=True))
+            return e / e.sum(axis=axis, keepdims=True)
 
         # Compute actions
-        actions = distrax.Softmax(logits).sample(seed=key_sample)
-        return jnp.expand_dims(actions, axis=-1)
+        probs = softmax(logits, axis=-1)
+        actions = np.array([np.random.choice(len(p), p=p) for p in probs])[:, None]
+
+        return actions.astype(np.int32)
 
     def get_params(self) -> nnx.State:
         """

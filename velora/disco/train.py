@@ -15,7 +15,6 @@
 
 import json
 import math
-import os
 import random
 import shutil
 import threading
@@ -524,21 +523,20 @@ class AgentTrainer:
             outputs = self._forward(obs_jax, hidden)
 
             # Env step
-            actions = self.policy_agent.act(np.asarray(outputs.preds.pi))
-            actions_np = np.asarray(actions, dtype=np.int32)
+            actions = self.policy_agent.act(outputs.preds.pi)
             next_obs, rewards, terminated, truncated, _ = self.envs.step(
-                actions_np.squeeze(-1)
+                actions.squeeze(axis=-1)
             )
 
-            discounts = jnp.where(
+            discounts = np.where(
                 terminated | truncated,
-                jnp.float32(0.0),
-                jnp.float32(1.0),
+                np.float32(0.0),
+                np.float32(1.0),
             )[:, None]
 
             # Store step data and episode stats
             buffer.write_step(
-                actions_np,
+                actions,
                 rewards[:, None],
                 np.asarray(discounts),
                 np.asarray(outputs.values),
@@ -688,7 +686,6 @@ class RuleTrainer:
     enabling `jax.vmap` to compute meta-gradients for an entire chunk in one batched
     accelerator call. A bounded thread pool collects rollouts concurrently,
     overlapping CPU environment stepping with accelerator gradient computation.
-
 
     Parameters
     ----------
@@ -1609,7 +1606,7 @@ class RuleTrainer:
                 self.console.update_progress("Meta Steps")
 
         except (KeyboardInterrupt, SystemExit):
-            os._exit(1)
+            exit()
 
         # Final cleanup
         self.save_checkpoint(force=True)
