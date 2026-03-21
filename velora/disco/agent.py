@@ -445,7 +445,10 @@ class PolicyAgent:
 
         # Compute actions
         probs = softmax(logits, axis=-1)
-        actions = np.array([np.random.choice(len(p), p=p) for p in probs])[:, None]
+        cumprobs = np.cumsum(probs, axis=-1)
+        cumprobs[:, -1] = 1.0  # Guarantee last bucket catches everything
+        u = np.random.uniform(size=(probs.shape[0], 1))
+        actions: np.ndarray = (u < cumprobs).argmax(axis=-1)[:, None]
 
         return actions.astype(np.int32)
 
