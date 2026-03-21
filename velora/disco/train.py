@@ -1326,9 +1326,9 @@ class RuleTrainer:
         """
         Collect rollouts from all trainers using a bounded thread pool.
 
-        Limits concurrent CPU work to `num_collection_workers` threads,
-        avoiding GIL contention from one-thread-per-trainer while still
-        overlapping CPU collection with accelerator gradient computation.
+        Forward passes run on the default accelerator (when available).
+        Limits concurrency to `num_collection_workers` threads to avoid
+        excessive GIL contention during JAX dispatch.
 
         Handles trainer resets inline — if a trainer has exhausted its
         lifetime budget, it is reset on the submitting thread before
@@ -1355,10 +1355,8 @@ class RuleTrainer:
                     self.reset_trainer(idx)
                     trainer = self.trainers[idx]
 
-            with jax.default_device(self._cpu):
-                tr = trainer.collect_stack(self.config.n_updates)
-                vr = trainer.collect_valid()
-
+            tr = trainer.collect_stack(self.config.n_updates)
+            vr = trainer.collect_valid()
             return tr, vr
 
         futures = [self._collection_pool.submit(_collect_one, idx) for idx in indices]
