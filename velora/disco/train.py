@@ -36,10 +36,15 @@ from velora.cli.disco.settings import DiscoParamsSettings
 from velora.cli.disco.simple import SimpleDashboard
 from velora.disco.agent import DiscoAgent, DiscoValueAgent, PolicyAgent
 from velora.disco.config.settings import AgentTrainerSettings, RuleTrainerSettings
-from velora.disco.config.state import AgentTrainerState, RuleTrainerState
+from velora.disco.config.state import (
+    AgentTrainerHiddenStates,
+    AgentTrainerState,
+    RuleTrainerState,
+)
 from velora.disco.ema import EMAState, MovingAverage
 from velora.disco.outputs import (
     AgentLossAux,
+    AgentTrainerOutput,
     LossStatistics,
     MetaGradOutput,
     MetaInnerStepCarry,
@@ -516,21 +521,10 @@ class AgentTrainer:
         # Trajectory collection
         for _ in range(seq_len):
             obs_jax = jnp.asarray(obs)
-
-            preds, h_policy = self.policy_agent(
-                obs_jax,
-                ocm_h_state=hidden.policy_ocm,
-                acm_h_state=hidden.policy_acm,
-            )
-            target_preds, h_target = self.target_agent(
-                obs_jax,
-                ocm_h_state=hidden.target_ocm,
-                acm_h_state=hidden.target_acm,
-            )
-            values, h_value = self.value_agent(obs_jax, h_state=hidden.value)
+            outputs = self._forward(obs_jax, hidden)
 
             # Env step
-            actions = self.policy_agent.act(np.asarray(preds.pi))
+            actions = self.policy_agent.act(np.asarray(outputs.preds.pi))
             actions_np = np.asarray(actions, dtype=np.int32)
             next_obs, rewards, terminated, truncated, _ = self.envs.step(
                 actions_np.squeeze(-1)
@@ -547,14 +541,14 @@ class AgentTrainer:
                 actions_np,
                 rewards[:, None],
                 np.asarray(discounts),
-                np.asarray(values),
-                preds,
-                target_preds,
+                np.asarray(outputs.values),
+                outputs.preds,
+                outputs.target_preds,
             )
             self.episode_tracker.record(rewards, terminated, truncated)
 
             # Update and reset hidden states on episode boundaries
-            hidden = hidden.update(h_policy, h_target, h_value)
+            hidden = hidden.update(outputs.h_policy, outputs.h_target, outputs.h_value)
             hidden = hidden.reset_on_done(discounts)
 
             obs = next_obs
@@ -562,6 +556,60 @@ class AgentTrainer:
         # Update trainer state
         self.state = self.state.update_hidden(hidden)
         self.state = self.state.update_obs(jnp.asarray(obs))
+
+    def _forward(
+        self,
+        obs: chex.Array,
+        hidden: AgentTrainerHiddenStates,
+    ) -> AgentTrainerOutput:
+        """
+        Run all three agent forward passes for a single collection step.
+
+        Computes a single shared encoder forward pass and reuses the
+        encoding across policy, target, and value agents — eliminating
+        two redundant CNN calls per step.
+
+        Parameters
+        ----------
+        obs : chex.Array
+            Observation array `(B, H, W, C)`, already on device
+        hidden : AgentTrainerHiddenStates
+            Current hidden states for all agents
+
+        Returns
+        -------
+        outputs : AgentTrainerForward
+            Agent trainer forward network predictions
+        """
+        # One encoder call shared across all three agents
+        encoding = self.policy_agent.encoder(obs)  # (B, T, F)
+
+        preds, h_policy = self.policy_agent(
+            obs,
+            encoding=encoding,
+            ocm_h_state=hidden.policy_ocm,
+            acm_h_state=hidden.policy_acm,
+        )
+        target_preds, h_target = self.target_agent(
+            obs,
+            encoding=encoding,
+            ocm_h_state=hidden.target_ocm,
+            acm_h_state=hidden.target_acm,
+        )
+        values, h_value = self.value_agent(
+            obs,
+            encoding=encoding,
+            h_state=hidden.value,
+        )
+
+        return AgentTrainerOutput(
+            preds=preds,
+            target_preds=target_preds,
+            values=values,
+            h_policy=h_policy,
+            h_target=h_target,
+            h_value=h_value,
+        )
 
     def collect_stack(self, n_rollouts: int) -> Rollout:
         """

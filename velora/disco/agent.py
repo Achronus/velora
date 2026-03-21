@@ -232,6 +232,7 @@ class PolicyAgent:
         ocm_h_state: Optional[chex.Array] = None,
         acm_h_state: Optional[chex.Array] = None,
         timespans: Optional[chex.Array] = None,
+        encoding: Optional[chex.Array] = None,
     ) -> Tuple[PolicyAgentOutput, PolicyAgentHiddenStates]:
         """
         Forward pass through the agent.
@@ -267,6 +268,10 @@ class PolicyAgent:
 
             - `seq_length (T)` the number of sequences (e.g., trajectories)
 
+        encoding : jax.Array (optional)
+            Pre-computed encoder features `(B, T, F)`. When provided,
+            skips the encoder forward pass. Default is `None`
+
         Returns
         -------
         preds : AgentOutput
@@ -274,9 +279,9 @@ class PolicyAgent:
         h_state : PolicyAgentHiddenStates
             An object of the agents hidden states
         """
-
-        # Process images
-        encoding = self.encoder(obs)  # (B, T, F)
+        # Reuse pre-computed encoding or compute fresh
+        if encoding is None:
+            encoding = self.encoder(obs)  # (B, T, F)
 
         # OCM forward - process observations and produce embeddings
         ocm_preds, ocm_h_state = self.ocm(
@@ -1063,6 +1068,7 @@ class DiscoValueAgent:
         *,
         h_state: Optional[chex.Array] = None,
         timespans: Optional[chex.Array] = None,
+        encoding: Optional[chex.Array] = None,
     ) -> Tuple[chex.Array, chex.Array]:
         """
         Forward pass through the agent.
@@ -1091,6 +1097,10 @@ class DiscoValueAgent:
 
             - `seq_length (T)` the number of sequences (e.g., trajectories)
 
+        encoding : jax.Array (optional)
+            Pre-computed encoder features `(B, T, F)`. When provided,
+            skips the encoder forward pass. Default is `None`
+
         Returns
         -------
         v : chex.Array
@@ -1098,12 +1108,13 @@ class DiscoValueAgent:
         h_state : chex.Array
             Updated hidden state. Shape: `(B, HS)`
         """
-        # Encode images -> (B, T, F)
-        features = self.encoder(obs)
+        # Reuse pre-computed encoding or compute fresh
+        if encoding is None:
+            encoding = self.encoder(obs)  # (B, T, F)
 
         # Compute state-value -> (B, T, 1)
         v, h_state = self.net(
-            features,
+            encoding,
             h_state=h_state,
             timespans=timespans,
         )

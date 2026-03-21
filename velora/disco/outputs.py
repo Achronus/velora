@@ -24,6 +24,7 @@ import optax
 from flax import struct
 
 from velora.disco.config.settings import LossCostSettings
+from velora.disco.config.state import PolicyAgentHiddenStates
 from velora.disco.ema import EMAState
 from velora.utils.transforms import squeeze_time
 
@@ -346,6 +347,35 @@ class ActionDecoderOutput:
     z: chex.Array
     aux_pi: chex.Array
     q: chex.Array
+
+
+@struct.dataclass
+class AgentTrainerOutput:
+    """
+    Outputs from a single collection step across all three agent networks.
+
+    Parameters
+    ----------
+    preds : PolicyAgentOutput
+        Policy agent predictions at `max_actions` dimension
+    target_preds : PolicyAgentOutput
+        Target agent predictions at `max_actions` dimension
+    values : chex.Array
+        State-value estimates `(B, 1)`
+    h_policy : PolicyAgentHiddenStates
+        Updated policy agent hidden states (OCM + ACM)
+    h_target : PolicyAgentHiddenStates
+        Updated target agent hidden states (OCM + ACM)
+    h_value : chex.Array
+        Updated value agent hidden state `(B, H)`
+    """
+
+    preds: PolicyAgentOutput
+    target_preds: PolicyAgentOutput
+    values: chex.Array
+    h_policy: PolicyAgentHiddenStates
+    h_target: PolicyAgentHiddenStates
+    h_value: chex.Array
 
 
 @struct.dataclass
