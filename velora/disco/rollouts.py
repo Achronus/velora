@@ -218,75 +218,46 @@ class Rollout:
         )
 
 
-class RolloutBuffer:
+class PoolRolloutBuffer:
     """
-    Pre-allocated CPU buffer for a stack of `N` rollouts.
+    Batched rollout buffer for all trainers in a `TrainerPool`.
 
-    All step data is written into fixed-size numpy arrays on the CPU.
-    A single `to_rollout()` call transfers the completed buffer to JAX
-    in one operation.
+    Stores experience for all trainers in a single pre-allocated numpy
+    array with shape `(P, N, B, T, ...)`, where `P` is the number of
+    trainers.
 
-    The buffer is circular and reused across meta-steps.
+    Supports batched writes (one `write_step_batched` call per
+    collection step for all trainers simultaneously) and chunk-based
+    reads (`get_chunk` slices and transfers a trainer range directly
+    to GPU for the vmapped gradient function).
 
     Parameters
     ----------
+    num_trainers : int
+        Number of trainers in the pool (`P`)
     n_rollouts : int
-        Number of rollouts to collect per `collect_stack` call (`N`).
-        Corresponds to `config.n_updates`.
+        Number of rollouts per collection phase (`N`).
+        Training uses `n_updates`, validation uses `1`
     n_envs : int
-        Number of parallel vectorised environments (`B`).
-        Corresponds to `config.num_vec_envs`.
+        Number of vectorized environments per trainer (`B`)
     seq_len : int
-        Trajectory length per rollout in timesteps (`T`).
-        Corresponds to `config.seq_len`.
+        Number of timesteps per rollout (`T`)
     n_actions : int
-        Size of the discrete action space. Used to allocate `pi`,
-        `aux_pi`, and `q` arrays.
+        Maximum action space size across all environments
     encoding_dim : int
-        Dimensionality of the CNN encoding output. Shared between
-        `preds` and `target_preds`.
+        Dimensionality of the CNN encoder output
     prediction_dim : int
-        Dimensionality of the observation-conditioned prediction vector
-        `y` and the action-conditioned prediction vector `z`.
+        Dimensionality of `y` and `z` prediction vectors
     q_dim : int
-        Number of bins in the distributional action-value head `q`.
-        Set to `n_actions` for a standard scalar Q head.
+        Number of bins in the distributional Q-value head
     use_bfloat16 : bool (optional)
-        Flag to set all floating-point arrays in the returned `Rollout` to `bfloat16` on GPU transfer. Halves VRAM usage for rollout
-        buffers with negligible effect on training quality. `actions` remain
-        `int32`. Default is `True`
-
-    Attributes
-    ----------
-    actions : np.ndarray
-        int32 `(N, B, T, 1)` — Actions taken at each step.
-    rewards : np.ndarray
-        float32 `(N, B, T, 1)` — Rewards received at each step.
-    discounts : np.ndarray
-        float32 `(N, B, T, 1)` — Episode continuation mask.
-        `1.0` = episode continues, `0.0` = episode ended.
-    values : np.ndarray
-        float32 `(N, B, T, 1)` — State-value estimates.
-
-    Policy prediction fields (prefix `p_`):
-        p_encoding : np.ndarray  float32 `(N, B, T, encoding_dim)`
-        p_pi       : np.ndarray  float32 `(N, B, T, n_actions)`
-        p_y        : np.ndarray  float32 `(N, B, T, prediction_dim)`
-        p_z        : np.ndarray  float32 `(N, B, T, prediction_dim)`
-        p_aux_pi   : np.ndarray  float32 `(N, B, T, n_actions, n_actions)`
-        p_q        : np.ndarray  float32 `(N, B, T, n_actions, q_dim)`
-
-    Target prediction fields (prefix `t_`):
-        t_encoding : np.ndarray  float32 `(N, B, T, encoding_dim)`
-        t_pi       : np.ndarray  float32 `(N, B, T, n_actions)`
-        t_y        : np.ndarray  float32 `(N, B, T, prediction_dim)`
-        t_z        : np.ndarray  float32 `(N, B, T, prediction_dim)`
-        t_aux_pi   : np.ndarray  float32 `(N, B, T, n_actions, n_actions)`
-        t_q        : np.ndarray  float32 `(N, B, T, n_actions, q_dim)`
+        Cast floating-point arrays to `bfloat16` on GPU transfer.
+        Default is `True`
     """
 
     def __init__(
         self,
+        num_trainers: int,
         n_rollouts: int,
         n_envs: int,
         seq_len: int,
@@ -294,12 +265,16 @@ class RolloutBuffer:
         encoding_dim: int,
         prediction_dim: int,
         q_dim: int,
+        *,
         use_bfloat16: bool = True,
-    ):
-        shape = (n_rollouts, n_envs, seq_len)  # (N, B, T)
+    ) -> None:
+        self._num_trainers = num_trainers
+        self._n_rollouts = n_rollouts
         self._use_bfloat16 = use_bfloat16
 
-        # Core
+        shape = (num_trainers, n_rollouts, n_envs, seq_len)  # (P, N, B, T)
+
+        # Core arrays
         self.actions = np.zeros((*shape, 1), dtype=np.int32)
         self.rewards = np.zeros((*shape, 1), dtype=np.float32)
         self.discounts = np.zeros((*shape, 1), dtype=np.float32)
@@ -321,12 +296,11 @@ class RolloutBuffer:
         self.t_aux_pi = np.zeros((*shape, n_actions, n_actions), dtype=np.float32)
         self.t_q = np.zeros((*shape, n_actions, q_dim), dtype=np.float32)
 
-        # Indexing
-        self._n_rollouts = n_rollouts
+        # Write indices
         self._rollout_idx = 0
         self._step_idx = 0
 
-    def write_step(
+    def write_step_batched(
         self,
         actions: np.ndarray,
         rewards: np.ndarray,
@@ -334,136 +308,111 @@ class RolloutBuffer:
         values: np.ndarray,
         preds: PolicyAgentOutput,
         target_preds: PolicyAgentOutput,
-    ):
+    ) -> None:
         """
-        Write a single environment step into the buffer.
+        Write one timestep for ALL trainers simultaneously.
 
-        Uses `np.copyto` throughout to write into pre-allocated memory
-        without creating any new numpy or JAX arrays.
+        All inputs have a leading `(P, ...)` dimension. Uses
+        `np.copyto` into pre-allocated memory — zero allocations.
 
         Parameters
         ----------
         actions : np.ndarray
-            int32 `(B, 1)` — Actions taken by the policy.
+            `(P, B, 1)` int32
         rewards : np.ndarray
-            float32 `(B, 1)` — Rewards returned by the environment.
+            `(P, B, 1)` float32
         discounts : np.ndarray
-            float32 `(B, 1)` — Episode continuation mask from the
-            environment. `1.0` = continues, `0.0` = ended.
+            `(P, B, 1)` float32
         values : np.ndarray
-            float32 `(B, 1)` — State-value estimates from the value
-            network.
+            `(P, B, 1)` float32
         preds : PolicyAgentOutput
-            Predictions from the live policy agent at this step.
-            Expected fields: `encoding`, `pi`, `y`, `z`,
-            `aux_pi`, `q`.
+            Policy predictions with fields `(P, B, ...)` as numpy
         target_preds : PolicyAgentOutput
-            Predictions from the target agent at this step.
-            Same fields as `preds`.
-
-        Raises
-        ------
-        IndexError
-            If called after the buffer is full (i.e., after
-            ``n_rollouts`` calls to ``next_rollout()``).
+            Target predictions with fields `(P, B, ...)` as numpy
         """
         n = self._rollout_idx
         t = self._step_idx
 
-        if n >= self._n_rollouts:
-            raise IndexError(
-                f"Buffer is full. Called write_step() after {self._n_rollouts} "
-                "rollouts. Call to_rollout() and recreate the buffer."
-            )
-
-        p = preds.to_numpy()
-        tp = target_preds.to_numpy()
-
-        # Broadcast incoming (B, 1) or (1,) to match buffer slice (B, 1)
-        target_shape = self.actions[n, :, t].shape  # (B, 1)
-        actions = np.broadcast_to(actions, target_shape)
-        rewards = np.broadcast_to(rewards, target_shape)
-        discounts = np.broadcast_to(discounts, target_shape)
-        values = np.broadcast_to(values, target_shape)
-
         # Core
-        np.copyto(self.actions[n, :, t], actions)
-        np.copyto(self.rewards[n, :, t], rewards)
-        np.copyto(self.discounts[n, :, t], discounts)
-        np.copyto(self.values[n, :, t], values)
+        np.copyto(self.actions[:, n, :, t], actions)
+        np.copyto(self.rewards[:, n, :, t], rewards)
+        np.copyto(self.discounts[:, n, :, t], discounts)
+        np.copyto(self.values[:, n, :, t], values)
 
         # Policy preds
-        np.copyto(self.p_encoding[n, :, t], p.encoding)
-        np.copyto(self.p_pi[n, :, t], p.pi)
-        np.copyto(self.p_y[n, :, t], p.y)
-        np.copyto(self.p_z[n, :, t], p.z)
-        np.copyto(self.p_aux_pi[n, :, t], p.aux_pi)
-        np.copyto(self.p_q[n, :, t], p.q)
+        np.copyto(self.p_encoding[:, n, :, t], preds.encoding)
+        np.copyto(self.p_pi[:, n, :, t], preds.pi)
+        np.copyto(self.p_y[:, n, :, t], preds.y)
+        np.copyto(self.p_z[:, n, :, t], preds.z)
+        np.copyto(self.p_aux_pi[:, n, :, t], preds.aux_pi)
+        np.copyto(self.p_q[:, n, :, t], preds.q)
 
         # Target preds
-        np.copyto(self.t_encoding[n, :, t], tp.encoding)
-        np.copyto(self.t_pi[n, :, t], tp.pi)
-        np.copyto(self.t_y[n, :, t], tp.y)
-        np.copyto(self.t_z[n, :, t], tp.z)
-        np.copyto(self.t_aux_pi[n, :, t], tp.aux_pi)
-        np.copyto(self.t_q[n, :, t], tp.q)
+        np.copyto(self.t_encoding[:, n, :, t], target_preds.encoding)
+        np.copyto(self.t_pi[:, n, :, t], target_preds.pi)
+        np.copyto(self.t_y[:, n, :, t], target_preds.y)
+        np.copyto(self.t_z[:, n, :, t], target_preds.z)
+        np.copyto(self.t_aux_pi[:, n, :, t], target_preds.aux_pi)
+        np.copyto(self.t_q[:, n, :, t], target_preds.q)
 
         self._step_idx += 1
 
-    def next_rollout(self):
-        """
-        Advance the write-head to the next rollout slot.
-
-        Resets the step index to zero and increments the rollout index.
-        Must be called once after every `seq_len` call to
-        `write_step()`.
-
-        Note
-        ----
-        This does **not** clear the buffer. Old data in the next slot
-        will be overwritten naturally by subsequent `write_step()`
-        calls before `to_rollout()` reads it.
-        """
+    def next_rollout(self) -> None:
+        """Advance all trainers to the next rollout slot."""
         self._rollout_idx += 1
         self._step_idx = 0
 
-    def to_rollout(self) -> Rollout:
+    def reset_head(self) -> None:
+        """Reset write indices for the next collection phase."""
+        self._rollout_idx = 0
+        self._step_idx = 0
+
+    def get_chunk(self, start: int, end: int, squeeze_n: bool = False) -> Rollout:
         """
-        Transfer the completed buffer to JAX and return a stacked
-        `Rollout`.
+        Slice trainers `[start:end]` and transfer to accelerator as a `Rollout`.
+
+        Directly creates stacked JAX arrays from the numpy buffer — no
+        intermediate `stack_pytrees` call needed. Applies `bfloat16`
+        conversion if enabled.
+
+        Parameters
+        ----------
+        start : int
+            First trainer index (inclusive)
+        end : int
+            Last trainer index (exclusive)
+        squeeze_n : bool (optional)
+            Remove the rollout dimension `N` from the output, converting
+            `(C, N, B, T, ...)` to `(C, B, T, ...)`. Used for
+            validation buffers where `N=1`. Default is `False`
 
         Returns
         -------
         rollout : Rollout
-            Stacked rollout with shape `(N, B, T, ...)` on the default
-            JAX device (GPU when available, CPU otherwise).
-
-        Note
-        ----
-        The buffer's numpy arrays are not freed after this call — they
-        are reused on the next iteration. This is intentional: the
-        allocation cost is paid once at construction time.
+            Stacked rollout `(chunk_size, N, B, T, ...)` on GPU
         """
+        s = slice(start, end)
+
         rollout = Rollout(
-            actions=jnp.asarray(self.actions),
-            rewards=jnp.asarray(self.rewards),
-            discounts=jnp.asarray(self.discounts),
-            values=jnp.asarray(self.values),
-            preds=PolicyAgentOutput.from_numpy(
-                self.p_encoding,
-                self.p_pi,
-                self.p_y,
-                self.p_z,
-                self.p_aux_pi,
-                self.p_q,
+            actions=jnp.asarray(self.actions[s]),
+            rewards=jnp.asarray(self.rewards[s]),
+            discounts=jnp.asarray(self.discounts[s]),
+            values=jnp.asarray(self.values[s]),
+            preds=PolicyAgentOutput(
+                encoding=jnp.asarray(self.p_encoding[s]),
+                pi=jnp.asarray(self.p_pi[s]),
+                y=jnp.asarray(self.p_y[s]),
+                z=jnp.asarray(self.p_z[s]),
+                aux_pi=jnp.asarray(self.p_aux_pi[s]),
+                q=jnp.asarray(self.p_q[s]),
             ),
-            target_preds=PolicyAgentOutput.from_numpy(
-                self.t_encoding,
-                self.t_pi,
-                self.t_y,
-                self.t_z,
-                self.t_aux_pi,
-                self.t_q,
+            target_preds=PolicyAgentOutput(
+                encoding=jnp.asarray(self.t_encoding[s]),
+                pi=jnp.asarray(self.t_pi[s]),
+                y=jnp.asarray(self.t_y[s]),
+                z=jnp.asarray(self.t_z[s]),
+                aux_pi=jnp.asarray(self.t_aux_pi[s]),
+                q=jnp.asarray(self.t_q[s]),
             ),
         )
 
@@ -477,23 +426,35 @@ class RolloutBuffer:
                 rollout,
             )
 
-        # Reset write-head for the next collect_stack call
-        self._rollout_idx = 0
-        self._step_idx = 0
+        if squeeze_n:
+            rollout = jax.tree.map(lambda x: x[:, 0], rollout)
 
         return rollout
 
+    def get_single(self, trainer_idx: int) -> Rollout:
+        """
+        Get a single trainer's rollout and transfer to accelerator.
+
+        Parameters
+        ----------
+        trainer_idx : int
+            Trainer index
+
+        Returns
+        -------
+        rollout : Rollout
+            Single trainer rollout `(N, B, T, ...)` on accelerator
+        """
+        return self.get_chunk(trainer_idx, trainer_idx + 1)
+
     def memory_mb(self) -> float:
         """
-        Return the total size of all pre-allocated numpy arrays in MB.
-
-        Useful for logging at construction time to confirm the buffer
-        footprint before training begins.
+        Total size of all pre-allocated numpy arrays in MB.
 
         Returns
         -------
         size_mb : float
-            Combined size of all numpy buffers in megabytes.
+            Combined size of all numpy buffers in megabytes
         """
         arrays = [
             self.actions,
@@ -516,20 +477,12 @@ class RolloutBuffer:
         return sum(a.nbytes for a in arrays) / 1e6
 
     def __repr__(self) -> str:
-        n, b, t = (
-            self._n_rollouts,
-            self.actions.shape[1],
-            self.actions.shape[2],
-        )
+        P, N, B, T = self.actions.shape[:4]
+
         return (
-            f"RolloutBuffer("
-            f"n_rollouts={n}, n_envs={b}, seq_len={t}, "
-            f"rollout={self._rollout_idx}/{n}, step={self._step_idx}, "
+            f"MegaRolloutBuffer("
+            f"trainers={P}, n_rollouts={N}, n_envs={B}, seq_len={T}, "
+            f"rollout={self._rollout_idx}/{N}, step={self._step_idx}, "
             f"memory={self.memory_mb():.1f}MB"
             f")"
         )
-
-    def to_rollout_zeros(self) -> Rollout:
-        """Return a zero-filled Rollout with correct shapes for JIT warmup."""
-        dummy = self.to_rollout()
-        return jax.tree.map(jnp.zeros_like, dummy)

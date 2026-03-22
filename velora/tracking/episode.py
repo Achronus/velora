@@ -75,7 +75,7 @@ class EpisodeTracker:
         if done.any():
             for i in np.where(done)[0]:
                 r = float(self._current_returns[i])
-                l = int(self._current_lengths[i])
+                l = int(self._current_lengths[i])  # noqa: E741
 
                 self.completed_returns += (r,)
                 self.completed_lengths += (l,)

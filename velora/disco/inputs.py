@@ -22,41 +22,47 @@ from velora.disco.ema import EMAState
 from velora.disco.rollouts import Rollout
 
 
-class MetaLossFnInputs(NamedTuple):
+class GradChunkInputs(NamedTuple):
     """
-    Non-differentiated inputs for the JIT-compiled meta-loss function.
+    Sliced inputs for a single chunk of the vmapped gradient function.
+
+    All fields have a leading chunk dimension `(C, ...)` where
+    `C = end - start` trainers.
 
     Parameters
     ----------
-    policy_params : optax.Params
-        Policy agent parameters
-    value_params : optax.Params
-        Value agent parameters
+    p_params : optax.Params
+        Policy network parameters
+    v_params : optax.Params
+        Value network parameters
     disco_h : chex.Array
-        Disco network hidden state
+        Disco network hidden states `(C, B, H)`
     meta_h : chex.Array
-        Meta LNN hidden state
-    p_opt_state : optax.OptState
-        Policy optimizer state
-    v_opt_state : optax.OptState
-        Value optimizer state
+        Meta-LNN hidden states `(C, B, H)`
+    p_opt : optax.OptState
+        Policy optimizer states
+    v_opt : optax.OptState
+        Value optimizer states
     adv_ema : EMAState
-        Advantage EMA state
+        Advantage EMA states
     td_ema : EMAState
-        TD-error EMA state
-    train_rollouts : Rollout
-        Training rollouts for the inner loop
+        TD-error EMA states
+    train_rollout : Rollout
+        Training rollouts `(C, N, B, T, ...)`
     valid_rollout : Rollout
-        Validation rollout for the meta-loss
+        Validation rollouts `(C, 1, B, T, ...)`
+    action_masks : chex.Array
+        Action masks `(C, max_actions)`
     """
 
-    policy_params: optax.Params
-    value_params: optax.Params
+    p_params: optax.Params
+    v_params: optax.Params
     disco_h: chex.Array
     meta_h: chex.Array
-    p_opt_state: optax.OptState
-    v_opt_state: optax.OptState
+    p_opt: optax.OptState
+    v_opt: optax.OptState
     adv_ema: EMAState
     td_ema: EMAState
-    train_rollouts: Rollout
+    train_rollout: Rollout
     valid_rollout: Rollout
+    action_masks: chex.Array

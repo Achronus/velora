@@ -24,7 +24,6 @@ import chex
 import gymnasium as gym
 import jax
 import jax.numpy as jnp
-import numpy as np
 import optax
 import orbax.checkpoint as ocp
 
@@ -40,8 +39,6 @@ from velora.disco.config.state import (
 )
 from velora.disco.ema import EMAState, MovingAverage
 from velora.disco.outputs import (
-    AgentLossAux,
-    AgentTrainerOutput,
     HiddenShapeCache,
     LossStatistics,
     MetaGradOutput,
@@ -50,7 +47,8 @@ from velora.disco.outputs import (
     MetaStepStats,
     ValueOutputs,
 )
-from velora.disco.rollouts import Rollout, RolloutBuffer
+from velora.disco.pool import TrainerPool
+from velora.disco.rollouts import Rollout
 from velora.disco.utils.budget import sample_budget
 from velora.disco.utils.compute import compute_value_outputs
 from velora.disco.utils.loss import (
@@ -67,20 +65,17 @@ from velora.tracking.logger import MetricsLogger
 from velora.tracking.manager import CheckpointManager
 from velora.utils.config import dump_config, load_config
 from velora.utils.format import cache_status
-from velora.utils.transforms import squeeze_time, stack_pytrees, unstack_pytree
+from velora.utils.transforms import squeeze_time, unstack_pytree
 
 
 class AgentTrainer:
     """
-    Trains a single `PolicyAgent` in a single environment using a learned update rule.
+    Factory for a single agent training slot in the `TrainerPool`.
 
-    `AgentTrainer` handles the inner loop of target rule learning (DiscoRL): collecting trajectories, generating targets via the target agent, and
-    updating the `PolicyAgent` to minimize prediction error against those targets.
-
-    This class is designed to be instantiated multiple times by `RuleTrainer`,
-    with each instance training an agent in a different environment. During
-    meta-training, it exposes differentiable update steps that allow gradients
-    to flow back through the agent's learning process.
+    Creates `PolicyAgent`, `DiscoValueAgent`, environments, and
+    optimizer states. After construction, `TrainerPool` extracts
+    the agents, params, and state — this class serves as an initializer
+    and is recreated on trainer resets.
 
     Lifetime
     ---------
@@ -100,26 +95,15 @@ class AgentTrainer:
         Configuration for individual agent training
     key : chex.PRNGKey
         Random number generator key
-    logger : MetricsLogger
-        The Tensorboard metrics logger for metric tracking
-    writer_name : str
-        The name of the metrics logger writer to use
     make_fn : MakeFn
         Factory function to create the environment
     budget_rng : random.Random
-        Python RNG used to sample the initial step budget. Passed in from
-        `RuleTrainer` so all trainers share a single seeded RNG, keeping
-        budget draws reproducible
+        Python RNG used to sample the initial step budget
     max_actions : int
         Maximum number of discrete actions across all environments in the
         training set
     jit_compile : bool (optional)
         Flag to enable/disable JIT compilation. Default is `False`
-    use_bfloat16 : bool (optional)
-        Flag to set all floating-point arrays in the returned `Rollout` to
-        `bfloat16` on GPU transfer. Halves VRAM usage for rollout buffers with
-        negligible effect on training quality. `actions` remain `int32`.
-        Default is `True`
     """
 
     def __init__(
@@ -128,23 +112,17 @@ class AgentTrainer:
         config: AgentTrainerSettings,
         *,
         key: chex.PRNGKey,
-        logger: MetricsLogger,
-        writer_name: str,
         make_fn: MakeFn,
         budget_rng: random.Random,
         max_actions: int,
         jit_compile: bool = False,
-        use_bfloat16: bool = True,
     ) -> None:
         self.config = config
         self.env_name = env_name
 
         self.envs = make_fn(self.env_name, self.config.batch_size)
 
-        self.logger = logger
-        self.writer_name = writer_name
         self.jit_compile = jit_compile
-        self.use_bfloat16 = use_bfloat16
         self.max_actions = max_actions
 
         self.action_space: gym.spaces.Discrete = self.envs.single_action_space  # type: ignore
@@ -205,35 +183,6 @@ class AgentTrainer:
         self.episode_tracker = EpisodeTracker(self.config.batch_size)
         self._collection_step = 0
 
-        # Pre-allocated buffers
-        self.train_buffer = RolloutBuffer(
-            n_rollouts=self.config.n_updates,
-            n_envs=self.config.batch_size,
-            seq_len=self.config.seq_len,
-            n_actions=self.max_actions,
-            encoding_dim=self.policy_agent.encoding_dim,
-            prediction_dim=self.config.agent.prediction_size,
-            q_dim=self.config.agent.q_size,
-            use_bfloat16=self.use_bfloat16,
-        )
-        self.valid_buffer = RolloutBuffer(
-            n_rollouts=1,
-            n_envs=self.config.batch_size,
-            seq_len=self.config.seq_len * 2,
-            n_actions=self.max_actions,
-            encoding_dim=self.policy_agent.encoding_dim,
-            prediction_dim=self.config.agent.prediction_size,
-            q_dim=self.config.agent.q_size,
-            use_bfloat16=self.use_bfloat16,
-        )
-
-    @property
-    def needs_reset(self) -> bool:
-        """
-        Check whether this trainer has exhausted its lifetime budget.
-        """
-        return self._env_steps >= self._step_budget
-
     def _create_optim(self) -> optax.GradientTransformation:
         """
         Create optimizer chain for agent and value network training.
@@ -288,138 +237,19 @@ class AgentTrainer:
             (self.config.batch_size, *self.obs_space.shape),
             dtype=self.obs_space.dtype,
         )
-        _ = self.policy_agent(dummy_obs)
-        _ = self.target_agent(dummy_obs)
-        _ = self.value_agent(dummy_obs)
+        _, h_policy = self.policy_agent(dummy_obs)
+        _, h_target = self.target_agent(dummy_obs)
+        _, h_value = self.value_agent(dummy_obs)
 
-    def log(self, metrics: Dict[str, float], *, idx: int | None = None) -> None:
-        """
-        Log metrics to `MetricsLogger` if logger is available.
-
-        Parameters
-        ----------
-        metrics : Dict[str, float]
-            Mapping of metric names to scalar values
-        idx : int (optional)
-            Step index. Default is `None`
-        """
-        if self.logger:
-            idx = idx if idx is not None else self.state.steps_trained
-            self.logger.log(self.writer_name, idx, metrics)
-
-    def update_value(
-        self,
-        rollout: Rollout,
-        *,
-        value_params: optax.Params | None = None,
-        value_opt_state: optax.OptState | None = None,
-        adv_ema: EMAState | None = None,
-        td_ema: EMAState | None = None,
-    ) -> Tuple[ValueOutputs, optax.Params, optax.OptState]:
-        """
-        Update value network and return the new parameters and optimizer state.
-
-        Can be used functionally with explicit `value_params` and `value_opt_state`.
-
-        Parameters
-        ----------
-        rollout : Rollout
-            Trajectory to compute value targets on
-        value_params : optax.Params (optional)
-            Value agent parameters for functional use. Default is `None`
-        value_opt_state : optax.OptState (optional)
-            Value agent optimizer state for functional use. Default is `None`
-        adv_ema : chex.Array (optional)
-            Advantage EMA state. When provided (functional mode), this value is
-            used instead of reading from `self.state`, preventing it from being
-            embedded as a constant in a JAX trace. Default is `None`
-        td_ema : chex.Array (optional)
-            TD-error EMA state. Same semantics as `adv_ema`. Default is `None`
-
-        Returns
-        -------
-        values_outs : ValueOutputs
-            Value function outputs
-        value_params : optax.Param
-            Updated value agent parameters
-        value_opt_state : optax.OptState
-            Updated value agent optimizer state
-
-        Raises
-        ------
-        func_mode_error : ValueError
-            Invalid parameters passed for functional mode
-        """
-        functional = value_params is not None
-
-        if (value_params is None) != (value_opt_state is None):
-            raise ValueError(
-                f"'functional' mode enabled. Requires 'value_params' and 'value_opt_state' values.\nGot: {value_params=}, {value_opt_state=}"
+        self.state = self.state.update_hidden(
+            AgentTrainerHiddenStates(
+                policy_ocm=h_policy.ocm,
+                policy_acm=h_policy.acm,
+                target_ocm=h_target.ocm,
+                target_acm=h_target.acm,
+                value=h_value,
             )
-
-        params = value_params if functional else self.value_agent.get_params()
-        opt_state = (
-            value_opt_state
-            if value_opt_state is not None
-            else self.state.value_opt_state
         )
-        adv_ema = adv_ema if adv_ema is not None else self.state.adv_ema
-        td_ema = td_ema if td_ema is not None else self.state.td_ema
-
-        def loss_fn(p, r, adv, td) -> Tuple[chex.Array, AgentLossAux]:
-            """Compute value loss."""
-            value_outs, new_adv_ema, new_td_ema = compute_value_outputs(
-                r,
-                self.ema_utils,
-                adv,
-                td,
-                self.config.value.gamma,
-                self.config.value.td_lambda,
-            )
-            net_out = value_outs.value[:-1]  # type: ignore
-
-            # Value loss from normalized TD
-            # loss = 0.5 * (value - stop_grad[value + TD])^2
-            value_target = jax.lax.stop_gradient(net_out + value_outs.normalized_td)
-            value_loss = (
-                self.config.loss_costs.value
-                * 0.5
-                * jnp.square(net_out - value_target).mean()
-            )
-
-            aux = AgentLossAux(
-                value_outs=value_outs,
-                adv_ema=new_adv_ema,
-                td_ema=new_td_ema,
-            )
-            return value_loss, aux
-
-        # Compute gradients
-        (v_loss, aux), grads = fwdrev_value_and_grad(loss_fn, has_aux=True)(
-            params, rollout, adv_ema, td_ema
-        )
-
-        # Apply optimizer
-        updates, new_opt_state = self.value_optim.update(grads, opt_state, params)
-        new_params = optax.apply_updates(params, updates)
-
-        # Update state
-        aux: AgentLossAux = aux
-
-        if not functional:
-            self.value_agent.update_params(new_params)  # type: ignore
-            self.state = self.state.update_value_opt(new_opt_state)
-            self.state = self.state.update_ema(aux.adv_ema, aux.td_ema)
-
-            # Log metrics
-            metrics = {
-                "value/loss": v_loss,
-                **aux.value_outs.to_metrics(),
-                "value/grad_norm": optax.global_norm(grads),
-            }
-            self.log(metrics)
-
-        return aux.value_outs, new_params, new_opt_state
 
     def compute_value_outs(
         self,
@@ -457,216 +287,6 @@ class AgentTrainer:
             self.config.value.td_lambda,
         )
 
-    def get_vmap_inputs(
-        self,
-    ) -> Tuple[
-        optax.Params,
-        optax.Params,
-        optax.OptState,
-        optax.OptState,
-        EMAState,
-        EMAState,
-    ]:
-        """
-        Return the trainer's current state as a flat tuple of pytress,
-        read for stacking across a chunk with `vmap`.
-
-        Returns
-        -------
-        p_params : optax.Params
-            Policy network parameters
-        v_params : optax.Params
-            Value network parameters
-        p_opt_state : optax.OptState
-            Policy optimizer state
-        v_opt_state : optax.OptState
-            Value optimizer state
-        adv_ema : EMAState
-            Advantage EMA state
-        td_ema : EMAState
-            TD-error EMA state
-        """
-        return (
-            self.policy_agent.get_params(),
-            self.value_agent.get_params(),
-            self.state.policy_opt_state,
-            self.state.value_opt_state,
-            self.state.adv_ema,
-            self.state.td_ema,
-        )
-
-    def _add_to_buffer(self, buffer: RolloutBuffer, seq_len: int) -> None:
-        """
-        Collects a trajectory by interacting with the environment and writes
-        it into the `buffer`.
-
-        Parameters
-        ----------
-        buffer : RolloutBuffer
-            Pre-allocated buffer to write into
-        seq_len : int
-            Number of environment steps to collect. Must match the `T`
-            dimension the buffer was constructed with
-
-        Returns
-        -------
-        rollout : Rollout
-            Fresh trajectory of experience
-        """
-        obs = self.state.current_obs
-        hidden = self.state.hidden
-
-        # Trajectory collection
-        for _ in range(seq_len):
-            obs_jax = jnp.asarray(obs)
-            outputs = self._forward(obs_jax, hidden)
-
-            # Env step
-            actions = self.policy_agent.act(outputs.preds.pi)
-            next_obs, rewards, terminated, truncated, _ = self.envs.step(
-                actions.squeeze(axis=-1)
-            )
-
-            discounts = np.where(
-                terminated | truncated,
-                np.float32(0.0),
-                np.float32(1.0),
-            )[:, None]
-
-            # Store step data and episode stats
-            buffer.write_step(
-                actions,
-                rewards[:, None],
-                np.asarray(discounts),
-                np.asarray(outputs.values),
-                outputs.preds,
-                outputs.target_preds,
-            )
-            self.episode_tracker.record(rewards, terminated, truncated)
-
-            # Update and reset hidden states on episode boundaries
-            hidden = hidden.update(outputs.h_policy, outputs.h_target, outputs.h_value)
-            hidden = hidden.reset_on_done(discounts)
-
-            obs = next_obs
-
-        # Update trainer state
-        self.state = self.state.update_hidden(hidden)
-        self.state = self.state.update_obs(jnp.asarray(obs))
-
-    def _forward(
-        self,
-        obs: chex.Array,
-        hidden: AgentTrainerHiddenStates,
-    ) -> AgentTrainerOutput:
-        """
-        Run all three agent forward passes for a single collection step.
-
-        Computes a single shared encoder forward pass and reuses the
-        encoding across policy, target, and value agents — eliminating
-        two redundant CNN calls per step.
-
-        Parameters
-        ----------
-        obs : chex.Array
-            Observation array `(B, H, W, C)`, already on device
-        hidden : AgentTrainerHiddenStates
-            Current hidden states for all agents
-
-        Returns
-        -------
-        outputs : AgentTrainerForward
-            Agent trainer forward network predictions
-        """
-        # One encoder call shared across all three agents
-        encoding = self.policy_agent.encoder(obs)  # (B, T, F)
-
-        preds, h_policy = self.policy_agent(
-            obs,
-            encoding=encoding,
-            ocm_h_state=hidden.policy_ocm,
-            acm_h_state=hidden.policy_acm,
-        )
-        target_preds, h_target = self.target_agent(
-            obs,
-            encoding=encoding,
-            ocm_h_state=hidden.target_ocm,
-            acm_h_state=hidden.target_acm,
-        )
-        values, h_value = self.value_agent(
-            obs,
-            encoding=encoding,
-            h_state=hidden.value,
-        )
-
-        return AgentTrainerOutput(
-            preds=preds,
-            target_preds=target_preds,
-            values=values,
-            h_policy=h_policy,
-            h_target=h_target,
-            h_value=h_value,
-        )
-
-    def collect_stack(self, n_rollouts: int) -> Rollout:
-        """
-        Collect a stack of `N` rollout training trajectories.
-
-        Writes each rollout directly into `train_buffer` and returns a single
-        stacked `Rollout` with shape `(N, B, T, ...)`.
-
-        Parameters
-        ----------
-        n_rollouts : int
-            Number of rollouts to collect. Must match the `n_rollouts`
-            dimension in the `train_buffer`
-
-        Returns
-        -------
-        stack : Rollout
-            Stacked rollouts with shape `(N, B, T, ...)`.
-            All arrays are Jax arrays loaded onto the default device
-        """
-        self.episode_tracker.reset()
-
-        for _ in range(n_rollouts):
-            self._add_to_buffer(self.train_buffer, self.config.seq_len)
-            self.train_buffer.next_rollout()
-
-        rollout = self.train_buffer.to_rollout()
-
-        # Accumulate training environment steps for lifetime tracking
-        self._env_steps += n_rollouts * self.config.seq_len
-
-        # Log episodic metrics and store rewards
-        if metrics := self.episode_tracker.metrics():
-            self.log(metrics, idx=self._collection_step)
-
-        self._collection_step += 1
-        return rollout
-
-    def collect_valid(self) -> Rollout:
-        """
-        Collect a single validation trajectory using the `valid_buffer`.
-
-        Returns
-        -------
-        rollout : Rollout
-            Single rollout with shape `(1, seq_len * 2, ...)`.
-            All arrays are JAX arrays loaded onto the default device
-        """
-        self._add_to_buffer(self.valid_buffer, self.config.seq_len * 2)
-        self.valid_buffer.next_rollout()
-        return self.valid_buffer.to_rollout()[0]
-
-    def ep_return(self) -> float:
-        """Windowed mean episodic return."""
-        return self.episode_tracker.windowed_mean_return
-
-    def ep_length(self) -> float:
-        """Windowed mean episode length."""
-        return self.episode_tracker.windowed_mean_length
-
     def close(self) -> None:
         """Clean up resources."""
         self.envs.close()
@@ -683,8 +303,10 @@ class RuleTrainer:
 
     All trainers produce identically-shaped outputs (action-invariant architecture),
     enabling `jax.vmap` to compute meta-gradients for an entire chunk in one batched
-    accelerator call. A bounded thread pool collects rollouts concurrently,
-    overlapping CPU environment stepping with accelerator gradient computation.
+    accelerator call. A `TrainerPool` holds all agent parameters, optimizer states,
+    and rollout buffers as permanently stacked arrays — eliminating per-step
+    stacking overhead and VRAM allocation cycles. Environment stepping is
+    parallelized via a thread pool.
 
     Parameters
     ----------
@@ -704,6 +326,9 @@ class RuleTrainer:
         Maximum number of trainers to `vmap` simultaneously. Higher values
         improve GPU utilization but increase VRAM usage. Reduce if
         out of memory (OOM). Default is `8`
+    num_env_workers : int (optional)
+        Number of threads for parallel environment stepping.
+        Default is `16`
     seed : int (optional)
         Random number generator seed. Default is `42`
     jit_compile : bool (optional)
@@ -728,10 +353,11 @@ class RuleTrainer:
     def __init__(
         self,
         envs: EnvSet | EnvGroup,
-        *,
         config: RuleTrainerSettings,
+        *,
         agents_per_env: int = 2,
         max_group_size: int = 8,
+        num_env_workers: int = 16,
         seed: int = 42,
         jit_compile: bool = True,
         cache_dir: str | None = ".cache/jax",
@@ -771,6 +397,7 @@ class RuleTrainer:
         self.config = config
         self.agents_per_env = agents_per_env
         self.max_group_size = max_group_size
+        self.num_env_workers = num_env_workers
         self.jit_compile = jit_compile
         self.cache_dir = cache_dir
         self.use_bfloat16 = use_bfloat16
@@ -821,6 +448,9 @@ class RuleTrainer:
         # Pre-computed constants
         self._action_masks: Dict[int, chex.Array] = {}
         self._hidden_shapes: HiddenShapeCache = None  # type: ignore
+
+        # Trainer pool
+        self.pool: TrainerPool = None  # type: ignore
 
         # init console dashboard
         _n_chunks = math.ceil(self.num_trainers / self.max_group_size)
@@ -908,7 +538,8 @@ class RuleTrainer:
         """
         Pre-compile all gradient functions before training begins.
 
-        Compiles for every distinct chunk size based on `num_trainers` and `max_group_size`.
+        Uses the trainer pool's zero-filled buffers and stacked arrays
+        for shape inference. Compiles for every distinct chunk size.
         """
         meta_params = self.meta_agent.get_params()
 
@@ -919,22 +550,6 @@ class RuleTrainer:
             else jax.jit(self.meta_optim.update)
         )
 
-        def _stack(x, n):
-            """Stack `n` copies of PyTree `x` along a new leading axis."""
-            return jax.tree.map(lambda t: jnp.stack([t] * n), x)
-
-        # Use any trainer — all have identical shapes
-        trainer = self.trainers[0]
-
-        # Collect real rollouts so shapes match exactly what training uses
-        with jax.default_device(self._cpu):
-            train_rollout = trainer.collect_stack(self.config.n_updates)
-            valid_rollout = trainer.collect_valid()
-
-        p_params, v_params, p_opt, v_opt, adv_ema, td_ema = trainer.get_vmap_inputs()
-        disco_h, meta_h = self.state.hidden.get(0)
-        action_mask = self._action_masks[trainer.n_actions]
-
         # Compile for every distinct chunk size
         chunk_sizes = {min(self.max_group_size, self.num_trainers)}
         remainder = self.num_trainers % self.max_group_size
@@ -943,30 +558,30 @@ class RuleTrainer:
             chunk_sizes.add(remainder)  # Include remainder chunks
 
         for chunk_size in chunk_sizes:
-            _ = self._batch_grad_fn(
-                meta_params,
-                _stack(p_params, chunk_size),
-                _stack(v_params, chunk_size),
-                jnp.stack([disco_h] * chunk_size),
-                jnp.stack([meta_h] * chunk_size),
-                _stack(p_opt, chunk_size),
-                _stack(v_opt, chunk_size),
-                _stack(adv_ema, chunk_size),
-                _stack(td_ema, chunk_size),
-                _stack(train_rollout, chunk_size),
-                _stack(valid_rollout, chunk_size),
-                jnp.stack([action_mask] * chunk_size),
+            # Slice from pool's stacked arrays
+            disco_h, meta_h = [], []
+            for idx in range(chunk_size):
+                d_h, m_h = self.state.hidden.get(idx)
+                disco_h.append(d_h)
+                meta_h.append(m_h)
+
+            grad_inputs = self.pool.get_grad_inputs(
+                0,
+                chunk_size,
+                jnp.stack(disco_h),
+                jnp.stack(meta_h),
             )
+            _ = self._batch_grad_fn(meta_params, *grad_inputs)
 
         # Block until compilations are complete
         jax.effects_barrier()
 
         # Warm per-trainer meta-optim JIT
         dummy_grad = jax.tree.map(jnp.zeros_like, meta_params)
-        for t in self.trainers:
-            _ = t.meta_optim_update(
+        for i in range(self.num_trainers):
+            _ = self.pool.meta_optim_updates[i](
                 dummy_grad,
-                t.meta_opt_state,
+                self.pool.meta_opt_states[i],
                 meta_params,
             )
         jax.effects_barrier()
@@ -991,28 +606,18 @@ class RuleTrainer:
                 env_name,
                 self.config.agent_trainer_config(),
                 key=trainer_keys[i],
-                logger=self.logger,
-                writer_name=f"envs/{env_name}",
                 make_fn=make_fn,
                 budget_rng=self._budget_rng,
                 max_actions=self.max_actions,
                 jit_compile=self.jit_compile,
-                use_bfloat16=self.use_bfloat16,
             )
             self.trainers.append(trainer)
             self.console.update_setup()
 
-        # Init meta-optimizers and warm trainers on each device
-        for i, trainer in enumerate(self.trainers):
+        # Init meta-optimizers and warm trainers
+        for trainer in self.trainers:
             trainer._init_meta_optim(self.meta_agent.get_params())
             trainer.warm()
-
-            if i == 0:
-                with jax.default_device(self._cpu):
-                    trainer.warm()
-                    _ = trainer.collect_stack(self.config.n_updates)
-                    _ = trainer.collect_valid()
-
             self.console.update_setup()
 
         # Pre-compute shared constants for the inner loop
@@ -1034,6 +639,22 @@ class RuleTrainer:
         # Build functions
         self._batch_grad_fn = self._build_batch_grad_fn()
         self._batched_collect_fn = self._build_batched_collect_fn()
+
+        # Build trainer pool — stacks all params/states as permanent GPU arrays
+        self.pool = TrainerPool(
+            self.trainers,
+            max_actions=self.max_actions,
+            action_masks=self._action_masks,
+            hidden_shapes=self._hidden_shapes,
+            n_updates=self.config.n_updates,
+            seq_len=self.config.seq_len,
+            batch_size=self.config.batch_size,
+            encoding_dim=self.trainers[0].policy_agent.encoding_dim,
+            prediction_dim=self.config.agent.prediction_size,
+            q_dim=self.config.agent.q_size,
+            use_bfloat16=self.use_bfloat16,
+            num_env_workers=self.num_env_workers,
+        )
         self.console.update_setup()
 
         # Pre-compile all chunk sizes so train() starts warm
@@ -1395,302 +1016,68 @@ class RuleTrainer:
             td_ema=final_td_ema,
         )
 
-    def _stack_hidden(
-        self,
-    ) -> Tuple[chex.Array, chex.Array, chex.Array, chex.Array, chex.Array]:
+    def _get_rollouts(self) -> None:
         """
-        Stack hidden states from all trainers for vmapped collection.
+        Collect all rollouts into the pool's buffers using batched
+        accelerator forward passes.
 
-        Replaces `None` hidden states (from freshly reset trainers)
-        with zeros using cached shapes from `_initial_setup`.
+        Handles trainer resets, runs the training collection phase,
+        updates step budgets and episode logging, performs soft target
+        updates, then runs the validation collection phase.
 
-        Returns
-        -------
-        p_ocm_h, p_acm_h, t_ocm_h, t_acm_h, v_h : chex.Array
-            Stacked hidden states, each `(N, B, H)`
+        All rollout data is written directly into `self.pool.train_buffer`
+        and `self.pool.valid_buffer` — no intermediate lists of
+        `Rollout` objects.
         """
-        s = self._hidden_shapes
-
-        def _h_or_zeros(h, shape):
-            return h if h is not None else jnp.zeros(shape)
-
-        return (
-            jnp.stack(
-                [
-                    _h_or_zeros(t.state.hidden.policy_ocm, s.policy_ocm)
-                    for t in self.trainers
-                ]
-            ),
-            jnp.stack(
-                [
-                    _h_or_zeros(t.state.hidden.policy_acm, s.policy_acm)
-                    for t in self.trainers
-                ]
-            ),
-            jnp.stack(
-                [
-                    _h_or_zeros(t.state.hidden.target_ocm, s.target_ocm)
-                    for t in self.trainers
-                ]
-            ),
-            jnp.stack(
-                [
-                    _h_or_zeros(t.state.hidden.target_acm, s.target_acm)
-                    for t in self.trainers
-                ]
-            ),
-            jnp.stack(
-                [_h_or_zeros(t.state.hidden.value, s.value) for t in self.trainers]
-            ),
-        )
-
-    def _batched_collect_phase(
-        self,
-        all_p_params: chex.ArrayTree,
-        all_t_params: chex.ArrayTree,
-        all_v_params: chex.ArrayTree,
-        all_masks: chex.Array,
-        p_ocm_h: chex.Array,
-        p_acm_h: chex.Array,
-        t_ocm_h: chex.Array,
-        t_acm_h: chex.Array,
-        v_h: chex.Array,
-        n_rollouts: int,
-        seq_len: int,
-        training: bool,
-    ) -> Tuple[chex.Array, chex.Array, chex.Array, chex.Array, chex.Array]:
-        """
-        Run one collection phase (training or validation) using batched
-        GPU forward passes.
-
-        Each step: one vmapped GPU call for all trainers, then sequential
-        env stepping and buffer writes on CPU.
-
-        Parameters
-        ----------
-        all_p_params : chex.ArrayTree
-            Stacked policy params `(N, ...)`
-        all_t_params : chex.ArrayTree
-            Stacked target params `(N, ...)`
-        all_v_params : chex.ArrayTree
-            Stacked value params `(N, ...)`
-        all_masks : chex.Array
-            Stacked action masks `(N, max_actions)`
-        p_ocm_h, p_acm_h, t_ocm_h, t_acm_h, v_h : chex.Array
-            Stacked hidden states `(N, B, H)`
-        n_rollouts : int
-            Number of rollouts to collect
-        seq_len : int
-            Steps per rollout
-        training : bool
-            Whether this is training (uses train_buffer) or validation
-
-        Returns
-        -------
-        p_ocm_h, p_acm_h, t_ocm_h, t_acm_h, v_h : chex.Array
-            Updated stacked hidden states
-        """
-        N = self.num_trainers
-        B = self.config.batch_size
-
-        # Current observations: (N, B, H, W, C)
-        all_obs = np.stack([t.state.current_obs for t in self.trainers])
-
-        for _ in range(n_rollouts):
-            for _ in range(seq_len):
-                obs_jax = jnp.asarray(all_obs)
-
-                # ONE vmapped GPU call for all trainers
-                (
-                    preds,
-                    target_preds,
-                    values,
-                    p_ocm_h,
-                    p_acm_h,
-                    t_ocm_h,
-                    t_acm_h,
-                    v_h,
-                ) = self._batched_collect_fn(
-                    obs_jax,
-                    all_p_params,
-                    all_t_params,
-                    all_v_params,
-                    p_ocm_h,
-                    p_acm_h,
-                    t_ocm_h,
-                    t_acm_h,
-                    v_h,
-                    all_masks,
-                )
-
-                # Transfer predictions to CPU in one sync
-                preds_cpu = jax.device_get(preds)
-                target_preds_cpu = jax.device_get(target_preds)
-                values_cpu = np.asarray(jax.device_get(values))
-
-                # Per-trainer: sample actions, step env, write buffer
-                all_discounts = np.zeros((N, B, 1), dtype=np.float32)
-
-                for i, trainer in enumerate(self.trainers):
-                    preds_i = jax.tree.map(lambda x: x[i], preds_cpu)
-                    target_preds_i = jax.tree.map(lambda x: x[i], target_preds_cpu)
-
-                    actions = trainer.policy_agent.act(preds_i.pi)
-                    next_obs, rewards, terminated, truncated, _ = trainer.envs.step(
-                        actions.squeeze(-1)
-                    )
-
-                    discounts = np.where(
-                        terminated | truncated,
-                        np.float32(0.0),
-                        np.float32(1.0),
-                    )[:, None]
-                    all_discounts[i] = discounts
-
-                    buffer = trainer.train_buffer if training else trainer.valid_buffer
-                    buffer.write_step(
-                        actions,
-                        rewards[:, None],
-                        discounts,
-                        values_cpu[i],
-                        preds_i,
-                        target_preds_i,
-                    )
-
-                    if training:
-                        trainer.episode_tracker.record(rewards, terminated, truncated)
-
-                    all_obs[i] = next_obs
-
-                # Reset hidden states on episode boundaries (vectorised on GPU)
-                mask = jnp.asarray(all_discounts).squeeze(-1)  # (N, B)
-                p_ocm_h = p_ocm_h * mask[..., None]
-                p_acm_h = p_acm_h * mask[..., None]
-                t_ocm_h = t_ocm_h * mask[..., None]
-                t_acm_h = t_acm_h * mask[..., None]
-                v_h = v_h * mask[..., None]
-
-            # Advance buffer rollout index
-            for trainer in self.trainers:
-                buffer = trainer.train_buffer if training else trainer.valid_buffer
-                buffer.next_rollout()
-
-        # Write back per-trainer state
-        for i, trainer in enumerate(self.trainers):
-            trainer.state = trainer.state.update_obs(jnp.asarray(all_obs[i]))
-            trainer.state = trainer.state.update_hidden(
-                AgentTrainerHiddenStates(
-                    policy_ocm=p_ocm_h[i],  # type: ignore
-                    policy_acm=p_acm_h[i],  # type: ignore
-                    target_ocm=t_ocm_h[i],  # type: ignore
-                    target_acm=t_acm_h[i],  # type: ignore
-                    value=v_h[i],  # type: ignore
-                )
-            )
-
-        return p_ocm_h, p_acm_h, t_ocm_h, t_acm_h, v_h
-
-    def _get_rollouts(self) -> Tuple[List[Rollout], List[Rollout]]:
-        """
-        Collect all rollouts using batched GPU forward passes.
-
-        Replaces sequential per-trainer collection with one vmapped
-        forward call per step across all trainers. Reduces Python loop
-        iterations from `num_trainers * n_updates * seq_len` to
-        `n_updates * seq_len`.
-
-        Returns
-        -------
-        train_rollouts : List[Rollout]
-            Training rollouts, one per trainer
-        valid_rollouts : List[Rollout]
-            Validation rollouts, one per trainer
-        """
-        # Handle resets before stacking params
-        for idx, trainer in enumerate(self.trainers):
-            if trainer.needs_reset:
+        # Handle resets before collection
+        for idx in range(self.num_trainers):
+            if self.pool.needs_reset(idx):
                 self.reset_trainer(idx)
+                self.pool.reset_trainer(idx, self.trainers[idx])
 
-        # Reset episode trackers
-        for trainer in self.trainers:
-            trainer.episode_tracker.reset()
+        # Reset episode trackers and buffer write heads
+        for tracker in self.pool.episode_trackers:
+            tracker.reset()
 
-        # Stack params once (constant during collection)
-        all_p_params = stack_pytrees(
-            [t.policy_agent.get_params() for t in self.trainers]
-        )
-        all_t_params = stack_pytrees(
-            [t.target_agent.get_params() for t in self.trainers]
-        )
-        all_v_params = stack_pytrees(
-            [t.value_agent.get_params() for t in self.trainers]
-        )
-        all_masks = jnp.stack([self._action_masks[t.n_actions] for t in self.trainers])
+        self.pool.train_buffer.reset_head()
+        self.pool.valid_buffer.reset_head()
 
-        # Stack hidden states (None → zeros)
-        p_ocm_h, p_acm_h, t_ocm_h, t_acm_h, v_h = self._stack_hidden()
-
-        # Training collection phase
-        p_ocm_h, p_acm_h, t_ocm_h, t_acm_h, v_h = self._batched_collect_phase(
-            all_p_params,
-            all_t_params,
-            all_v_params,
-            all_masks,
-            p_ocm_h,
-            p_acm_h,
-            t_ocm_h,
-            t_acm_h,
-            v_h,
+        # Training: collection phase
+        self.pool.collect(
+            self._batched_collect_fn,
             n_rollouts=self.config.n_updates,
             seq_len=self.config.seq_len,
             training=True,
         )
 
-        # Finalize training: step budget, episode logging
-        for trainer in self.trainers:
-            trainer._env_steps += self.config.n_updates * self.config.seq_len
-            if metrics := trainer.episode_tracker.metrics():
-                trainer.log(metrics, idx=trainer._collection_step)
-            trainer._collection_step += 1
+        # Finalize: step budgets, episode logging
+        self.pool.finalize_training(self.config.n_updates, self.config.seq_len)
 
-        # Soft update target params before validation
-        for trainer in self.trainers:
-            trainer.target_agent.soft_param_update(
-                self.config.tau, trainer.policy_agent.get_params()
-            )
+        for i in range(self.num_trainers):
+            tracker = self.pool.episode_trackers[i]
 
-        # Restack target params after soft update
-        all_t_params = stack_pytrees(
-            [t.target_agent.get_params() for t in self.trainers]
-        )
+            if metrics := tracker.metrics():
+                self.logger.log(
+                    f"envs/{self.pool.env_names[i]}",
+                    self.pool._collection_steps[i] - 1,
+                    metrics,
+                )
 
-        # Validation collection phase
-        self._batched_collect_phase(
-            all_p_params,
-            all_t_params,
-            all_v_params,
-            all_masks,
-            p_ocm_h,
-            p_acm_h,
-            t_ocm_h,
-            t_acm_h,
-            v_h,
+        # Soft update targets
+        self.pool.soft_update_targets(self.config.tau)
+
+        # Validation: collection phase
+        self.pool.collect(
+            self._batched_collect_fn,
             n_rollouts=1,
             seq_len=self.config.seq_len * 2,
             training=False,
         )
 
-        # Build rollouts from buffers
-        train_rollouts = [t.train_buffer.to_rollout() for t in self.trainers]
-        valid_rollouts = [t.valid_buffer.to_rollout()[0] for t in self.trainers]
-
-        return train_rollouts, valid_rollouts
-
     def _process_chunk(
         self,
-        chunk_indices: List[int],
-        train_rollouts: List[Rollout],
-        valid_rollouts: List[Rollout],
+        start: int,
+        end: int,
         meta_params: chex.ArrayTree,
         accumulated_grad: chex.ArrayTree,
         stats: MetaStepStats,
@@ -1698,17 +1085,15 @@ class RuleTrainer:
         """
         Compute meta-gradients for a chunk of trainers.
 
-        Rollouts are padded from `n_actions` to `max_actions` before stacking,
-        and an action mask is threaded through for masked operations.
+        Slices directly into the pool's stacked arrays — no intermediate
+        stacking. Writes results back via in-place pool updates.
 
         Parameters
         ----------
-        chunk_indices : List[int]
-            Trainer indices in this chunk
-        train_rollouts : List[Rollout]
-            Pre-collected training rollouts, one per trainer in chunk order
-        valid_rollouts : List[Rollout]
-            Pre-collected validation rollouts, one per trainer in chunk order
+        start : int
+            First trainer index (inclusive)
+        end : int
+            Last trainer index (exclusive)
         meta_params : chex.ArrayTree
             Current shared meta-network parameters
         accumulated_grad : chex.ArrayTree
@@ -1721,81 +1106,52 @@ class RuleTrainer:
         accumulated_grad : chex.ArrayTree
             Updated gradient accumulator
         """
-        vmapped_fn = self._batch_grad_fn
-        chunk_trainers = [self.trainers[i] for i in chunk_indices]
+        # Slice disco/meta hidden states for this chunk
+        stacked_disco_h, stacked_meta_h = [], []
 
-        # Stack chunk inputs along a leading group dimension for vmap
-        stacked_train = stack_pytrees(train_rollouts)
-        stacked_valid = stack_pytrees(valid_rollouts)
+        for idx in range(start, end):
+            d_h, m_h = self.state.hidden.get(idx)
+            stacked_disco_h.append(d_h)
+            stacked_meta_h.append(m_h)
 
-        (
-            stacked_p_params,
-            stacked_v_params,
-            stacked_p_opt,
-            stacked_v_opt,
-            stacked_adv_ema,
-            stacked_td_ema,
-        ) = [
-            stack_pytrees(field)  # type: ignore
-            for field in zip(*[t.get_vmap_inputs() for t in chunk_trainers])
-        ]
+        stacked_disco_h = jnp.stack(stacked_disco_h)
+        stacked_meta_h = jnp.stack(stacked_meta_h)
 
-        stacked_disco_h, stacked_meta_h = [
-            jnp.stack(hs)
-            for hs in zip(*[self.state.hidden.get(i) for i in chunk_indices])
-        ]
-
-        # Build per-trainer action masks: (chunk, max_actions)
-        stacked_action_masks = jnp.stack(
-            [self._action_masks[t.n_actions] for t in chunk_trainers]
+        # Get all gradient inputs from pool
+        grad_inputs = self.pool.get_grad_inputs(
+            start,
+            end,
+            stacked_disco_h,
+            stacked_meta_h,
         )
 
         # Single accelerator call for entire chunk
-        chunk_out: MetaGradOutput = vmapped_fn(
+        chunk_out: MetaGradOutput = self._batch_grad_fn(
             meta_params,
-            stacked_p_params,
-            stacked_v_params,
-            stacked_disco_h,
-            stacked_meta_h,
-            stacked_p_opt,
-            stacked_v_opt,
-            stacked_adv_ema,
-            stacked_td_ema,
-            stacked_train,
-            stacked_valid,
-            stacked_action_masks,
+            *grad_inputs,
         )
+        chunk_out = jax.device_get(chunk_out)  # ACL->CPU sync
 
-        # Post-batch: apply updates and accumulate gradients
-        for i, (idx, trainer) in enumerate(zip(chunk_indices, chunk_trainers)):
-            p_params_i = unstack_pytree(chunk_out.p_params, i)
-            v_params_i = unstack_pytree(chunk_out.v_params, i)
-            v_opt_i = unstack_pytree(chunk_out.v_opt_state, i)
-            meta_grad_i = unstack_pytree(chunk_out.meta_grad, i)
+        # Post-batch: accumulate gradients and log metrics
+        chunk_size = end - start
+        for i in range(chunk_size):
+            idx = start + i
 
-            trainer.policy_agent.update_params(p_params_i)  # type: ignore
-            trainer.target_agent.update_params(p_params_i)  # type: ignore
-            trainer.value_agent.update_params(v_params_i)  # type: ignore
-            trainer.state = trainer.state.update_value_opt(v_opt_i)
-
-            # Write updated EMA states back to trainer for next meta-step
-            adv_ema_i: EMAState = unstack_pytree(chunk_out.adv_ema, i)  # type: ignore
-            td_ema_i: EMAState = unstack_pytree(chunk_out.td_ema, i)  # type: ignore
-            trainer.state = trainer.state.update_ema(adv_ema_i, td_ema_i)
-
+            # Update disco/meta hidden states
             self.state = self.state.update_hidden(
                 idx,
                 chunk_out.disco_h[i],  # type: ignore
                 chunk_out.meta_h[i],  # type: ignore
             )
 
-            # Norm gradient magnitude via per trainer optim before accumulating
-            normed_grad, new_meta_opt_state = trainer.meta_optim_update(
+            # Norm gradient via per-trainer optimizer
+            meta_grad_i = unstack_pytree(chunk_out.meta_grad, i)
+            normed_grad, new_meta_opt_state = self.pool.meta_optim_updates[idx](
                 meta_grad_i,
-                trainer.meta_opt_state,
+                self.pool.meta_opt_states[idx],
                 meta_params,
             )
-            trainer.meta_opt_state = new_meta_opt_state
+            self.pool.meta_opt_states[idx] = new_meta_opt_state
 
             accumulated_grad = jax.tree.map(
                 lambda acc, g: acc + g,
@@ -1820,7 +1176,13 @@ class RuleTrainer:
                 entropy=chunk_out.entropy_loss[i],  # type: ignore
                 regularization=chunk_out.reg_loss[i],  # type: ignore
             )
-            stats.record(trainer.ep_return(), trainer.ep_length(), losses_i)
+
+            ep_tracker: EpisodeTracker = self.pool.episode_trackers[idx]
+            stats.record(
+                ep_tracker.windowed_mean_return,
+                ep_tracker.windowed_mean_length,
+                losses_i,
+            )
 
         return accumulated_grad
 
@@ -1828,9 +1190,10 @@ class RuleTrainer:
         """
         Performs meta-training loop to discover an RL update rule.
 
-        Each meta-step collects rollouts from all trainers via batched
-        vmapped forward passes, then computes meta-gradients in chunks
-        on the accelerator.
+        Each meta-step collects rollouts into the pool's mega-buffers
+        via batched vmapped forward passes, then computes meta-gradients
+        in chunks on the accelerator by slicing directly into the pool's
+        stacked arrays.
 
         Includes
         --------
@@ -1844,7 +1207,6 @@ class RuleTrainer:
         2. Log metrics and checkpoints periodically
         """
         self.console.start_training()
-        all_indices = list(range(self.num_trainers))
 
         try:
             for step in range(self.state.meta_step, self.n_steps):
@@ -1852,27 +1214,23 @@ class RuleTrainer:
                 meta_params = self.meta_agent.get_params()
 
                 accumulated_grad = jax.tree.map(jnp.zeros_like, meta_params)
-                train_rollouts, valid_rollouts = self._get_rollouts()
+                self._get_rollouts()
 
-                # Process all chunks and update trainer params
+                # Process all chunks
                 for start in range(0, self.num_trainers, self.max_group_size):
                     end = min(start + self.max_group_size, self.num_trainers)
-                    chunk_indices = all_indices[start:end]
-                    chunk_train = train_rollouts[start:end]
-                    chunk_valid = valid_rollouts[start:end]
+                    chunk_envs = self.pool.env_names[start:end]
 
-                    chunk_envs = [self.trainers[i].env_name for i in chunk_indices]
                     self.console.update_progress(
                         "Inner Updates",
-                        chunk_size=len(chunk_indices),
+                        chunk_size=end - start,
                         env_names=chunk_envs,
                     )
 
-                    # Compute gradients for this agent
+                    # Compute gradients for this chunk
                     accumulated_grad = self._process_chunk(
-                        chunk_indices,
-                        chunk_train,
-                        chunk_valid,
+                        start,
+                        end,
                         meta_params,
                         accumulated_grad,
                         stats,
@@ -1905,6 +1263,10 @@ class RuleTrainer:
                     self.save_checkpoint()
 
                 self.console.update_progress("Meta Steps")
+
+                # Cleanup
+                del avg_grad
+                jax.effects_barrier()
 
         except (KeyboardInterrupt, SystemExit):
             exit()
@@ -1986,10 +1348,12 @@ class RuleTrainer:
             config=config,
             agents_per_env=meta_run["agents_per_env"],
             max_group_size=meta_run["max_group_size"],
+            num_env_workers=meta_run["num_env_workers"],
             seed=meta_run["seed"],
             jit_compile=jit_compile,
             cache_dir=cache_dir,
             verbose=verbose,
+            use_bfloat16=meta_run["use_bfloat16"],
         )
 
         # Restore meta-agent params and RuleTrainerState (includes meta_step)
@@ -2104,8 +1468,10 @@ class RuleTrainer:
             "config": dump_config(self.config),
             "agents_per_env": self.agents_per_env,
             "max_group_size": self.max_group_size,
+            "num_env_workers": self.num_env_workers,
             "seed": self._seed,
             "envs": [g.dump() for g in self._env_groups],
+            "use_bfloat16": self.use_bfloat16,
         }
 
         meta_run_path = Path(self.cp_manager.cp_dir, "meta_run.json")
@@ -2181,13 +1547,10 @@ class RuleTrainer:
             env_name,
             self.config.agent_trainer_config(),
             key=new_key,
-            logger=self.logger,
-            writer_name=f"envs/{env_name}",
             make_fn=make_fn,
             budget_rng=self._budget_rng,
             max_actions=self.max_actions,
             jit_compile=self.jit_compile,
-            use_bfloat16=self.use_bfloat16,
         )
 
         # Init fresh per-trainer meta-gradient optimizer
@@ -2205,10 +1568,10 @@ class RuleTrainer:
 
     def close(self) -> None:
         """Clean up resources."""
-        self.cp_manager.close()
+        if self.pool is not None:
+            self.pool.close()
 
-        for trainer in self.trainers:
-            trainer.close()
+        self.cp_manager.close()
 
     def save_rule(self) -> Path:
         """
@@ -2225,6 +1588,10 @@ class RuleTrainer:
         """
         root_dir, sub_dir = self.rule_path.parent, self.rule_path.name
 
+        if self.rule_path.exists():
+            shutil.rmtree(self.rule_path)
+
+        return self.meta_agent.save(root_dir, sub_dir, timestamp=False)
         if self.rule_path.exists():
             shutil.rmtree(self.rule_path)
 
