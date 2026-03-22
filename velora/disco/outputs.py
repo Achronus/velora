@@ -432,6 +432,35 @@ class ValueOutputs:
 
 
 @struct.dataclass
+class HiddenShapeCache:
+    """
+    Cached hidden state shapes for batched collection.
+
+    All shapes are `(B, H)` where `B` is batch size and `H`
+    is the hidden dimension for that module.
+
+    Parameters
+    ----------
+    policy_ocm : Tuple[int, ...]
+        Policy OCM hidden state shape
+    policy_acm : Tuple[int, ...]
+        Policy ACM hidden state shape
+    target_ocm : Tuple[int, ...]
+        Target OCM hidden state shape
+    target_acm : Tuple[int, ...]
+        Target ACM hidden state shape
+    value : Tuple[int, ...]
+        Value network hidden state shape
+    """
+
+    policy_ocm: Tuple[int, ...]
+    policy_acm: Tuple[int, ...]
+    target_ocm: Tuple[int, ...]
+    target_acm: Tuple[int, ...]
+    value: Tuple[int, ...]
+
+
+@struct.dataclass
 class AgentLosses:
     """
     Dataclass for individual loss components from a policy agent training step.

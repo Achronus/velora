@@ -211,6 +211,7 @@ class PolicyAgent:
             Action decoder (possibly JIT-wrapped)
         """
         # Cache graphdef + non-param state for functional forward pass
+        self._enc_graphdef, _, self._enc_rest = nnx.split(self._encoder, nnx.Param, ...)
         self._ocm_graphdef, _, self._ocm_rest = nnx.split(self._ocm, nnx.Param, ...)
         self._acm_graphdef, _, self._acm_rest = nnx.split(self._acm, nnx.Param, ...)
         self._dec_graphdef, _, self._dec_rest = nnx.split(self._decoder, nnx.Param, ...)
@@ -507,6 +508,34 @@ class PolicyAgent:
         acm = nnx.merge(self._acm_graphdef, params["acm"], self._acm_rest)
         decoder = nnx.merge(self._dec_graphdef, params["decoder"], self._dec_rest)
         return ocm, acm, decoder
+
+    def merge_all_params(
+        self, params: nnx.State
+    ) -> Tuple[ImageEncoder, OCM, ACM, ActionDecoder]:
+        """
+        Reconstruct all modules from explicit parameters, including encoder.
+
+        Parameters
+        ----------
+        params : nnx.State
+            Full parameter states from `get_params()`
+
+        Returns
+        -------
+        encoder : ImageEncoder
+            Reconstructed encoder
+        ocm : OCM
+            Reconstructed OCM
+        acm : ACM
+            Reconstructed ACM
+        decoder : ActionDecoder
+            Reconstructed decoder
+        """
+        encoder = nnx.merge(self._enc_graphdef, params["encoder"], self._enc_rest)
+        ocm = nnx.merge(self._ocm_graphdef, params["ocm"], self._ocm_rest)
+        acm = nnx.merge(self._acm_graphdef, params["acm"], self._acm_rest)
+        decoder = nnx.merge(self._dec_graphdef, params["decoder"], self._dec_rest)
+        return encoder, ocm, acm, decoder
 
     def soft_param_update(self, tau: float, new_params: nnx.State) -> None:
         """
@@ -1065,10 +1094,28 @@ class DiscoValueAgent:
         net : LNN
             Value network (possibly JIT-wrapped)
         """
+        self._net_graphdef, _, self._net_rest = nnx.split(self._net, nnx.Param, ...)
+
         if jit_compile:
             return nnx.jit(self._encoder), nnx.jit(self._net)  # type: ignore
 
         return self._encoder, self._net
+
+    def merge_net(self, params: nnx.State) -> LNN:
+        """
+        Reconstruct value LNN from explicit parameters.
+
+        Parameters
+        ----------
+        params : nnx.State
+            Value agent parameters from `get_params()`
+
+        Returns
+        -------
+        net : LNN
+            Reconstructed value network
+        """
+        return nnx.merge(self._net_graphdef, params["net"], self._net_rest)
 
     def __call__(
         self,

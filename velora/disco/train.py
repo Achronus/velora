@@ -17,8 +17,6 @@ import json
 import math
 import random
 import shutil
-import threading
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Callable, Dict, List, Self, Tuple
 
@@ -44,6 +42,7 @@ from velora.disco.ema import EMAState, MovingAverage
 from velora.disco.outputs import (
     AgentLossAux,
     AgentTrainerOutput,
+    HiddenShapeCache,
     LossStatistics,
     MetaGradOutput,
     MetaInnerStepCarry,
@@ -68,7 +67,7 @@ from velora.tracking.logger import MetricsLogger
 from velora.tracking.manager import CheckpointManager
 from velora.utils.config import dump_config, load_config
 from velora.utils.format import cache_status
-from velora.utils.transforms import stack_pytrees, unstack_pytree
+from velora.utils.transforms import squeeze_time, stack_pytrees, unstack_pytree
 
 
 class AgentTrainer:
@@ -705,11 +704,6 @@ class RuleTrainer:
         Maximum number of trainers to `vmap` simultaneously. Higher values
         improve GPU utilization but increase VRAM usage. Reduce if
         out of memory (OOM). Default is `8`
-    num_collection_workers : int (optional)
-        Maximum number of concurrent threads for rollout collection.
-        Higher values increase CPU parallelism for env stepping but add
-        GIL contention during JAX dispatch. 8-16 is recommended for most
-        setups. Default is `8`
     seed : int (optional)
         Random number generator seed. Default is `42`
     jit_compile : bool (optional)
@@ -738,7 +732,6 @@ class RuleTrainer:
         config: RuleTrainerSettings,
         agents_per_env: int = 2,
         max_group_size: int = 8,
-        num_collection_workers: int = 8,
         seed: int = 42,
         jit_compile: bool = True,
         cache_dir: str | None = ".cache/jax",
@@ -818,22 +811,16 @@ class RuleTrainer:
         self.cp_manager = CheckpointManager(self.config.checkpoint)
         self.rule_path = Path(self.cp_manager.cp_dir, "final_disco").resolve()
 
-        # Batch gradient functions
+        # Batch functions
         self.max_actions = self._compute_max_actions()
         self._batch_grad_fn: Callable[..., MetaGradOutput] = None  # type: ignore
+        self._batched_collect_fn: Callable = None  # type: ignore
 
         self._meta_optim_update: Callable = None  # type: ignore
 
         # Pre-computed constants
         self._action_masks: Dict[int, chex.Array] = {}
-
-        # Bounded thread pool for concurrent rollout collection
-        self._collection_pool = ThreadPoolExecutor(
-            max_workers=min(num_collection_workers, self.num_trainers),
-            thread_name_prefix="collector",
-        )
-        self._collection_lock = threading.Lock()
-        self._use_threads = jax.default_backend() == "cpu"
+        self._hidden_shapes: HiddenShapeCache = None  # type: ignore
 
         # init console dashboard
         _n_chunks = math.ceil(self.num_trainers / self.max_group_size)
@@ -1016,14 +1003,15 @@ class RuleTrainer:
             self.console.update_setup()
 
         # Init meta-optimizers and warm trainers on each device
-        for trainer in self.trainers:
+        for i, trainer in enumerate(self.trainers):
             trainer._init_meta_optim(self.meta_agent.get_params())
             trainer.warm()
 
-            with jax.default_device(self._cpu):
-                trainer.warm()
-                _ = trainer.collect_stack(self.config.n_updates)
-                _ = trainer.collect_valid()
+            if i == 0:
+                with jax.default_device(self._cpu):
+                    trainer.warm()
+                    _ = trainer.collect_stack(self.config.n_updates)
+                    _ = trainer.collect_valid()
 
             self.console.update_setup()
 
@@ -1033,8 +1021,19 @@ class RuleTrainer:
             for t in self.trainers
         }
 
-        # Build single batch-grad function
+        # Cache hidden state shapes for batched collection (None → zeros)
+        h0 = self.trainers[0].state.hidden
+        self._hidden_shapes = HiddenShapeCache(
+            policy_ocm=jnp.shape(h0.policy_ocm),  # type: ignore
+            policy_acm=jnp.shape(h0.policy_acm),  # type: ignore
+            target_ocm=jnp.shape(h0.target_ocm),  # type: ignore
+            target_acm=jnp.shape(h0.target_acm),  # type: ignore
+            value=jnp.shape(h0.value),  # type: ignore
+        )
+
+        # Build functions
         self._batch_grad_fn = self._build_batch_grad_fn()
+        self._batched_collect_fn = self._build_batched_collect_fn()
         self.console.update_setup()
 
         # Pre-compile all chunk sizes so train() starts warm
@@ -1096,6 +1095,83 @@ class RuleTrainer:
                 in_axes=(None, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
             )
         )
+
+    def _build_batched_collect_fn(self) -> Callable:
+        """
+        Build a JIT + vmap compiled forward pass for batched collection.
+
+        Processes all trainers in one GPU call by vmapping a pure forward
+        function over stacked params, observations, and hidden states.
+        Uses the first trainer as a template for graph definitions.
+
+        Returns
+        -------
+        fn : Callable
+            JIT + vmap compiled collection forward function
+        """
+        t = self.trainers[0]  # template
+
+        def _pure_forward(
+            obs,
+            p_params,
+            t_params,
+            v_params,
+            p_ocm_h,
+            p_acm_h,
+            t_ocm_h,
+            t_acm_h,
+            v_h,
+            a_mask,
+        ):
+            # Reconstruct all modules from explicit params
+            encoder, p_ocm, p_acm, p_dec = t.policy_agent.merge_all_params(p_params)
+            _, t_ocm, t_acm, t_dec = t.target_agent.merge_all_params(t_params)
+            v_net = t.value_agent.merge_net(v_params)
+
+            # Shared encoding
+            encoding = encoder(obs)
+
+            # Policy forward
+            ocm_preds, new_p_ocm_h = p_ocm(encoding, h_state=p_ocm_h)
+            acm_preds, new_p_acm_h = p_acm(ocm_preds.embedding, h_state=p_acm_h)
+            preds = t.policy_agent._decode_to_actions(
+                encoding,
+                ocm_preds,
+                acm_preds,
+                action_mask=a_mask,
+                decoder=p_dec,
+            )
+
+            # Target forward
+            t_ocm_preds, new_t_ocm_h = t_ocm(encoding, h_state=t_ocm_h)
+            t_acm_preds, new_t_acm_h = t_acm(
+                t_ocm_preds.embedding,
+                h_state=t_acm_h,
+            )
+            target_preds = t.target_agent._decode_to_actions(
+                encoding,
+                t_ocm_preds,
+                t_acm_preds,
+                action_mask=a_mask,
+                decoder=t_dec,
+            )
+
+            # Value forward
+            v, new_v_h = v_net(encoding, h_state=v_h)
+            values = squeeze_time(v)
+
+            return (
+                preds,
+                target_preds,
+                values,
+                new_p_ocm_h,
+                new_p_acm_h,
+                new_t_ocm_h,
+                new_t_acm_h,
+                new_v_h,
+            )
+
+        return jax.jit(jax.vmap(_pure_forward))
 
     def _compute_meta_gradient(
         self,
@@ -1319,55 +1395,294 @@ class RuleTrainer:
             td_ema=final_td_ema,
         )
 
-    def _get_rollouts(self, indices: List[int]) -> Tuple[List[Rollout], List[Rollout]]:
+    def _stack_hidden(
+        self,
+    ) -> Tuple[chex.Array, chex.Array, chex.Array, chex.Array, chex.Array]:
         """
-        Collect rollouts from all trainers using a bounded thread pool.
+        Stack hidden states from all trainers for vmapped collection.
 
-        Forward passes run on the default accelerator (when available).
-        Limits concurrency to `num_collection_workers` threads to avoid
-        excessive GIL contention during JAX dispatch.
+        Replaces `None` hidden states (from freshly reset trainers)
+        with zeros using cached shapes from `_initial_setup`.
 
-        Handles trainer resets inline — if a trainer has exhausted its
-        lifetime budget, it is reset on the submitting thread before
-        collection begins.
+        Returns
+        -------
+        p_ocm_h, p_acm_h, t_ocm_h, t_acm_h, v_h : chex.Array
+            Stacked hidden states, each `(N, B, H)`
+        """
+        s = self._hidden_shapes
+
+        def _h_or_zeros(h, shape):
+            return h if h is not None else jnp.zeros(shape)
+
+        return (
+            jnp.stack(
+                [
+                    _h_or_zeros(t.state.hidden.policy_ocm, s.policy_ocm)
+                    for t in self.trainers
+                ]
+            ),
+            jnp.stack(
+                [
+                    _h_or_zeros(t.state.hidden.policy_acm, s.policy_acm)
+                    for t in self.trainers
+                ]
+            ),
+            jnp.stack(
+                [
+                    _h_or_zeros(t.state.hidden.target_ocm, s.target_ocm)
+                    for t in self.trainers
+                ]
+            ),
+            jnp.stack(
+                [
+                    _h_or_zeros(t.state.hidden.target_acm, s.target_acm)
+                    for t in self.trainers
+                ]
+            ),
+            jnp.stack(
+                [_h_or_zeros(t.state.hidden.value, s.value) for t in self.trainers]
+            ),
+        )
+
+    def _batched_collect_phase(
+        self,
+        all_p_params: chex.ArrayTree,
+        all_t_params: chex.ArrayTree,
+        all_v_params: chex.ArrayTree,
+        all_masks: chex.Array,
+        p_ocm_h: chex.Array,
+        p_acm_h: chex.Array,
+        t_ocm_h: chex.Array,
+        t_acm_h: chex.Array,
+        v_h: chex.Array,
+        n_rollouts: int,
+        seq_len: int,
+        training: bool,
+    ) -> Tuple[chex.Array, chex.Array, chex.Array, chex.Array, chex.Array]:
+        """
+        Run one collection phase (training or validation) using batched
+        GPU forward passes.
+
+        Each step: one vmapped GPU call for all trainers, then sequential
+        env stepping and buffer writes on CPU.
 
         Parameters
         ----------
-        indices : List[int]
-            Trainer indices to collect rollouts for
+        all_p_params : chex.ArrayTree
+            Stacked policy params `(N, ...)`
+        all_t_params : chex.ArrayTree
+            Stacked target params `(N, ...)`
+        all_v_params : chex.ArrayTree
+            Stacked value params `(N, ...)`
+        all_masks : chex.Array
+            Stacked action masks `(N, max_actions)`
+        p_ocm_h, p_acm_h, t_ocm_h, t_acm_h, v_h : chex.Array
+            Stacked hidden states `(N, B, H)`
+        n_rollouts : int
+            Number of rollouts to collect
+        seq_len : int
+            Steps per rollout
+        training : bool
+            Whether this is training (uses train_buffer) or validation
+
+        Returns
+        -------
+        p_ocm_h, p_acm_h, t_ocm_h, t_acm_h, v_h : chex.Array
+            Updated stacked hidden states
+        """
+        N = self.num_trainers
+        B = self.config.batch_size
+
+        # Current observations: (N, B, H, W, C)
+        all_obs = np.stack([t.state.current_obs for t in self.trainers])
+
+        for _ in range(n_rollouts):
+            for _ in range(seq_len):
+                obs_jax = jnp.asarray(all_obs)
+
+                # ONE vmapped GPU call for all trainers
+                (
+                    preds,
+                    target_preds,
+                    values,
+                    p_ocm_h,
+                    p_acm_h,
+                    t_ocm_h,
+                    t_acm_h,
+                    v_h,
+                ) = self._batched_collect_fn(
+                    obs_jax,
+                    all_p_params,
+                    all_t_params,
+                    all_v_params,
+                    p_ocm_h,
+                    p_acm_h,
+                    t_ocm_h,
+                    t_acm_h,
+                    v_h,
+                    all_masks,
+                )
+
+                # Transfer predictions to CPU in one sync
+                preds_cpu = jax.device_get(preds)
+                target_preds_cpu = jax.device_get(target_preds)
+                values_cpu = np.asarray(jax.device_get(values))
+
+                # Per-trainer: sample actions, step env, write buffer
+                all_discounts = np.zeros((N, B, 1), dtype=np.float32)
+
+                for i, trainer in enumerate(self.trainers):
+                    preds_i = jax.tree.map(lambda x: x[i], preds_cpu)
+                    target_preds_i = jax.tree.map(lambda x: x[i], target_preds_cpu)
+
+                    actions = trainer.policy_agent.act(preds_i.pi)
+                    next_obs, rewards, terminated, truncated, _ = trainer.envs.step(
+                        actions.squeeze(-1)
+                    )
+
+                    discounts = np.where(
+                        terminated | truncated,
+                        np.float32(0.0),
+                        np.float32(1.0),
+                    )[:, None]
+                    all_discounts[i] = discounts
+
+                    buffer = trainer.train_buffer if training else trainer.valid_buffer
+                    buffer.write_step(
+                        actions,
+                        rewards[:, None],
+                        discounts,
+                        values_cpu[i],
+                        preds_i,
+                        target_preds_i,
+                    )
+
+                    if training:
+                        trainer.episode_tracker.record(rewards, terminated, truncated)
+
+                    all_obs[i] = next_obs
+
+                # Reset hidden states on episode boundaries (vectorised on GPU)
+                mask = jnp.asarray(all_discounts).squeeze(-1)  # (N, B)
+                p_ocm_h = p_ocm_h * mask[..., None]
+                p_acm_h = p_acm_h * mask[..., None]
+                t_ocm_h = t_ocm_h * mask[..., None]
+                t_acm_h = t_acm_h * mask[..., None]
+                v_h = v_h * mask[..., None]
+
+            # Advance buffer rollout index
+            for trainer in self.trainers:
+                buffer = trainer.train_buffer if training else trainer.valid_buffer
+                buffer.next_rollout()
+
+        # Write back per-trainer state
+        for i, trainer in enumerate(self.trainers):
+            trainer.state = trainer.state.update_obs(jnp.asarray(all_obs[i]))
+            trainer.state = trainer.state.update_hidden(
+                AgentTrainerHiddenStates(
+                    policy_ocm=p_ocm_h[i],  # type: ignore
+                    policy_acm=p_acm_h[i],  # type: ignore
+                    target_ocm=t_ocm_h[i],  # type: ignore
+                    target_acm=t_acm_h[i],  # type: ignore
+                    value=v_h[i],  # type: ignore
+                )
+            )
+
+        return p_ocm_h, p_acm_h, t_ocm_h, t_acm_h, v_h
+
+    def _get_rollouts(self) -> Tuple[List[Rollout], List[Rollout]]:
+        """
+        Collect all rollouts using batched GPU forward passes.
+
+        Replaces sequential per-trainer collection with one vmapped
+        forward call per step across all trainers. Reduces Python loop
+        iterations from `num_trainers * n_updates * seq_len` to
+        `n_updates * seq_len`.
 
         Returns
         -------
         train_rollouts : List[Rollout]
-            Training rollouts in group-index order
+            Training rollouts, one per trainer
         valid_rollouts : List[Rollout]
-            Validation rollouts in group-index order
+            Validation rollouts, one per trainer
         """
-
-        def _collect_one(idx: int) -> Tuple[Rollout, Rollout]:
-            trainer = self.trainers[idx]
-
+        # Handle resets before stacking params
+        for idx, trainer in enumerate(self.trainers):
             if trainer.needs_reset:
-                with self._collection_lock:
-                    self.reset_trainer(idx)
-                    trainer = self.trainers[idx]
+                self.reset_trainer(idx)
 
-            tr = trainer.collect_stack(self.config.n_updates)
-            vr = trainer.collect_valid()
-            return tr, vr
+        # Reset episode trackers
+        for trainer in self.trainers:
+            trainer.episode_tracker.reset()
 
-        if self._use_threads:
-            # CPU: thread pool, parallelises numpy/ALE
-            futures = [
-                self._collection_pool.submit(_collect_one, idx) for idx in indices
-            ]
-            results = [f.result() for f in futures]
-        else:
-            # Accelerator: sequential, no threads
-            results = [_collect_one(idx) for idx in indices]
+        # Stack params once (constant during collection)
+        all_p_params = stack_pytrees(
+            [t.policy_agent.get_params() for t in self.trainers]
+        )
+        all_t_params = stack_pytrees(
+            [t.target_agent.get_params() for t in self.trainers]
+        )
+        all_v_params = stack_pytrees(
+            [t.value_agent.get_params() for t in self.trainers]
+        )
+        all_masks = jnp.stack([self._action_masks[t.n_actions] for t in self.trainers])
 
-        train_rollouts = [r[0] for r in results]
-        valid_rollouts = [r[1] for r in results]
+        # Stack hidden states (None → zeros)
+        p_ocm_h, p_acm_h, t_ocm_h, t_acm_h, v_h = self._stack_hidden()
+
+        # Training collection phase
+        p_ocm_h, p_acm_h, t_ocm_h, t_acm_h, v_h = self._batched_collect_phase(
+            all_p_params,
+            all_t_params,
+            all_v_params,
+            all_masks,
+            p_ocm_h,
+            p_acm_h,
+            t_ocm_h,
+            t_acm_h,
+            v_h,
+            n_rollouts=self.config.n_updates,
+            seq_len=self.config.seq_len,
+            training=True,
+        )
+
+        # Finalize training: step budget, episode logging
+        for trainer in self.trainers:
+            trainer._env_steps += self.config.n_updates * self.config.seq_len
+            if metrics := trainer.episode_tracker.metrics():
+                trainer.log(metrics, idx=trainer._collection_step)
+            trainer._collection_step += 1
+
+        # Soft update target params before validation
+        for trainer in self.trainers:
+            trainer.target_agent.soft_param_update(
+                self.config.tau, trainer.policy_agent.get_params()
+            )
+
+        # Restack target params after soft update
+        all_t_params = stack_pytrees(
+            [t.target_agent.get_params() for t in self.trainers]
+        )
+
+        # Validation collection phase
+        self._batched_collect_phase(
+            all_p_params,
+            all_t_params,
+            all_v_params,
+            all_masks,
+            p_ocm_h,
+            p_acm_h,
+            t_ocm_h,
+            t_acm_h,
+            v_h,
+            n_rollouts=1,
+            seq_len=self.config.seq_len * 2,
+            training=False,
+        )
+
+        # Build rollouts from buffers
+        train_rollouts = [t.train_buffer.to_rollout() for t in self.trainers]
+        valid_rollouts = [t.valid_buffer.to_rollout()[0] for t in self.trainers]
 
         return train_rollouts, valid_rollouts
 
@@ -1513,20 +1828,18 @@ class RuleTrainer:
         """
         Performs meta-training loop to discover an RL update rule.
 
-        Each meta-step collects rollouts from all trainers via a bounded
-        thread pool, then computes vmapped meta-gradients in chunks on
-        the accelerator. Rollout collection for step N+1 is prefetched
-        in the background during step N's gradient computation, meta-update,
-        and logging — overlapping CPU collection with accelerator work.
+        Each meta-step collects rollouts from all trainers via batched
+        vmapped forward passes, then computes meta-gradients in chunks
+        on the accelerator.
 
         Includes
         --------
         1. For each meta-step:
 
-            a. Wait for prefetched rollouts (or collect if first step)
+            a. Collect rollouts from all trainers (batched forward)
             b. Process trainers in chunks via vmapped gradient computation
-            c. Start prefetching next step's rollouts (background)
-            d. Average gradients and update meta-network (overlaps with prefetch)
+            c. Accumulate meta-gradients through the learning process
+            d. Average gradients and update meta-network
 
         2. Log metrics and checkpoints periodically
         """
@@ -1539,7 +1852,7 @@ class RuleTrainer:
                 meta_params = self.meta_agent.get_params()
 
                 accumulated_grad = jax.tree.map(jnp.zeros_like, meta_params)
-                train_rollouts, valid_rollouts = self._get_rollouts(all_indices)
+                train_rollouts, valid_rollouts = self._get_rollouts()
 
                 # Process all chunks and update trainer params
                 for start in range(0, self.num_trainers, self.max_group_size):
@@ -1609,7 +1922,6 @@ class RuleTrainer:
         checkpoint_dir: str,
         *,
         additional_steps: int | None = None,
-        num_collection_workers: int = 8,
         jit_compile: bool = True,
         cache_dir: str | None = ".cache/jax",
         verbose: bool = True,
@@ -1631,9 +1943,6 @@ class RuleTrainer:
             Number of additional meta-training steps beyond the restored
             `meta_step`. When `None`, continues to the original
             `n_meta_steps` target from config. Default is `None`
-        num_collection_workers : int (optional)
-            Maximum number of concurrent threads for rollout collection.
-            Default is `8`
         jit_compile : bool (optional)
             Flag to enable/disable JIT compilation. Default is `True`
         cache_dir : str | None (optional)
@@ -1677,7 +1986,6 @@ class RuleTrainer:
             config=config,
             agents_per_env=meta_run["agents_per_env"],
             max_group_size=meta_run["max_group_size"],
-            num_collection_workers=num_collection_workers,
             seed=meta_run["seed"],
             jit_compile=jit_compile,
             cache_dir=cache_dir,
@@ -1897,7 +2205,6 @@ class RuleTrainer:
 
     def close(self) -> None:
         """Clean up resources."""
-        self._collection_pool.shutdown(wait=False)
         self.cp_manager.close()
 
         for trainer in self.trainers:
