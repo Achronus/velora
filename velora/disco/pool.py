@@ -426,8 +426,7 @@ class TrainerPool:
         end : int
             Last trainer index (exclusive)
         chunk_out : MetaGradOutput
-            Output from `_batch_grad_fn` (already on CPU via
-            `device_get`)
+            Output from `_batch_grad_fn`
         """
         s = slice(start, end)
 
@@ -439,7 +438,7 @@ class TrainerPool:
             lambda dst, src: dst.at[s].set(src), self.v_params, chunk_out.v_params
         )
 
-        # Update target params (same as policy — soft update happens later)
+        # Update target params
         self.t_params = jax.tree.map(
             lambda dst, src: dst.at[s].set(src), self.t_params, chunk_out.p_params
         )

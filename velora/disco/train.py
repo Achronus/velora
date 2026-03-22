@@ -39,6 +39,7 @@ from velora.disco.config.state import (
 )
 from velora.disco.ema import EMAState, MovingAverage
 from velora.disco.outputs import (
+    ChunkLogData,
     HiddenShapeCache,
     LossStatistics,
     MetaGradOutput,
@@ -1130,7 +1131,13 @@ class RuleTrainer:
             meta_params,
             *grad_inputs,
         )
-        chunk_out = jax.device_get(chunk_out)  # ACL->CPU sync
+        del grad_inputs, stacked_disco_h, stacked_meta_h
+
+        # Populate gradient computations in pool
+        self.pool.update_from_grad(start, end, chunk_out)
+
+        # Only transfer scalar logging data to CPU
+        log_data: ChunkLogData = jax.device_get(chunk_out.log_data())
 
         # Post-batch: accumulate gradients and log metrics
         chunk_size = end - start
@@ -1162,19 +1169,19 @@ class RuleTrainer:
             # Log metrics
             self._log_meta_metrics(
                 idx,
-                chunk_out.pg_loss[i],  # type: ignore
-                chunk_out.entropy_loss[i],  # type: ignore
-                chunk_out.reg_loss[i],  # type: ignore
-                chunk_out.meta_loss[i],  # type: ignore
-                chunk_out.advantages[i],  # type: ignore
-                chunk_out.normalized_advantages[i],  # type: ignore
+                log_data.pg_loss[i],  # type: ignore
+                log_data.entropy_loss[i],  # type: ignore
+                log_data.reg_loss[i],  # type: ignore
+                log_data.meta_loss[i],  # type: ignore
+                log_data.advantages[i],  # type: ignore
+                log_data.normalized_advantages[i],  # type: ignore
             )
 
             losses_i = LossStatistics(
-                meta=chunk_out.meta_loss[i],  # type: ignore
-                policy_gradient=chunk_out.pg_loss[i],  # type: ignore
-                entropy=chunk_out.entropy_loss[i],  # type: ignore
-                regularization=chunk_out.reg_loss[i],  # type: ignore
+                meta=log_data.meta_loss[i],  # type: ignore
+                policy_gradient=log_data.pg_loss[i],  # type: ignore
+                entropy=log_data.entropy_loss[i],  # type: ignore
+                regularization=log_data.reg_loss[i],  # type: ignore
             )
 
             ep_tracker: EpisodeTracker = self.pool.episode_trackers[idx]
@@ -1183,6 +1190,9 @@ class RuleTrainer:
                 ep_tracker.windowed_mean_length,
                 losses_i,
             )
+
+        # Accelerator cleanup
+        del chunk_out, log_data
 
         return accumulated_grad
 
@@ -1241,6 +1251,7 @@ class RuleTrainer:
                     lambda g: g / self.num_trainers,
                     accumulated_grad,
                 )
+                del accumulated_grad  # Free before meta update allocates
                 self._apply_meta_update(avg_grad)
 
                 # Log metrics
@@ -1588,10 +1599,6 @@ class RuleTrainer:
         """
         root_dir, sub_dir = self.rule_path.parent, self.rule_path.name
 
-        if self.rule_path.exists():
-            shutil.rmtree(self.rule_path)
-
-        return self.meta_agent.save(root_dir, sub_dir, timestamp=False)
         if self.rule_path.exists():
             shutil.rmtree(self.rule_path)
 

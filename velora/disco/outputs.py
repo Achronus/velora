@@ -620,6 +620,38 @@ class MetaInnerStepCarry:
 
 
 @struct.dataclass
+class ChunkLogData:
+    """
+    Lightweight logging subset of `MetaGradOutput`.
+
+    Contains only the scalar metrics needed for per-trainer logging
+    and dashboard updates.
+
+    Parameters
+    ----------
+    pg_loss : chex.Array
+        Policy gradient loss per trainer `(C,)`
+    entropy_loss : chex.Array
+        Entropy regularisation loss per trainer `(C,)`
+    reg_loss : chex.Array
+        Meta-regularisation loss per trainer `(C,)`
+    meta_loss : chex.Array
+        Total meta-loss per trainer `(C,)`
+    advantages : chex.Array
+        Raw advantages from the validation rollout per trainer
+    normalized_advantages : chex.Array
+        EMA-normalised advantages per trainer
+    """
+
+    pg_loss: chex.Array
+    entropy_loss: chex.Array
+    reg_loss: chex.Array
+    meta_loss: chex.Array
+    advantages: chex.Array
+    normalized_advantages: chex.Array
+
+
+@struct.dataclass
 class MetaGradOutput:
     """
     Outputs from a single meta-gradient computation.
@@ -670,6 +702,25 @@ class MetaGradOutput:
     normalized_advantages: chex.Array
     adv_ema: EMAState
     td_ema: EMAState
+
+    def log_data(self) -> ChunkLogData:
+        """
+        Extract only the scalar logging fields for CPU transfer
+        as a `ChunkLogData` object.
+
+        Returns
+        -------
+        log_data : ChunkLogData
+            Logging-only scalars, safe for `jax.device_get`
+        """
+        return ChunkLogData(
+            pg_loss=self.pg_loss,
+            entropy_loss=self.entropy_loss,
+            reg_loss=self.reg_loss,
+            meta_loss=self.meta_loss,
+            advantages=self.advantages,
+            normalized_advantages=self.normalized_advantages,
+        )
 
 
 @struct.dataclass
