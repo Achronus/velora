@@ -832,11 +832,8 @@ class RuleTrainer:
             max_workers=min(num_collection_workers, self.num_trainers),
             thread_name_prefix="collector",
         )
-        self._prefetch_pool = ThreadPoolExecutor(
-            max_workers=1,
-            thread_name_prefix="prefetch",
-        )
         self._collection_lock = threading.Lock()
+        self._use_threads = jax.default_backend() == "cpu"
 
         # init console dashboard
         _n_chunks = math.ceil(self.num_trainers / self.max_group_size)
@@ -1359,8 +1356,15 @@ class RuleTrainer:
             vr = trainer.collect_valid()
             return tr, vr
 
-        futures = [self._collection_pool.submit(_collect_one, idx) for idx in indices]
-        results = [f.result() for f in futures]
+        if self._use_threads:
+            # CPU: thread pool, parallelises numpy/ALE
+            futures = [
+                self._collection_pool.submit(_collect_one, idx) for idx in indices
+            ]
+            results = [f.result() for f in futures]
+        else:
+            # Accelerator: sequential, no threads
+            results = [_collect_one(idx) for idx in indices]
 
         train_rollouts = [r[0] for r in results]
         valid_rollouts = [r[1] for r in results]
@@ -1528,7 +1532,6 @@ class RuleTrainer:
         """
         self.console.start_training()
         all_indices = list(range(self.num_trainers))
-        prefetch_future = None
 
         try:
             for step in range(self.state.meta_step, self.n_steps):
@@ -1536,12 +1539,7 @@ class RuleTrainer:
                 meta_params = self.meta_agent.get_params()
 
                 accumulated_grad = jax.tree.map(jnp.zeros_like, meta_params)
-
-                # Wait for prefetched rollouts, or collect if first step
-                if prefetch_future is not None:
-                    train_rollouts, valid_rollouts = prefetch_future.result()
-                else:
-                    train_rollouts, valid_rollouts = self._get_rollouts(all_indices)
+                train_rollouts, valid_rollouts = self._get_rollouts(all_indices)
 
                 # Process all chunks and update trainer params
                 for start in range(0, self.num_trainers, self.max_group_size):
@@ -1565,14 +1563,6 @@ class RuleTrainer:
                         meta_params,
                         accumulated_grad,
                         stats,
-                    )
-
-                # Trainers have updated params — safe to prefetch next step
-                # Collection overlaps with meta-update, logging, and checkpointing
-                if step < self.n_steps - 1:
-                    prefetch_future = self._prefetch_pool.submit(
-                        self._get_rollouts,
-                        all_indices,
                     )
 
                 # Apply average gradients through single shared optimizer
@@ -1908,7 +1898,6 @@ class RuleTrainer:
     def close(self) -> None:
         """Clean up resources."""
         self._collection_pool.shutdown(wait=False)
-        self._prefetch_pool.shutdown(wait=False)
         self.cp_manager.close()
 
         for trainer in self.trainers:
