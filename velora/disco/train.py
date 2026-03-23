@@ -711,19 +711,6 @@ class RuleTrainer:
         `meta_params` is shared across the chunk (`in_axes=None`). All per-trainer
         inputs are batched along the leading chunk dimension.
 
-        We use a buffer donation (`donate_argnums`) strategy that allows XLA to
-        reuse the memory of donated inputs for intermediate buffers or outputs,
-        reducing peak VRAM. We donate only freshly-created arrays that are never
-        accessed after the call:
-
-        - `disco_h` (arg 3) and `meta_h` (arg 4): freshly `jnp.stack`'d
-          from per-trainer tuples each chunk
-        - `train_rollout` (arg 9) and `valid_rollout` (arg 10): freshly
-          transferred from numpy via `jnp.asarray` each chunk
-
-        Pool-sliced arrays (params, opt states, EMA, masks) are NOT donated
-        because JAX slicing may alias the parent buffer.
-
         Returns
         -------
         fn : Callable
@@ -755,7 +742,6 @@ class RuleTrainer:
                 _pure_fn,
                 in_axes=(None, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
             ),
-            donate_argnums=(3, 4, 9, 10),
         )
 
     def _build_batched_collect_fn(self) -> Callable:
@@ -1187,8 +1173,8 @@ class RuleTrainer:
             # Update disco/meta hidden states
             self.state = self.state.update_hidden(
                 idx,
-                chunk_out.disco_h[i],  # type: ignore
-                chunk_out.meta_h[i],  # type: ignore
+                chunk_out.disco_h[i].copy(),  # type: ignore
+                chunk_out.meta_h[i].copy(),  # type: ignore
             )
 
             # Norm gradient via per-trainer optimizer
@@ -1233,6 +1219,7 @@ class RuleTrainer:
 
         # Accelerator cleanup
         del chunk_out, log_data
+        jax.effects_barrier()  # flush async ops
 
         return accumulated_grad
 
