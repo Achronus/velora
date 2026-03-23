@@ -13,6 +13,7 @@
 # limitations under the License.
 # ==============================================================================
 
+import multiprocessing as mp
 from functools import partial
 from typing import Literal
 
@@ -25,6 +26,13 @@ from velora.gym.error import MissingPackageError
 from velora.gym.wrappers import FrameStackReshape
 
 VectorMode = Literal["sync", "async", "vector_entry_point"]
+
+# Use "forkserver" to avoid deadlocks when forking alongside
+# JAX's multithreaded CUDA runtime
+try:
+    mp.set_start_method("forkserver")
+except RuntimeError:
+    pass  # Already set/called from subprocesses elsewhere
 
 
 def make_atari_env(
