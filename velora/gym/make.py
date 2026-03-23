@@ -31,7 +31,7 @@ def make_atari_env(
     name: str,
     num_envs: int = 4,
     max_episode_steps: int = 2000,
-    vec_mode: VectorMode = "sync",
+    vec_mode: VectorMode = "async",
     render_mode: str = "rgb_array",
     **kwargs,
 ) -> VectorEnv:
@@ -55,7 +55,7 @@ def make_atari_env(
     max_episode_steps : int (optional)
         Maximum number of episode steps. Default is `2000`
     vec_mode : Literal["sync", "async", "vector_entry_point"] (optional)
-        The type of vector environment to make. Default is `sync`
+        The type of vector environment to make. Default is `async`
     render_mode : str (optional)
         The type of render mode for the environment.
         Default is `rgb_array`
