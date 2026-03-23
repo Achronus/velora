@@ -14,6 +14,7 @@
 # ==============================================================================
 
 import multiprocessing as mp
+import os
 import sys
 from functools import partial
 from typing import Literal
@@ -37,6 +38,59 @@ try:
     mp.set_start_method("forkserver")
 except RuntimeError:
     pass  # Already set/called from subprocesses elsewhere
+
+
+def _make_silent_env(
+    name: str,
+    render_mode: str,
+    wrappers: list,
+    **kwargs,
+) -> gym.Env:
+    """
+    Create a single wrapped environment with C-level stdout/stderr
+    suppressed during ROM loading.
+
+    Redirects OS file descriptors 1 and 2 to `/dev/null` around the
+    `gym.make` call. This catches ALE's C-level `printf` banner that
+    fires on ROM initialization — something Python-level
+    `redirect_stdout` cannot suppress.
+
+    Parameters
+    ----------
+    name : str
+        Gymnasium environment ID
+    render_mode : str
+        Render mode for the environment
+    wrappers : list
+        Ordered list of wrapper callables to apply
+    kwargs : Any
+        Additional arguments passed to `gym.make()`
+
+    Returns
+    -------
+    env : gym.Env
+        Wrapped environment
+    """
+    # Redirect OS-level file descriptors to suppress C-level prints
+    fd_out = os.dup(1)
+    fd_err = os.dup(2)
+    devnull = os.open(os.devnull, os.O_WRONLY)
+    os.dup2(devnull, 1)
+    os.dup2(devnull, 2)
+
+    try:
+        env = gym.make(name, render_mode=render_mode, **kwargs)
+
+        for wrapper in wrappers:
+            env = wrapper(env)
+        return env
+
+    finally:
+        os.dup2(fd_out, 1)
+        os.dup2(fd_err, 2)
+        os.close(fd_out)
+        os.close(fd_err)
+        os.close(devnull)
 
 
 def make_atari_env(
@@ -104,14 +158,23 @@ def make_atari_env(
     )
     framestack = partial(FrameStackObservation, stack_size=4)  # (84, 84, 4))
     time_limit = partial(TimeLimit, max_episode_steps=effective_limit)
+    wrappers = [preprocess, framestack, FrameStackReshape, time_limit]
 
-    envs = gym.make_vec(
-        name,
-        num_envs=num_envs,
-        vectorization_mode=vec_mode,
-        render_mode=render_mode,
-        wrappers=[preprocess, framestack, FrameStackReshape, time_limit],
-        frameskip=1,  # Handled by AtariPreprocessing
-        **kwargs,
-    )
+    env_fns = [
+        partial(
+            _make_silent_env,
+            name,
+            render_mode,
+            wrappers,
+            frameskip=1,  # Handled by AtariPreprocessing
+            **kwargs,
+        )
+        for _ in range(num_envs)
+    ]
+
+    if vec_mode == "async":
+        envs = gym.vector.AsyncVectorEnv(env_fns)
+    else:
+        envs = gym.vector.SyncVectorEnv(env_fns)
+
     return RecordEpisodeStatistics(envs)
