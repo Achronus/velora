@@ -14,9 +14,11 @@
 # ==============================================================================
 
 import multiprocessing as mp
+import sys
 from functools import partial
 from typing import Literal
 
+import ale_py
 import gymnasium as gym
 from gymnasium.vector import VectorEnv
 from gymnasium.wrappers import AtariPreprocessing, FrameStackObservation, TimeLimit
@@ -26,6 +28,8 @@ from velora.gym.error import MissingPackageError
 from velora.gym.wrappers import FrameStackReshape
 
 VectorMode = Literal["sync", "async", "vector_entry_point"]
+
+gym.register_envs(ale_py)
 
 # Use "forkserver" to avoid deadlocks when forking alongside
 # JAX's multithreaded CUDA runtime
@@ -75,15 +79,11 @@ def make_atari_env(
     envs : JaxConversion
         A set of wrapped vectorized environments
     """
-    try:
-        import ale_py
-
-        gym.register_envs(ale_py)
-    except ImportError as e:
+    if "ale_py" not in sys.modules:
         raise MissingPackageError(
             "Atari environments require 'ale-py'. "
             "Install with: pip install 'gymnasium[atari]'"
-        ) from e
+        )
 
     # Compute effective step limit - use smaller than max where possible
     spec = gym.spec(name)
