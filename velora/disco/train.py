@@ -542,8 +542,13 @@ class RuleTrainer:
         """
         Pre-compile all gradient functions before training begins.
 
-        Uses the trainer pool's zero-filled buffers and stacked arrays
-        for shape inference. Compiles for every distinct chunk size.
+        Warms:
+            1. `_batched_collect_fn` — vmapped forward pass over all trainers
+            2. `_batch_grad_fn` — vmapped meta-gradient for each chunk size
+            3. `_meta_optim_update` — shared meta optimizer
+            4. Per-trainer meta-optim updates
+
+        Uses the trainer pool's existing accelerator arrays for shape inference.
         """
         meta_params = self.meta_agent.get_params()
 
@@ -554,7 +559,24 @@ class RuleTrainer:
             else jax.jit(self.meta_optim.update)
         )
 
-        # Compile for every distinct chunk size
+        # Warm the collection forward pass
+        dummy_obs = jnp.asarray(self.pool.obs)
+        _ = self._batched_collect_fn(
+            dummy_obs,
+            self.pool.p_params,
+            self.pool.t_params,
+            self.pool.v_params,
+            self.pool.p_ocm_h,
+            self.pool.p_acm_h,
+            self.pool.t_ocm_h,
+            self.pool.t_acm_h,
+            self.pool.v_h,
+            self.pool.action_masks,
+        )
+        del dummy_obs
+        jax.effects_barrier()
+
+        # Warm the gradient function for each chunk size
         chunk_sizes = {min(self.max_group_size, self.num_trainers)}
         remainder = self.num_trainers % self.max_group_size
 
