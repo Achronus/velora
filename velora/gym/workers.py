@@ -136,6 +136,38 @@ class EnvWorkerPool:
         `ceil(num_trainers / num_workers)` trainers
     """
 
+    @staticmethod
+    def verify_workers(num_workers: int) -> None:
+        """
+        Verify the system can support the requested number of worker processes.
+
+        Uses `os.cpu_count()` as a cross-platform upper bound — spawning
+        more workers than available CPUs wastes resources and risks
+        hitting OS thread/process limits inside containers.
+
+        Parameters
+        ----------
+        num_workers : int
+            Requested number of worker processes
+
+        Raises
+        ------
+        RuntimeError
+            If the system cannot support the requested worker count
+        """
+        cpu_count = os.cpu_count() or 1
+
+        # Reserve 1 core for the main process (JAX, training loop),
+        # round down to nearest multiple of 8
+        max_workers = max(1, (cpu_count - 1) // 8 * 8)
+
+        if num_workers > max_workers:
+            raise RuntimeError(
+                f"Requested {num_workers} env workers but only {cpu_count} "
+                f"CPU cores detected. "
+                f"We recommend 'num_env_workers={max_workers}' instead."
+            )
+
     def __init__(
         self,
         env_specs: List[Tuple[str, MakeFn, int]],

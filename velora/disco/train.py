@@ -373,6 +373,9 @@ class RuleTrainer:
         use_bfloat16: bool = True,
         debug: bool = False,
     ) -> None:
+        # Verify valid worker size
+        EnvWorkerPool.verify_workers(num_env_workers)
+
         # spawn re-executes __main__ in child processes — skip init
         # entirely so workers don't recreate trainers or dashboards
         self._is_subprocess = os.environ.get("_VELORA_WORKER") == "1"
