@@ -13,9 +13,12 @@
 # limitations under the License.
 # ==============================================================================
 
-import multiprocessing as mp
+import importlib.resources
+import json
 import os
-from multiprocessing.connection import Connection
+import struct
+import subprocess
+import sys
 from typing import TYPE_CHECKING, Callable, List, Tuple
 
 import numpy as np
@@ -25,104 +28,64 @@ if TYPE_CHECKING:
 
 MakeFn = Callable[..., "VectorEnv"]
 
+CMD_STEP = 1
+CMD_RESET = 2
+CMD_CLOSE = 3
 
-def _worker_process(
-    cmd_conn: Connection,
-    result_conn: Connection,
-    env_specs: List[Tuple[str, int]],
-    make_fn_ref: Tuple[str, str],
-) -> None:
+
+def _read_exact(fd: int, n: int) -> bytes:
+    """Read exactly `n` bytes from a file descriptor."""
+    chunks = []
+    remaining = n
+
+    while remaining > 0:
+        chunk = os.read(fd, remaining)
+
+        if not chunk:
+            raise EOFError("Worker pipe closed unexpectedly")
+        chunks.append(chunk)
+        remaining -= len(chunk)
+
+    return b"".join(chunks)
+
+
+def _write_all(fd: int, data: bytes) -> None:
+    """Write all bytes to a file descriptor."""
+    view = memoryview(data)
+    offset = 0
+
+    while offset < len(view):
+        written = os.write(fd, view[offset:])
+        offset += written
+
+
+def _worker_script_path() -> str:
     """
-    Environment worker subprocess main loop.
+    Locate `velora/gym/worker.py` on disk.
 
-    Creates and steps environments locally. Never touches the GPU —
-    `CUDA_VISIBLE_DEVICES` is cleared before any imports that could
-    trigger JAX initialization.
+    Uses `importlib.resources` to handle both source checkouts and
+    installed packages (wheels, editable installs).
 
-    The `make_fn` is passed as a `(module, qualname)` string pair
-    rather than a callable to prevent pickle from importing `velora`
-    (and triggering console/GPU initialization) before the worker has
-    a chance to silence stdout and hide CUDA.
-
-    Parameters
-    ----------
-    cmd_conn : Connection
-        Receives commands from the main process
-    result_conn : Connection
-        Sends results back to the main process
-    env_specs : List[Tuple[str, int]]
-        `(env_name, batch_size)` for each trainer this worker owns
-    make_fn_ref : Tuple[str, str]
-        `(module_path, function_name)` for lazy import of the
-        environment factory function
+    Returns
+    -------
+    path : str
+        Absolute path to the worker script
     """
-    # Ensure no GPU access — belt and suspenders with parent's env var
-    os.environ["CUDA_VISIBLE_DEVICES"] = ""
-
-    # Import velora after silencing
-    import importlib
-
-    module = importlib.import_module(make_fn_ref[0])
-    make_fn = getattr(module, make_fn_ref[1])
-
-    # Create environments
-    envs: List["VectorEnv"] = []
-    for env_name, batch_size in env_specs:
-        env: "VectorEnv" = make_fn(env_name, batch_size)
-        envs.append(env)
-
-    # Reset all environments and send initial observations
-    initial_obs = []
-    for env in envs:
-        obs, _ = env.reset()
-        initial_obs.append(obs)
-
-    result_conn.send(initial_obs)
-
-    # Command loop
-    while True:
-        msg = cmd_conn.recv()
-        cmd = msg[0]
-
-        if cmd == "step":
-            actions_list = msg[1]
-            results = []
-
-            for env, actions in zip(envs, actions_list):
-                next_obs, rewards, terminated, truncated, _ = env.step(actions)
-                results.append((next_obs, rewards, terminated, truncated))
-
-            result_conn.send(results)
-
-        elif cmd == "reset":
-            local_idx: int = msg[1]
-            env_name, batch_size = env_specs[local_idx]
-
-            envs[local_idx].close()
-            envs[local_idx] = make_fn(env_name, batch_size, vec_mode="sync")
-
-            obs, _ = envs[local_idx].reset()
-            result_conn.send(obs)
-
-        elif cmd == "close":
-            for env in envs:
-                env.close()
-            break
+    return str(importlib.resources.files("velora.gym").joinpath("worker.py"))
 
 
 class EnvWorkerPool:
     """
     Fixed-size process pool for parallel environment stepping.
 
-    Spawns `num_workers` subprocesses using the `spawn` start method,
-    each owning a contiguous slice of trainers' environments. Workers
-    create and step environments locally — they never import JAX with
-    GPU support or allocate VRAM.
+    Launches `num_workers` subprocesses via `subprocess.Popen`,
+    each owning a contiguous slice of trainers' environments.
+    Workers are standalone Python scripts that never import
+    velora or JAX — no fork, no CUDA context, no GIL contention.
 
-    The pool is created once during setup and reused for the entire
-    training run. Each collection timestep fans out actions to all
-    workers, then collects `(obs, rewards, terminated, truncated)`
-    back through pipes.
+    Communication uses dedicated pipe file descriptors with a binary
+    protocol. Each collection timestep fans out actions to all workers
+    simultaneously, then collects results.
 
     Remainder trainers are distributed one contiguous slice each across
     the first `remainder` workers for even load balancing.
@@ -134,6 +97,8 @@ class EnvWorkerPool:
     num_workers : int
         Number of worker processes to spawn. Each worker owns
         `ceil(num_trainers / num_workers)` trainers
+    max_episode_steps : int (optional)
+        Maximum episode steps for Atari environments. Default is `2000`
     """
 
     @staticmethod
@@ -172,13 +137,10 @@ class EnvWorkerPool:
         self,
         env_specs: List[Tuple[str, MakeFn, int]],
         num_workers: int,
+        max_episode_steps: int = 2000,
     ) -> None:
         self.num_trainers = len(env_specs)
         self.num_workers = min(num_workers, self.num_trainers)
-
-        # All trainers share the same make_fn
-        _make_fn = env_specs[0][1]
-        self._make_fn_ref = (_make_fn.__module__, _make_fn.__qualname__)
 
         # Assign trainers to workers in contiguous slices
         self._worker_slices: List[Tuple[int, int]] = []  # (start, end)
@@ -197,81 +159,83 @@ class EnvWorkerPool:
             for local_idx, global_idx in enumerate(range(s, e)):
                 self._trainer_to_worker[global_idx] = (w, local_idx)
 
-        # Spawn workers using "spawn" context — no fork, no JAX
-        # thread state inheritance, no deadlock risk
-        ctx = mp.get_context("spawn")
+        # Locate worker script — invoked as a file
+        worker_script = _worker_script_path()
 
-        self._cmd_conns: List[Connection] = []
-        self._result_conns: List[Connection] = []
-        self._processes: List[mp.Process] = []
-
-        # Hide CUDA from child processes and mark as worker subprocess
-        _old_cuda = os.environ.get("CUDA_VISIBLE_DEVICES")
-        os.environ["CUDA_VISIBLE_DEVICES"] = ""
-        os.environ["_VELORA_WORKER"] = "1"
+        # Spawn workers
+        self._cmd_fds: List[int] = []
+        self._result_fds: List[int] = []
+        self._processes: List[subprocess.Popen] = []
 
         for w in range(self.num_workers):
             s, e = self._worker_slices[w]
-            worker_specs = [
+            worker_env_specs = [
                 (name, batch_size) for name, _, batch_size in env_specs[s:e]
             ]
 
-            parent_cmd, child_cmd = ctx.Pipe()
-            parent_result, child_result = ctx.Pipe()
-
-            p = ctx.Process(
-                target=_worker_process,
-                args=(child_cmd, child_result, worker_specs, self._make_fn_ref),
-                daemon=True,
-            )
-            p.start()
-
-            # Close child-side connections in parent (avoids fd leak)
-            child_cmd.close()
-            child_result.close()
-
-            self._cmd_conns.append(parent_cmd)  # type: ignore
-            self._result_conns.append(parent_result)  # type: ignore
-            self._processes.append(p)  # type: ignore
-
-        # Verify all workers are alive
-        dead = [w for w, p in enumerate(self._processes) if not p.is_alive()]
-        if dead:
-            self.close()
-            raise RuntimeError(
-                f"Env workers {dead} died on startup. Process/thread limits reached."
-                f"Try reducing num_env_workers (currently {num_workers}). "
+            config = json.dumps(
+                {
+                    "env_specs": worker_env_specs,
+                    "max_episode_steps": max_episode_steps,
+                }
             )
 
-        # Restore CUDA visibility in parent
-        if _old_cuda is not None:
-            os.environ["CUDA_VISIBLE_DEVICES"] = _old_cuda
-        else:
-            os.environ.pop("CUDA_VISIBLE_DEVICES", None)
+            proc = subprocess.Popen(
+                [sys.executable, worker_script, config],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+            )
 
-        os.environ.pop("_VELORA_WORKER", None)
+            # Get raw fds from the pipe file objects for binary I/O
+            self._cmd_fds.append(proc.stdin.fileno())  # type: ignore
+            self._result_fds.append(proc.stdout.fileno())  # type: ignore
+            self._processes.append(proc)
+
+        # Read shape info from each worker
+        shapes = None
+        for w in range(self.num_workers):
+            json_len = struct.unpack("<I", _read_exact(self._result_fds[w], 4))[0]
+            worker_shapes = json.loads(
+                _read_exact(self._result_fds[w], json_len).decode()
+            )
+
+            if shapes is None:
+                shapes = worker_shapes
+
+        assert shapes is not None
+        self._obs_shape = tuple(shapes["obs_shape"])
+        self._obs_dtype = np.dtype(shapes["obs_dtype"])
+        self._batch_size = self._obs_shape[0]
+
+        # Pre-compute fixed sizes for hot loop
+        self._obs_nbytes = int(np.prod(self._obs_shape)) * self._obs_dtype.itemsize
+        self._action_nbytes = self._batch_size * np.dtype(np.int32).itemsize
+        self._reward_nbytes = self._batch_size * np.dtype(np.float32).itemsize
+        self._flag_nbytes = self._batch_size  # uint8
+
+        self._result_nbytes_per_env = (
+            self._obs_nbytes + self._reward_nbytes + self._flag_nbytes * 2
+        )
 
         # Collect initial observations from all workers
         self.initial_obs = self._collect_initial_obs()
 
         # Pre-allocate reusable buffers for step_all results
-        sample_obs: np.ndarray = self.initial_obs[0]  # (B, H, W, C)
-        batch_size = sample_obs.shape[0]
-
         self._step_obs = np.empty(
-            (self.num_trainers, *sample_obs.shape),
-            dtype=sample_obs.dtype,
+            (self.num_trainers, *self._obs_shape),
+            dtype=self._obs_dtype,
         )
         self._step_rewards = np.empty(
-            (self.num_trainers, batch_size),
+            (self.num_trainers, self._batch_size),
             dtype=np.float32,
         )
         self._step_terminated = np.empty(
-            (self.num_trainers, batch_size),
+            (self.num_trainers, self._batch_size),
             dtype=np.bool_,
         )
         self._step_truncated = np.empty(
-            (self.num_trainers, batch_size),
+            (self.num_trainers, self._batch_size),
             dtype=np.bool_,
         )
 
@@ -286,8 +250,14 @@ class EnvWorkerPool:
         """
         all_obs = []
         for w in range(self.num_workers):
-            obs_list = self._result_conns[w].recv()
-            all_obs.extend(obs_list)
+            s, e = self._worker_slices[w]
+
+            for _ in range(e - s):
+                obs_bytes = _read_exact(self._result_fds[w], self._obs_nbytes)
+                obs = np.frombuffer(obs_bytes, dtype=self._obs_dtype).reshape(
+                    self._obs_shape
+                )
+                all_obs.append(obs.copy())
 
         return np.stack(all_obs)
 
@@ -300,7 +270,7 @@ class EnvWorkerPool:
 
         Fans out actions to all workers, then collects results.
         Workers step their assigned trainers sequentially within
-        each process, but all workers run simultaneously.
+        each process, but all workers run in parallel.
 
         Returns views into internal buffers — valid until the next
         `step_all` call.
@@ -321,23 +291,60 @@ class EnvWorkerPool:
         truncated : np.ndarray
             Truncation flags. Shape: `(P, B)`
         """
-        # Fan out — send each worker its slice of actions
+        # Fan out — send CMD_STEP + actions to each worker
         for w in range(self.num_workers):
             s, e = self._worker_slices[w]
-            worker_actions = [all_actions[i].squeeze(-1) for i in range(s, e)]
-            self._cmd_conns[w].send(("step", worker_actions))
 
-        # Collect — write into pre-allocated buffers
+            action_parts = [
+                all_actions[i].squeeze(-1).astype(np.int32).tobytes()
+                for i in range(s, e)
+            ]
+            msg = bytes([CMD_STEP]) + b"".join(action_parts)
+            _write_all(self._cmd_fds[w], msg)
+
+        # Collect results from each worker
         for w in range(self.num_workers):
-            results = self._result_conns[w].recv()
-            s, _ = self._worker_slices[w]
+            s, e = self._worker_slices[w]
+            num_envs = e - s
 
-            for local_idx, (obs, rew, term, trunc) in enumerate(results):
+            result_bytes = _read_exact(
+                self._result_fds[w],
+                num_envs * self._result_nbytes_per_env,
+            )
+
+            offset = 0
+            for local_idx in range(num_envs):
                 global_idx = s + local_idx
+
+                # Obs
+                end = offset + self._obs_nbytes
+                obs = np.frombuffer(
+                    result_bytes[offset:end], dtype=self._obs_dtype
+                ).reshape(self._obs_shape)
                 np.copyto(self._step_obs[global_idx], obs)
+                offset = end
+
+                # Rewards
+                end = offset + self._reward_nbytes
+                rew = np.frombuffer(result_bytes[offset:end], dtype=np.float32)
                 np.copyto(self._step_rewards[global_idx], rew)
+                offset = end
+
+                # Terminated
+                end = offset + self._flag_nbytes
+                term = np.frombuffer(result_bytes[offset:end], dtype=np.uint8).astype(
+                    np.bool_
+                )
                 np.copyto(self._step_terminated[global_idx], term)
+                offset = end
+
+                # Truncated
+                end = offset + self._flag_nbytes
+                trunc = np.frombuffer(result_bytes[offset:end], dtype=np.uint8).astype(
+                    np.bool_
+                )
                 np.copyto(self._step_truncated[global_idx], trunc)
+                offset = end
 
         return (
             self._step_obs,
@@ -365,19 +372,33 @@ class EnvWorkerPool:
             Initial observation from the reset. Shape: `(B, ...)`
         """
         w, local_idx = self._trainer_to_worker[global_idx]
-        self._cmd_conns[w].send(("reset", local_idx))
-        return self._result_conns[w].recv()
+
+        msg = bytes([CMD_RESET]) + struct.pack("<I", local_idx)
+        _write_all(self._cmd_fds[w], msg)
+
+        obs_bytes = _read_exact(self._result_fds[w], self._obs_nbytes)
+        return (
+            np.frombuffer(obs_bytes, dtype=self._obs_dtype)
+            .reshape(self._obs_shape)
+            .copy()
+        )
 
     def close(self) -> None:
         """Shut down all worker processes."""
         for w in range(self.num_workers):
             try:
-                self._cmd_conns[w].send(("close",))
+                _write_all(self._cmd_fds[w], bytes([CMD_CLOSE]))
             except (BrokenPipeError, OSError):
                 pass
 
-        for p in self._processes:
-            p.join(timeout=5)
+        for proc in self._processes:
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.terminate()
 
-            if p.is_alive():
-                p.terminate()
+            # Close pipe file objects (owns the fds)
+            if proc.stdin:
+                proc.stdin.close()
+            if proc.stdout:
+                proc.stdout.close()
