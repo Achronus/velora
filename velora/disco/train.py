@@ -1623,7 +1623,7 @@ class RuleTrainer:
         self.state = restored["state"]
 
         # Reset all agent trainers
-        for idx in range(self.num_envs):
+        for idx in range(self.num_trainers):
             self.reset_trainer(idx)
 
         return True
