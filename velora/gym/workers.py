@@ -202,6 +202,15 @@ class EnvWorkerPool:
             self._result_conns.append(parent_result)  # type: ignore
             self._processes.append(p)  # type: ignore
 
+        # Verify all workers are alive
+        dead = [w for w, p in enumerate(self._processes) if not p.is_alive()]
+        if dead:
+            self.close()
+            raise RuntimeError(
+                f"Env workers {dead} died on startup. Process/thread limits reached."
+                f"Try reducing num_env_workers (currently {num_workers}). "
+            )
+
         # Restore CUDA visibility in parent
         if _old_cuda is not None:
             os.environ["CUDA_VISIBLE_DEVICES"] = _old_cuda
