@@ -580,7 +580,12 @@ class RuleTrainer:
 
         # Warm the collection forward pass
         dummy_obs = jnp.asarray(self.pool.obs)
-        _ = self._batched_collect_fn(
+        (
+            warm_preds,
+            warm_target_preds,
+            warm_values,
+            *_,
+        ) = self._batched_collect_fn(
             dummy_obs,
             self.pool.p_params,
             self.pool.t_params,
@@ -592,8 +597,16 @@ class RuleTrainer:
             self.pool.v_h,
             self.pool.action_masks,
         )
-        del dummy_obs
+
+        # Warm XLA's GPU->CPU host transfer
+        _ = jax.device_get((warm_preds, warm_target_preds, warm_values))
+
+        del dummy_obs, warm_preds, warm_target_preds, warm_values
         jax.effects_barrier()
+
+        # Pre-touch rollout buffer pages
+        self.pool.train_buffer.prefault()
+        self.pool.valid_buffer.prefault()
 
         # Warm the gradient function for each chunk size
         chunk_sizes = {min(self.max_group_size, self.num_trainers)}
@@ -1360,7 +1373,7 @@ class RuleTrainer:
                 self.console.update_progress("Meta Steps")
 
                 # Cleanup
-                del avg_grad
+                del avg_grad, stats
                 jax.effects_barrier()
 
         except (KeyboardInterrupt, SystemExit):

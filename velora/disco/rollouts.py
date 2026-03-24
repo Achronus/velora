@@ -367,6 +367,38 @@ class PoolRolloutBuffer:
         self._rollout_idx = 0
         self._step_idx = 0
 
+    def prefault(self) -> None:
+        """
+        Force the OS to map physical pages for all pre-allocated arrays.
+
+        Freshly allocated numpy arrays (via `np.zeros`) are virtual —
+        the OS defers physical page mapping until first write. This
+        causes page faults on the first collection step (~150ms/step
+        overhead). `fill(0)` is a single C-level `memset` that
+        touches every page, forcing the kernel to map them upfront.
+
+        Call once during setup, after buffer construction.
+        """
+        for arr in [
+            self.actions,
+            self.rewards,
+            self.discounts,
+            self.values,
+            self.p_encoding,
+            self.p_pi,
+            self.p_y,
+            self.p_z,
+            self.p_aux_pi,
+            self.p_q,
+            self.t_encoding,
+            self.t_pi,
+            self.t_y,
+            self.t_z,
+            self.t_aux_pi,
+            self.t_q,
+        ]:
+            arr.fill(0)
+
     def get_chunk(self, start: int, end: int, squeeze_n: bool = False) -> Rollout:
         """
         Slice trainers `[start:end]` and transfer to accelerator as a `Rollout`.
