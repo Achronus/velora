@@ -13,12 +13,125 @@
 # limitations under the License.
 # ==============================================================================
 
+import logging
+import os
+import sys
 from concurrent.futures import ThreadPoolExecutor
+from io import TextIOWrapper
+from pathlib import Path
 from typing import Dict
 
 from tensorboardX import SummaryWriter
 
 from velora.tracking.settings import MetricLoggerSettings
+
+
+class _TeeWriter:
+    """
+    File-like object that writes to both a terminal fd and a log file.
+
+    Used to replace `sys.stderr` so that Python-level tracebacks
+    and warnings appear on the terminal AND get captured to disk.
+
+    Parameters
+    ----------
+    terminal_fd : int
+        File descriptor of the original terminal stream (saved via
+        `os.dup` before fd 2 was redirected)
+    log_file : TextIOWrapper
+        Open file handle for the log file
+    """
+
+    def __init__(self, terminal_fd: int, log_file: TextIOWrapper) -> None:
+        self._terminal_fd = terminal_fd
+        self._log_file = log_file
+
+    def write(self, msg: str) -> int:
+        """Write to both terminal and log file."""
+        encoded = msg.encode() if isinstance(msg, str) else msg
+        os.write(self._terminal_fd, encoded)
+
+        self._log_file.write(msg)
+        self._log_file.flush()
+        return len(msg)
+
+    def flush(self) -> None:
+        """Flush the log file (terminal fd is unbuffered)."""
+        self._log_file.flush()
+
+    def fileno(self) -> int:
+        """Return the terminal fd for compatibility."""
+        return self._terminal_fd
+
+
+class RuntimeLogger:
+    """
+    Captures Python warnings and stderr to a log file.
+
+    Intercepts three streams into a single `runtime.log` file:
+
+    1. **Python warnings** — via `logging.captureWarnings(True)` with
+       a `FileHandler`. Catches `warnings.warn()` from JAX, numpy,
+       gymnasium, etc.
+    2. **Python stderr** — via a tee that writes to both the terminal
+       and the log file. Catches tracebacks, logging output, and any
+       `print(..., file=sys.stderr)` calls.
+    3. **C-level stderr** — by redirecting OS file descriptor 2 to the
+       log file. Catches JAX/XLA plugin errors, CUDA warnings, and
+       other native code output that bypasses Python's `sys.stderr`.
+
+    Parameters
+    ----------
+    log_dir : Path
+        Directory to write `runtime.log` into (created if needed)
+    """
+
+    def __init__(self, log_dir: Path) -> None:
+        log_dir.mkdir(parents=True, exist_ok=True)
+        self._log_path = log_dir / "runtime.log"
+        self._log_file = open(self._log_path, "a", encoding="utf-8")
+
+        # Python warnings → file via logging
+        self._handler = logging.FileHandler(self._log_path, encoding="utf-8")
+        self._handler.setFormatter(
+            logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
+        )
+        self._warnings_logger = logging.getLogger("py.warnings")
+        self._warnings_logger.addHandler(self._handler)
+        self._warnings_logger.setLevel(logging.WARNING)
+        logging.captureWarnings(True)
+
+        # C-level stderr → file only
+        # Save the real terminal fd so the tee can still write there
+        self._saved_stderr_fd = os.dup(2)
+        log_fd = self._log_file.fileno()
+        os.dup2(log_fd, 2)  # fd 2 → log file (C-level writes go here)
+
+        # Python stderr → tee (terminal + file)
+        self._original_stderr = sys.stderr
+        sys.stderr = _TeeWriter(self._saved_stderr_fd, self._log_file)  # type: ignore
+
+    @property
+    def path(self) -> Path:
+        """Path to the runtime log file."""
+        return self._log_path
+
+    def close(self) -> None:
+        """Restore stderr and close the log file."""
+        # Restore Python stderr
+        sys.stderr = self._original_stderr
+
+        # Restore C-level stderr
+        os.dup2(self._saved_stderr_fd, 2)
+        os.close(self._saved_stderr_fd)
+
+        # Remove logging handler
+        logging.captureWarnings(False)
+        self._warnings_logger.removeHandler(self._handler)
+        self._handler.close()
+
+        # Close log file
+        self._log_file.close()
 
 
 class MetricsLogger:

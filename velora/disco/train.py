@@ -64,7 +64,7 @@ from velora.gym.envs import EnvGroup, EnvSet, MakeFn
 from velora.gym.workers import EnvWorkerPool
 from velora.nn.optim import scale_by_adan_no_denom
 from velora.tracking.episode import EpisodeTracker
-from velora.tracking.logger import MetricsLogger
+from velora.tracking.logger import MetricsLogger, RuntimeLogger
 from velora.tracking.manager import CheckpointManager
 from velora.utils.config import dump_config, load_config
 from velora.utils.format import cache_status
@@ -428,6 +428,9 @@ class RuleTrainer:
         # Init logger - one writer per unique env
         self.logger = MetricsLogger(self.config.logger)
         self.logger.add_writer("meta")
+
+        # Init runtime logger - capture warnings and stderr to runtime.log
+        self.runtime_logger = RuntimeLogger(self.logger.root_dir)
 
         for name, _ in self._unique_env_specs:
             self.logger.add_writer(f"envs/{name}")
@@ -1664,6 +1667,7 @@ class RuleTrainer:
             self.pool.close()
 
         self.cp_manager.close()
+        self.runtime_logger.close()
 
     def save_rule(self) -> Path:
         """
