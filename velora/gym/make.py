@@ -13,11 +13,9 @@
 # limitations under the License.
 # ==============================================================================
 
-import multiprocessing as mp
 import os
 import sys
 from functools import partial
-from typing import Literal
 
 import ale_py
 import gymnasium as gym
@@ -28,16 +26,7 @@ from gymnasium.wrappers.vector import RecordEpisodeStatistics
 from velora.gym.error import MissingPackageError
 from velora.gym.wrappers import FrameStackReshape
 
-VectorMode = Literal["sync", "async", "vector_entry_point"]
-
 gym.register_envs(ale_py)
-
-# Use "forkserver" to avoid deadlocks when forking alongside
-# JAX's multithreaded CUDA runtime
-try:
-    mp.set_start_method("forkserver")
-except RuntimeError:
-    pass  # Already set/called from subprocesses elsewhere
 
 
 def _make_silent_env(
@@ -97,13 +86,12 @@ def make_atari_env(
     name: str,
     num_envs: int = 4,
     max_episode_steps: int = 2000,
-    vec_mode: VectorMode = "async",
     render_mode: str = "rgb_array",
     **kwargs,
 ) -> VectorEnv:
     """
-    Creates a vectorized [Atari](https://ale.farama.org/) environment using common
-    pre-processing techniques.
+    Creates a sync vectorized [Atari](https://ale.farama.org/) environment
+    using common pre-processing techniques.
 
     Applies wrappers -
     - `gymnasium.wrappers.AtariPreprocessing`
@@ -120,8 +108,6 @@ def make_atari_env(
         The number of vectorized environments to make. Default is `4`
     max_episode_steps : int (optional)
         Maximum number of episode steps. Default is `2000`
-    vec_mode : Literal["sync", "async", "vector_entry_point"] (optional)
-        The type of vector environment to make. Default is `async`
     render_mode : str (optional)
         The type of render mode for the environment.
         Default is `rgb_array`
@@ -172,9 +158,5 @@ def make_atari_env(
         for _ in range(num_envs)
     ]
 
-    if vec_mode == "async":
-        envs = gym.vector.AsyncVectorEnv(env_fns)
-    else:
-        envs = gym.vector.SyncVectorEnv(env_fns)
-
+    envs = gym.vector.SyncVectorEnv(env_fns)
     return RecordEpisodeStatistics(envs)

@@ -66,7 +66,10 @@ class ConsoleDashboard:
         self._is_setting_up = False
         self._is_training = False
 
-        self.console = Console(width=width)
+        # Force console display
+        self._console_file = os.fdopen(os.dup(1), "w")
+        self.console = Console(width=width, file=self._console_file)
+
         self._live: Live | None = None
 
     def _check_terminal_width(self) -> None:

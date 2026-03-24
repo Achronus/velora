@@ -13,11 +13,9 @@
 # limitations under the License.
 # ==============================================================================
 
-from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING, Callable, Dict, List
 
 import chex
-import gymnasium as gym
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -26,6 +24,7 @@ import optax
 from velora.disco.inputs import GradChunkInputs
 from velora.disco.outputs import HiddenShapeCache, MetaGradOutput
 from velora.disco.rollouts import PoolRolloutBuffer
+from velora.gym.workers import EnvWorkerPool
 from velora.tracking.episode import EpisodeTracker
 from velora.utils.transforms import stack_pytrees
 
@@ -44,7 +43,9 @@ class TrainerPool:
 
     - **Collection** — `collect()` runs the batched forward pass loop,
     writing directly into `PoolRolloutBuffer` instances. One vmapped
-    accelerator call per step across all trainers.
+    accelerator call per step across all trainers. Environment stepping
+    is delegated to an `EnvWorkerPool` of long-lived subprocesses for
+    parallel execution.
 
     - **Gradient** — `get_grad_inputs()` slices the stacked arrays for
     a chunk of trainers. `update_from_grad()` writes gradient results
@@ -78,9 +79,8 @@ class TrainerPool:
     use_bfloat16 : bool (optional)
         Cast rollout floats to `bfloat16` on accelerator transfer.
         Default is `True`
-    num_env_workers : int (optional)
-        Number of threads for parallel environment stepping.
-        Default is `16`
+    env_worker_pool : EnvWorkerPool
+        Subprocess worker pool for parallel environment stepping
     """
 
     def __init__(
@@ -95,16 +95,17 @@ class TrainerPool:
         encoding_dim: int,
         prediction_dim: int,
         q_dim: int,
+        env_worker_pool: EnvWorkerPool,
         *,
         use_bfloat16: bool = True,
-        num_env_workers: int = 16,
     ) -> None:
         self.num_trainers = len(trainers)
         self.max_actions = max_actions
+
         self._hidden_shapes = hidden_shapes
+        self._env_workers = env_worker_pool
 
         # Per-trainer metadata (not stacked)
-        self.envs: List[gym.vector.VectorEnv] = [t.envs for t in trainers]
         self.episode_trackers: List[EpisodeTracker] = [
             t.episode_tracker for t in trainers
         ]
@@ -144,7 +145,7 @@ class TrainerPool:
         self._init_hidden(trainers)
 
         # Current observations — numpy (P, B, H, W, C)
-        self.obs = np.stack([t.state.current_obs for t in trainers])
+        self.obs = self._env_workers.initial_obs.copy()
 
         # Rollout buffers — numpy (P, N, B, T, ...)
         self.train_buffer = PoolRolloutBuffer(
@@ -168,12 +169,6 @@ class TrainerPool:
             prediction_dim=prediction_dim,
             q_dim=q_dim,
             use_bfloat16=use_bfloat16,
-        )
-
-        # Thread pool for parallel env stepping
-        self._env_pool = ThreadPoolExecutor(
-            max_workers=min(num_env_workers, self.num_trainers),
-            thread_name_prefix="env",
         )
 
     def _init_hidden(self, trainers: List["AgentTrainer"]) -> None:
@@ -272,41 +267,32 @@ class TrainerPool:
                 if all_pi.ndim == 4:
                     all_pi = all_pi.squeeze(axis=2)
 
-                flat_pi = all_pi.reshape(-1, all_pi.shape[-1])
-                e = np.exp(flat_pi - np.max(flat_pi, axis=-1, keepdims=True))
-                probs = e / e.sum(axis=-1, keepdims=True)
-                cumprobs = np.cumsum(probs, axis=-1)
-                cumprobs[:, -1] = 1.0
-                u = np.random.uniform(size=(flat_pi.shape[0], 1))
-                all_actions = (
-                    (u < cumprobs).argmax(axis=-1).reshape(P, -1, 1).astype(np.int32)
+                g = np.random.gumbel(size=all_pi.shape)
+                all_actions: np.ndarray = (
+                    (all_pi + g).argmax(axis=-1).reshape(P, -1, 1).astype(np.int32)
                 )
 
-                # Threaded env stepping
-                all_rewards = np.zeros((P, self.obs.shape[1], 1), dtype=np.float32)
-                all_discounts = np.zeros((P, self.obs.shape[1], 1), dtype=np.float32)
+                # Parallel env stepping via subprocess workers
+                next_obs, rewards, terminated, truncated = self._env_workers.step_all(
+                    all_actions
+                )
 
-                def _step_env(i: int) -> None:
-                    next_obs, rewards, terminated, truncated, _ = self.envs[i].step(
-                        all_actions[i].squeeze(-1)
-                    )
-                    discounts = np.where(
-                        terminated | truncated,
-                        np.float32(0.0),
-                        np.float32(1.0),
-                    )[:, None]
+                np.copyto(self.obs, next_obs)
 
-                    all_rewards[i] = rewards[:, None]
-                    all_discounts[i] = discounts
-                    self.obs[i] = next_obs
+                all_rewards = rewards[:, :, np.newaxis].astype(np.float32)
+                all_discounts = np.where(
+                    terminated | truncated,
+                    np.float32(0.0),
+                    np.float32(1.0),
+                )[:, :, np.newaxis]
 
-                    if training:
-                        self.episode_trackers[i].record(rewards, terminated, truncated)
-
-                futures = [self._env_pool.submit(_step_env, i) for i in range(P)]
-
-                for f in futures:
-                    f.result()
+                if training:
+                    for i in range(P):
+                        self.episode_trackers[i].record(
+                            rewards[i],
+                            terminated[i],
+                            truncated[i],
+                        )
 
                 # Batched buffer write
                 buffer.write_step_batched(
@@ -432,28 +418,40 @@ class TrainerPool:
 
         # Update policy and value params
         self.p_params = jax.tree.map(
-            lambda dst, src: dst.at[s].set(src), self.p_params, chunk_out.p_params
+            lambda dst, src: dst.at[s].set(src),
+            self.p_params,
+            chunk_out.p_params,
         )
         self.v_params = jax.tree.map(
-            lambda dst, src: dst.at[s].set(src), self.v_params, chunk_out.v_params
+            lambda dst, src: dst.at[s].set(src),
+            self.v_params,
+            chunk_out.v_params,
         )
 
         # Update target params
         self.t_params = jax.tree.map(
-            lambda dst, src: dst.at[s].set(src), self.t_params, chunk_out.p_params
+            lambda dst, src: dst.at[s].set(src),
+            self.t_params,
+            chunk_out.p_params,
         )
 
         # Update value optimizer state
         self.v_opt = jax.tree.map(
-            lambda dst, src: dst.at[s].set(src), self.v_opt, chunk_out.v_opt_state
+            lambda dst, src: dst.at[s].set(src),
+            self.v_opt,
+            chunk_out.v_opt_state,
         )
 
         # Update EMA states
         self.adv_ema = jax.tree.map(
-            lambda dst, src: dst.at[s].set(src), self.adv_ema, chunk_out.adv_ema
+            lambda dst, src: dst.at[s].set(src),
+            self.adv_ema,
+            chunk_out.adv_ema,
         )
         self.td_ema = jax.tree.map(
-            lambda dst, src: dst.at[s].set(src), self.td_ema, chunk_out.td_ema
+            lambda dst, src: dst.at[s].set(src),
+            self.td_ema,
+            chunk_out.td_ema,
         )
 
     def reset_trainer(
@@ -527,12 +525,17 @@ class TrainerPool:
         self.t_acm_h = self.t_acm_h.at[idx].set(jnp.zeros(s.target_acm))
         self.v_h = self.v_h.at[idx].set(jnp.zeros(s.value))
 
-        # Update env, tracker, and per-trainer metadata
-        self.envs[idx] = new_trainer.envs
+        # Update env
+        new_obs = self._env_workers.reset_trainer(idx)
+        self.obs[idx] = new_obs
+
+        # Close main-process envs - worker owns the stepping envs
+        new_trainer.envs.close()
+
+        # Update tracker, and per-trainer metadata
         self.episode_trackers[idx] = new_trainer.episode_tracker
         self.n_actions_list[idx] = new_trainer.n_actions
         self.env_names[idx] = new_trainer.env_name
-        self.obs[idx] = new_trainer.state.current_obs
 
         # Lifetime tracking
         self._env_steps[idx] = new_trainer._env_steps
@@ -544,8 +547,5 @@ class TrainerPool:
         self.meta_opt_states[idx] = new_trainer.meta_opt_state
 
     def close(self) -> None:
-        """Close all environments and thread pool."""
-        self._env_pool.shutdown(wait=False)
-
-        for env in self.envs:
-            env.close()
+        """Close all environments and worker pool."""
+        self._env_workers.close()

@@ -15,8 +15,10 @@
 
 import json
 import math
+import os
 import random
 import shutil
+import threading
 from pathlib import Path
 from typing import Callable, Dict, List, Self, Tuple
 
@@ -60,6 +62,7 @@ from velora.disco.utils.loss import (
 )
 from velora.disco.utils.mixflow import fwdrev_value_and_grad
 from velora.gym.envs import EnvGroup, EnvSet, MakeFn
+from velora.gym.workers import EnvWorkerPool
 from velora.nn.optim import scale_by_adan_no_denom
 from velora.tracking.episode import EpisodeTracker
 from velora.tracking.logger import MetricsLogger
@@ -78,13 +81,17 @@ class AgentTrainer:
     the agents, params, and state — this class serves as an initializer
     and is recreated on trainer resets.
 
+    Environments are created temporarily during construction for
+    metadata extraction (action space, observation space) and then
+    closed — stepping is handled by `EnvWorkerPool` subprocesses.
+
     Lifetime
     ---------
     Each trainer is assigned a step budget on construction, sampled from the
     DiscoRL distribution `{20M, 50M, 100M, 200M}` environment steps with
     weights inversely proportional to budget size. When the budget is
-    exhausted, `needs_reset` becomes `True` and `RuleTrainer` will
-    replace this trainer with a freshly initialized one before the next
+    exhausted, `TrainerPool` detects the overspend and `RuleTrainer`
+    replaces this trainer with a freshly initialized one before the next
     collection step. This ensures the meta-learner continually observes
     agents learning from scratch rather than converged policies.
 
@@ -307,7 +314,7 @@ class RuleTrainer:
     accelerator call. A `TrainerPool` holds all agent parameters, optimizer states,
     and rollout buffers as permanently stacked arrays — eliminating per-step
     stacking overhead and VRAM allocation cycles. Environment stepping is
-    parallelized via a thread pool.
+    parallelized via a worker pool.
 
     Parameters
     ----------
@@ -366,6 +373,12 @@ class RuleTrainer:
         use_bfloat16: bool = True,
         debug: bool = False,
     ) -> None:
+        # spawn re-executes __main__ in child processes — skip init
+        # entirely so workers don't recreate trainers or dashboards
+        self._is_subprocess = os.environ.get("_VELORA_WORKER") == "1"
+        if self._is_subprocess:
+            return
+
         _cache_status = cache_status(cache_dir, jit_compile)
 
         # JAX CPU only guard for bfloat16 - not supported on CPU only
@@ -404,7 +417,7 @@ class RuleTrainer:
         self.cache_dir = cache_dir
         self.use_bfloat16 = use_bfloat16
 
-        self.debug = debug
+        self.debug = debug  # temp
 
         self._seed = seed
         self._env_groups = envs.groups
@@ -453,8 +466,9 @@ class RuleTrainer:
         self._action_masks: Dict[int, chex.Array] = {}
         self._hidden_shapes: HiddenShapeCache = None  # type: ignore
 
-        # Trainer pool
+        # Training pools
         self.pool: TrainerPool = None  # type: ignore
+        self._env_worker_pool: EnvWorkerPool = None  # type: ignore
 
         # init console dashboard
         _n_chunks = math.ceil(self.num_trainers / self.max_group_size)
@@ -624,7 +638,7 @@ class RuleTrainer:
         trainer_keys : List[chex.PRNGKey]
             List of trainer random number generated keys
         """
-        setup_total = 2 * self.num_trainers + 3
+        setup_total = 2 * self.num_trainers + 4
         self.console.start_setup(setup_total)
 
         # Build trainers
@@ -667,6 +681,32 @@ class RuleTrainer:
         self._batch_grad_fn = self._build_batch_grad_fn()
         self._batched_collect_fn = self._build_batched_collect_fn()
 
+        # Spawn subprocess worker pool in a background thread so the
+        # Rich Live refresh thread can keep the console responsive
+        env_worker_specs = [
+            (name, make_fn, self.config.batch_size) for name, make_fn in self._env_specs
+        ]
+        pool_result: List[EnvWorkerPool] = []
+        pool_error: List[BaseException] = []
+
+        def _create_pool() -> None:
+            try:
+                pool_result.append(
+                    EnvWorkerPool(env_worker_specs, self.num_env_workers)
+                )
+            except BaseException as exc:
+                pool_error.append(exc)
+
+        pool_thread = threading.Thread(target=_create_pool, daemon=True)
+        pool_thread.start()
+        pool_thread.join()
+
+        if pool_error:
+            raise pool_error[0]
+
+        self._env_worker_pool = pool_result[0]
+        self.console.update_setup()
+
         # Build trainer pool — stacks all params/states as permanent GPU arrays
         self.pool = TrainerPool(
             self.trainers,
@@ -679,9 +719,14 @@ class RuleTrainer:
             encoding_dim=self.trainers[0].policy_agent.encoding_dim,
             prediction_dim=self.config.agent.prediction_size,
             q_dim=self.config.agent.q_size,
+            env_worker_pool=self._env_worker_pool,
             use_bfloat16=self.use_bfloat16,
-            num_env_workers=self.num_env_workers,
         )
+
+        # Close main-process envs - workers own the stepping environments
+        for trainer in self.trainers:
+            trainer.envs.close()
+
         self.console.update_setup()
 
         # Pre-compile all chunk sizes so train() starts warm
@@ -1052,9 +1097,8 @@ class RuleTrainer:
         updates step budgets and episode logging, performs soft target
         updates, then runs the validation collection phase.
 
-        All rollout data is written directly into `self.pool.train_buffer`
-        and `self.pool.valid_buffer` — no intermediate lists of
-        `Rollout` objects.
+        All rollout data is written directly into `pool.train_buffer`
+        and `pool.valid_buffer`.
         """
         # Handle resets before collection
         for idx in range(self.num_trainers):
@@ -1159,7 +1203,7 @@ class RuleTrainer:
         )
         del grad_inputs, stacked_disco_h, stacked_meta_h
 
-        # Populate gradient computations in pool
+        # Populate gradient params/states back into pool
         self.pool.update_from_grad(start, end, chunk_out)
 
         # Only transfer scalar logging data to CPU
@@ -1227,7 +1271,7 @@ class RuleTrainer:
         """
         Performs meta-training loop to discover an RL update rule.
 
-        Each meta-step collects rollouts into the pool's mega-buffers
+        Each meta-step collects rollouts into the pool's buffers
         via batched vmapped forward passes, then computes meta-gradients
         in chunks on the accelerator by slicing directly into the pool's
         stacked arrays.
@@ -1243,6 +1287,9 @@ class RuleTrainer:
 
         2. Log metrics and checkpoints periodically
         """
+        if self._is_subprocess:
+            return
+
         import time
 
         self.console.start_training()
@@ -1264,7 +1311,7 @@ class RuleTrainer:
                     t0 = time.perf_counter()
 
                 self._get_rollouts()
-                jax.effects_barrier()
+                jax.effects_barrier()  # flush async ops
 
                 if self.debug:
                     t1 = time.perf_counter()
