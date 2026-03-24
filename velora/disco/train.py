@@ -681,6 +681,12 @@ class RuleTrainer:
         self._batch_grad_fn = self._build_batch_grad_fn()
         self._batched_collect_fn = self._build_batched_collect_fn()
 
+        # Close main-process envs - workers own the stepping environments
+        for trainer in self.trainers:
+            trainer.envs.close()
+
+        self.console.update_setup()
+
         # Spawn subprocess worker pool in a background thread so the
         # Rich Live refresh thread can keep the console responsive
         env_worker_specs = [
@@ -705,7 +711,6 @@ class RuleTrainer:
             raise pool_error[0]
 
         self._env_worker_pool = pool_result[0]
-        self.console.update_setup()
 
         # Build trainer pool — stacks all params/states as permanent GPU arrays
         self.pool = TrainerPool(
@@ -722,11 +727,6 @@ class RuleTrainer:
             env_worker_pool=self._env_worker_pool,
             use_bfloat16=self.use_bfloat16,
         )
-
-        # Close main-process envs - workers own the stepping environments
-        for trainer in self.trainers:
-            trainer.envs.close()
-
         self.console.update_setup()
 
         # Pre-compile all chunk sizes so train() starts warm
