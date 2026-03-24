@@ -18,7 +18,6 @@ import math
 import os
 import random
 import shutil
-import threading
 from pathlib import Path
 from typing import Callable, Dict, List, Self, Tuple
 
@@ -690,30 +689,14 @@ class RuleTrainer:
 
         self.console.update_setup()
 
-        # Spawn subprocess worker pool in a background thread so the
-        # Rich Live refresh thread can keep the console responsive
+        # Spawn subprocess worker pool
         env_worker_specs = [
             (name, make_fn, self.config.batch_size) for name, make_fn in self._env_specs
         ]
-        pool_result: List[EnvWorkerPool] = []
-        pool_error: List[BaseException] = []
-
-        def _create_pool() -> None:
-            try:
-                pool_result.append(
-                    EnvWorkerPool(env_worker_specs, self.num_env_workers)
-                )
-            except BaseException as exc:
-                pool_error.append(exc)
-
-        pool_thread = threading.Thread(target=_create_pool, daemon=True)
-        pool_thread.start()
-        pool_thread.join()
-
-        if pool_error:
-            raise pool_error[0]
-
-        self._env_worker_pool = pool_result[0]
+        self._env_worker_pool = EnvWorkerPool(
+            env_worker_specs,
+            self.num_env_workers,
+        )
 
         # Build trainer pool — stacks all params/states as permanent GPU arrays
         self.pool = TrainerPool(
