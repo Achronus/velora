@@ -1392,6 +1392,8 @@ class RuleTrainer:
         checkpoint_dir: str,
         *,
         additional_steps: int | None = None,
+        max_group_size: int = 8,
+        num_env_workers: int = 16,
         jit_compile: bool = True,
         cache_dir: str | None = ".cache/jax",
         verbose: bool = True,
@@ -1413,6 +1415,13 @@ class RuleTrainer:
             Number of additional meta-training steps beyond the restored
             `meta_step`. When `None`, continues to the original
             `n_meta_steps` target from config. Default is `None`
+        max_group_size : int (optional)
+            Maximum number of trainers to `vmap` simultaneously. Higher values
+            improve GPU utilization but increase VRAM usage. Reduce if
+            out of memory (OOM). Default is `8`
+        num_env_workers : int (optional)
+            Number of threads for parallel environment stepping.
+            Default is `16`
         jit_compile : bool (optional)
             Flag to enable/disable JIT compilation. Default is `True`
         cache_dir : str | None (optional)
@@ -1455,8 +1464,8 @@ class RuleTrainer:
             envs,
             config=config,
             agents_per_env=meta_run["agents_per_env"],
-            max_group_size=meta_run["max_group_size"],
-            num_env_workers=meta_run["num_env_workers"],
+            max_group_size=max_group_size,
+            num_env_workers=num_env_workers,
             seed=meta_run["seed"],
             jit_compile=jit_compile,
             cache_dir=cache_dir,
