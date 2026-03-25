@@ -20,7 +20,7 @@ def sample_budget(rng: random.Random) -> int:
     """
     Sample a step budget from a lifetime distribution.
 
-    Budgets are drawn from `{20M, 50M, 100M, 200M}` environment steps,
+    Budgets are drawn from `{5M, 10M, 20M, 50M}` environment steps,
     weighted inversely proportional to their size so shorter lifetimes are
     sampled more frequently.
 
@@ -34,7 +34,7 @@ def sample_budget(rng: random.Random) -> int:
     budget : int
         Sampled step budget
     """
-    LIFETIME_BUDGETS = [20_000_000, 50_000_000, 100_000_000, 200_000_000]
+    LIFETIME_BUDGETS = [5_000_000, 10_000_000, 20_000_000, 50_000_000]
     LIFETIME_WEIGHTS = [1 / b for b in LIFETIME_BUDGETS]
 
     return rng.choices(LIFETIME_BUDGETS, weights=LIFETIME_WEIGHTS, k=1)[0]
