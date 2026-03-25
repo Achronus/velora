@@ -15,7 +15,6 @@
 
 import json
 import math
-import os
 import random
 import shutil
 from pathlib import Path
@@ -370,16 +369,9 @@ class RuleTrainer:
         cache_dir: str | None = ".cache/jax",
         verbose: bool = True,
         use_bfloat16: bool = True,
-        debug: bool = False,
     ) -> None:
         # Verify valid worker size
         EnvWorkerPool.verify_workers(num_env_workers)
-
-        # spawn re-executes __main__ in child processes — skip init
-        # entirely so workers don't recreate trainers or dashboards
-        self._is_subprocess = os.environ.get("_VELORA_WORKER") == "1"
-        if self._is_subprocess:
-            return
 
         _cache_status = cache_status(cache_dir, jit_compile)
 
@@ -418,8 +410,6 @@ class RuleTrainer:
         self.jit_compile = jit_compile
         self.cache_dir = cache_dir
         self.use_bfloat16 = use_bfloat16
-
-        self.debug = debug  # temp
 
         self._seed = seed
         self._env_groups = envs.groups
@@ -1289,34 +1279,17 @@ class RuleTrainer:
 
         2. Log metrics and checkpoints periodically
         """
-        if self._is_subprocess:
-            return
-
-        import time
-
         self.console.start_training()
 
         try:
             for step in range(self.state.meta_step, self.n_steps):
-                if step % 1 == 0 and self.debug:
-                    jax.debug.print(
-                        "VRAM: {v}MB",
-                        v=jax.devices()[0].memory_stats()["bytes_in_use"] / 1e6,
-                    )
-
                 stats = MetaStepStats(self.num_trainers)
                 meta_params = self.meta_agent.get_params()
 
                 accumulated_grad = jax.tree.map(jnp.zeros_like, meta_params)
 
-                if self.debug:
-                    t0 = time.perf_counter()
-
                 self._get_rollouts()
                 jax.effects_barrier()  # flush async ops
-
-                if self.debug:
-                    t1 = time.perf_counter()
 
                 # Process all chunks
                 for start in range(0, self.num_trainers, self.max_group_size):
@@ -1337,11 +1310,6 @@ class RuleTrainer:
                         accumulated_grad,
                         stats,
                     )
-
-                if self.debug:
-                    t2 = time.perf_counter()
-                    jax.debug.print("collection: {t}s", t=t1 - t0)  # type: ignore
-                    jax.debug.print("chunks: {t}s", t=t2 - t1)  # type: ignore
 
                 # Apply average gradients through single shared optimizer
                 avg_grad = jax.tree.map(
