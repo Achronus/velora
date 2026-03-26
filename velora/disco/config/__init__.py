@@ -1,3 +1,4 @@
+from velora.disco.config.metadata import RuleTrainerMetadata
 from velora.disco.config.settings import (
     AgentTrainerSettings,
     DiscoAgentSettings,
@@ -18,6 +19,7 @@ from velora.disco.config.state import (
 )
 
 __all__ = [
+    "RuleTrainerMetadata",
     "AgentTrainerSettings",
     "DiscoAgentSettings",
     "DiscoEncoderSettings",

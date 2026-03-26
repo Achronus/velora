@@ -13,15 +13,18 @@
 # limitations under the License.
 # ==============================================================================
 
+import json
 from pathlib import Path
-from typing import Any, List
+from typing import Any, List, Self, Type, TypeVar
 
 import orbax.checkpoint as ocp
-from orbax.checkpoint.checkpoint_managers import FixedIntervalPolicy, LatestN
+from orbax.checkpoint.checkpoint_managers import LatestN
 
+from velora.tracking.metadata import CheckpointMetadata
 from velora.tracking.settings import CheckpointSettings
 
 CheckpointState = Any  # Any flax.struct.dataclass instance
+M = TypeVar("M", bound=CheckpointMetadata)
 
 
 class CheckpointManager:
@@ -45,16 +48,21 @@ class CheckpointManager:
         self.config = config
 
         self.cp_dir.mkdir(parents=True, exist_ok=True)
-        self._last_saved_step = -1
 
         # Configure checkpointing
         options = ocp.CheckpointManagerOptions(
-            save_decision_policy=FixedIntervalPolicy(config.freq),
             preservation_policy=LatestN(config.max),
         )
         self._manager = ocp.CheckpointManager(self.cp_dir, options=options)
 
-    def save(self, step: int, state: CheckpointState, force: bool = False) -> bool:
+    def save(
+        self,
+        step: int,
+        state: CheckpointState,
+        *,
+        metadata: CheckpointMetadata | None = None,
+        force: bool = False,
+    ) -> bool:
         """
         Save trainer state to checkpoint.
 
@@ -64,19 +72,26 @@ class CheckpointManager:
             Current training step
         state : CheckpointState
             A Flax dataclass state to save
-        force : bool
-            Force save even if within save_interval. Default is `False`
+        metadata : CheckpointMetadata (optional)
+            Metadata to persist alongside the checkpoint as
+            `metadata.json`. Written on every save, overwriting the
+            previous version. Default is `None`
+        force : bool (optional)
+            Force save regardless of frequency. Default is `False`
 
         Returns
         -------
         saved : bool
             Whether the checkpoint was actually saved
         """
-        if not force and (step - self._last_saved_step) < self.config.freq:
+        if not force and not self.should_save(step):
             return False
 
-        self._manager.save(step, args=ocp.args.PyTreeSave(state))  # type: ignore
-        self._last_saved_step = step
+        self._manager.save(step, args=ocp.args.PyTreeSave(state), force=force)  # type: ignore
+
+        if metadata is not None:
+            meta_path = self.cp_dir / "metadata.json"
+            meta_path.write_text(json.dumps(metadata.to_dict(), indent=2))
 
         return True
 
@@ -84,7 +99,7 @@ class CheckpointManager:
         self,
         step: int | None = None,
         state_template: CheckpointState | None = None,
-    ) -> CheckpointState | None:
+    ) -> CheckpointState:
         """
         Restore trainer state from checkpoint.
 
@@ -97,11 +112,19 @@ class CheckpointManager:
 
         Returns
         -------
-        state : CheckpointState | None
-            Restored state, or `None` if no checkpoint exists
+        state : CheckpointState
+            Restored state
+
+        Raises
+        ------
+        checkpoint_error : ValueError
+            If no checkpoint exists in the checkpoint directory
         """
         if self._manager.latest_step() is None:
-            return None
+            raise ValueError(
+                f"No checkpoint found in '{self.cp_dir}'. "
+                "Ensure the directory contains valid orbax checkpoint files."
+            )
 
         restore_step = step if step is not None else self._manager.latest_step()
 
@@ -115,9 +138,42 @@ class CheckpointManager:
 
         return restored  # type: ignore
 
+    def load_metadata(
+        self,
+        cls: Type[M],
+    ) -> M:
+        """
+        Load metadata saved alongside checkpoints.
+
+        Parameters
+        ----------
+        cls : Type[CheckpointMetadata]
+            Metadata subclass to deserialize into. Returns a typed
+            instance via `cls.from_dict()`
+
+        Returns
+        -------
+        metadata : CheckpointMetadata
+            Typed metadata instance
+
+        Raises
+        ------
+        file_error : FileNotFoundError
+            If `metadata.json` does not exist in the checkpoint directory
+        """
+        meta_path = self.cp_dir / "metadata.json"
+
+        if not meta_path.exists():
+            raise FileNotFoundError(
+                f"No 'metadata.json' found in '{self.cp_dir}'. "
+                "Ensure the checkpoint was saved with metadata."
+            )
+
+        return cls.from_dict(json.loads(meta_path.read_text()))
+
     def should_save(self, step: int) -> bool:
         """Check if a checkpoint should be saved at this step."""
-        return (step - self._last_saved_step) >= self.config.freq
+        return step > 0 and step % self.config.freq == 0
 
     def wait_until_finished(self) -> None:
         """Wait for any async checkpoint operations to complete."""
@@ -141,3 +197,9 @@ class CheckpointManager:
         """Close the checkpoint manager and release resources."""
         self.wait_until_finished()
         self._manager.close()
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.close()

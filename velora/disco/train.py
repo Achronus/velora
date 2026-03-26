@@ -13,7 +13,6 @@
 # limitations under the License.
 # ==============================================================================
 
-import json
 import math
 import random
 import shutil
@@ -31,6 +30,7 @@ from velora.cli.disco.dashboard import DiscoConsoleDashboard
 from velora.cli.disco.settings import DiscoParamsSettings
 from velora.cli.disco.simple import SimpleDashboard
 from velora.disco.agent import DiscoAgent, DiscoValueAgent, PolicyAgent
+from velora.disco.config.metadata import RuleTrainerMetadata
 from velora.disco.config.settings import AgentTrainerSettings, RuleTrainerSettings
 from velora.disco.config.state import (
     AgentTrainerHiddenStates,
@@ -65,6 +65,7 @@ from velora.nn.optim import scale_by_adan_no_denom
 from velora.tracking.episode import EpisodeTracker
 from velora.tracking.logger import MetricsLogger, RuntimeLogger
 from velora.tracking.manager import CheckpointManager
+from velora.tracking.settings import CheckpointSettings
 from velora.utils.config import dump_config, load_config
 from velora.utils.format import cache_status
 from velora.utils.transforms import squeeze_time, unstack_pytree
@@ -1335,9 +1336,7 @@ class RuleTrainer:
                 )
 
                 # Checkpoint periodically
-                if step % self.config.checkpoint.freq == 0:
-                    self.save_checkpoint()
-
+                self.save_checkpoint()
                 self.console.update_progress("Meta Steps")
 
                 # Cleanup
@@ -1377,7 +1376,7 @@ class RuleTrainer:
         Parameters
         ----------
         checkpoint_dir : str
-            Path to the checkpoint directory containing `meta_run.json`
+            Path to the checkpoint directory containing `metadata.json`
             and the Orbax checkpoint subdirectories
         additional_steps : int (optional)
             Number of additional meta-training steps beyond the restored
@@ -1408,45 +1407,42 @@ class RuleTrainer:
         Raises
         ------
         file_error : FileNotFoundError
-            If `meta_run.json` is not found in `checkpoint_dir`
+            If `metadata.json` is not found in `checkpoint_dir`
         checkpoint_error : ValueError
             If no checkpoint exists in `checkpoint_dir`
         """
-        cp_dir = Path(checkpoint_dir)
-        meta_run_path = cp_dir / "meta_run.json"
+        cp_settings = CheckpointSettings.from_path(checkpoint_dir)
 
-        if not meta_run_path.exists():
-            raise FileNotFoundError(
-                f"No 'meta_run.json' found in '{checkpoint_dir}'."
-                "Ensure the checkpoint was saved by 'RuleTrainer'."
-            )
+        # Load metadata from the user-provided directory
+        with CheckpointManager(cp_settings) as manager:
+            meta_run = manager.load_metadata(RuleTrainerMetadata)
 
-        meta_run = json.loads(meta_run_path.read_text())
+        # Reconstruct environment groups and config from saved metadata
+        envs = EnvSet(*[EnvGroup.load(g) for g in meta_run.envs])
+        config: RuleTrainerSettings = load_config(
+            RuleTrainerSettings,
+            meta_run.config,
+        )
 
-        # Reconstruct environment groups from saved serialized data
-        envs = EnvSet(*[EnvGroup.load(g) for g in meta_run["envs"]])
-        config = load_config(RuleTrainerSettings, meta_run["config"])
+        # Point checkpoint config at the user-provided directory
+        config = config.__replace__(checkpoint=cp_settings)
 
         # Construct trainer
         trainer = cls(
             envs,
             config=config,
-            agents_per_env=meta_run["agents_per_env"],
+            agents_per_env=meta_run.agents_per_env,
             max_group_size=max_group_size,
             num_env_workers=num_env_workers,
-            seed=meta_run["seed"],
+            seed=meta_run.seed,
             jit_compile=jit_compile,
             cache_dir=cache_dir,
             verbose=verbose,
-            use_bfloat16=meta_run["use_bfloat16"],
+            use_bfloat16=meta_run.use_bfloat16,
         )
 
         # Restore meta-agent params and RuleTrainerState (includes meta_step)
-        if not trainer.load_checkpoint():
-            raise ValueError(
-                f"No checkpoint found in '{checkpoint_dir}'. "
-                "Ensure the directory contains valid orbax checkpoint files."
-            )
+        trainer.load_checkpoint()
 
         # Extend training if additional steps requested
         if additional_steps is not None:
@@ -1527,7 +1523,7 @@ class RuleTrainer:
         Includes -
             - Meta agent parameters
             - Trainer state
-            - `meta_run.json` - config and environment set
+            - `metadata.json` - config and environment set
 
         Parameters
         ----------
@@ -1539,32 +1535,29 @@ class RuleTrainer:
         saved : bool
             Whether checkpoint was actually saved
         """
-        if not force and not self.cp_manager.should_save(self.state.meta_step):
-            return False
-
         checkpoint = {
             "meta_params": self.meta_agent.get_params(),
             "state": self.state,
         }
 
-        self.cp_manager.save(self.state.meta_step, checkpoint, force=True)
+        metadata = RuleTrainerMetadata(
+            config=dump_config(self.config),
+            agents_per_env=self.agents_per_env,
+            max_group_size=self.max_group_size,
+            num_env_workers=self.num_env_workers,
+            seed=self._seed,
+            envs=[g.dump() for g in self._env_groups],
+            use_bfloat16=self.use_bfloat16,
+        )
 
-        meta_run = {
-            "config": dump_config(self.config),
-            "agents_per_env": self.agents_per_env,
-            "max_group_size": self.max_group_size,
-            "num_env_workers": self.num_env_workers,
-            "seed": self._seed,
-            "envs": [g.dump() for g in self._env_groups],
-            "use_bfloat16": self.use_bfloat16,
-        }
+        return self.cp_manager.save(
+            self.state.meta_step,
+            checkpoint,
+            metadata=metadata,
+            force=force,
+        )
 
-        meta_run_path = Path(self.cp_manager.cp_dir, "meta_run.json")
-        meta_run_path.write_text(json.dumps(meta_run, indent=2))
-
-        return True
-
-    def load_checkpoint(self, step: int | None = None) -> bool:
+    def load_checkpoint(self, step: int | None = None) -> None:
         """
         Restore training state from a checkpoint.
 
@@ -1576,10 +1569,10 @@ class RuleTrainer:
         step : int (optional)
             Specific step to restore, or `None` for latest. Default is `None`
 
-        Returns
-        -------
-        success : bool
-            Whether restoration was successful
+        Raises
+        ------
+        checkpoint_error : ValueError
+            If no checkpoint exists in the checkpoint directory
         """
         abstract_checkpoint = {
             "meta_params": jax.tree.map(
@@ -1594,9 +1587,6 @@ class RuleTrainer:
 
         restored = self.cp_manager.restore(step, abstract_checkpoint)
 
-        if restored is None:
-            return False
-
         # Restore meta-agent params and state
         self.meta_agent.update_params(restored["meta_params"])
         self.state = restored["state"]
@@ -1604,8 +1594,6 @@ class RuleTrainer:
         # Reset all agent trainers
         for idx in range(self.num_trainers):
             self.reset_trainer(idx)
-
-        return True
 
     def reset_trainer(self, trainer_idx: int) -> None:
         """

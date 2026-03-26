@@ -14,6 +14,7 @@
 # ==============================================================================
 
 from pathlib import Path
+from typing import Self
 
 from flax import struct
 
@@ -24,6 +25,9 @@ from velora.utils.format import create_directory
 class CheckpointSettings:
     """
     Dataclass for `CheckpointManager` settings.
+
+    Default settings create the following checkpoint directory:
+    `checkpoints/rule_trainer_[ddmmyy]_[hhmmss]/`.
 
     Parameters
     ----------
@@ -36,17 +40,67 @@ class CheckpointSettings:
         Checkpoint save frequency between timesteps. Default is `100`
     max : int (optional)
         Maximum number of checkpoints to store. Default is `20`
+    timestamp : bool (optional)
+        Whether to append timestamps to checkpoint directory.
+        Uses timestamp format: `ddmmyy_hhmmss`. Default is `True`
+    _dirpath : Path (optional)
+        Cached directory path. Computed automatically on creation.
+        Default is `None`
     """
 
     base_dir: Path | str = "checkpoints"
     name: str = "rule_trainer"
     freq: int = 100
     max: int = 20
+    timestamp: bool = True
+
+    _dirpath: Path | None = struct.field(pytree_node=False, default=None)
+
+    def __post_init__(self):
+        if self._dirpath is None:
+            object.__setattr__(
+                self,
+                "_dirpath",
+                create_directory(self.base_dir, self.name, self.timestamp),
+            )
 
     @property
     def dirpath(self) -> Path:
-        """Get directory path. Format: `./[base_dir]/[name]`."""
-        return Path(self.base_dir, self.name).resolve()
+        """
+        Get directory path. Format:
+        - `timestamp=True` - `./[base_dir]/[name]_[timestamp]`
+        - `timestamp=False` - `./[base_dir]/[name]`
+        """
+        return self._dirpath  # type: ignore
+
+    @classmethod
+    def from_path(cls, path: str | Path, **overrides: object) -> Self:
+        """
+        Create settings that point at an existing checkpoint directory.
+
+        Useful when restoring from a checkpoint where the directory
+        already exists on disk.
+
+        Parameters
+        ----------
+        path : str | Path
+            Path to an existing checkpoint directory
+        overrides : kwargs (optional)
+            Override any other settings (e.g., `freq`, `max`)
+
+        Returns
+        -------
+        settings : CheckpointSettings
+            Settings with `dirpath` locked to `path`
+        """
+        resolved = Path(path).resolve()
+        return cls(
+            base_dir=str(resolved.parent),
+            name=resolved.name,
+            timestamp=False,
+            _dirpath=resolved,
+            **overrides,
+        )
 
 
 @struct.dataclass(frozen=True)
