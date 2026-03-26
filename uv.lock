@@ -109,23 +109,6 @@ wheels = [
 ]
 
 [[package]]
-name = "array-record"
-version = "0.8.3"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "absl-py" },
-    { name = "etils", extra = ["epath"] },
-]
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/d6/63/fd734c5f2be8017d4f33cff0dd3d3e2f91de3ab988f93755cdc54d67b654/array_record-0.8.3-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:fa94fa053c1afaecc183a1c31463fd89d1b7b148cc526095bfc50ab58967e47c", size = 3989122, upload-time = "2025-11-13T16:15:38.375Z" },
-    { url = "https://files.pythonhosted.org/packages/e9/b0/9f649781c8e630cbb8724fb56627430b4249b51e8536e6e0a31d6f85f147/array_record-0.8.3-cp313-cp313-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:adfe6c92918363747539c0caa579f568f75aac079ad7bbd4ebcf7fdb02e5461b", size = 4838733, upload-time = "2025-11-13T16:15:39.767Z" },
-    { url = "https://files.pythonhosted.org/packages/d7/6d/5575a1d64cffecb72de5743b35a1532b1801a0350b9b45f277090d02b3c2/array_record-0.8.3-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:13df1aec9b38afe98973bf5fe3cf523f83ca904b0423d85319930877145b8f28", size = 4995837, upload-time = "2025-11-13T16:15:40.973Z" },
-    { url = "https://files.pythonhosted.org/packages/99/46/1449f2c36f75e563c5bdd59133146a10110bcf3a3cd53d7d74a535579603/array_record-0.8.3-cp314-cp314-macosx_11_0_arm64.whl", hash = "sha256:14facb713fc55ea612cf853c0abbc602032ae619eb85037af3aa41dc4e27eed6", size = 3989205, upload-time = "2025-11-13T16:15:42.156Z" },
-    { url = "https://files.pythonhosted.org/packages/35/ef/f85d329ac6cdcc8c3e8af832c30a9a0b719c6719a09191056ef7342a3627/array_record-0.8.3-cp314-cp314-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:06b17a0a90bc74a80c4ebad0b99f0e039adb01746b673db3d7a5632d8b138ddd", size = 4839320, upload-time = "2025-11-13T16:15:43.617Z" },
-    { url = "https://files.pythonhosted.org/packages/f2/89/510594ff506d456d7dc0e8dfa9095f078e5f98da49d1b8f7be1fd9c0717e/array_record-0.8.3-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:89d2cf5f4709be3c6c2b30c0d366005223375633ffce66dcb13d927a0bdc5228", size = 4995667, upload-time = "2025-11-13T16:15:45.092Z" },
-]
-
-[[package]]
 name = "arrow"
 version = "1.4.0"
 source = { registry = "https://pypi.org/simple" }
@@ -691,27 +674,6 @@ wheels = [
 ]
 
 [[package]]
-name = "grain"
-version = "0.2.13"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "absl-py" },
-    { name = "array-record", marker = "sys_platform != 'win32'" },
-    { name = "cloudpickle" },
-    { name = "dm-tree" },
-    { name = "etils", extra = ["epath", "epy"] },
-    { name = "more-itertools" },
-    { name = "numpy" },
-    { name = "protobuf" },
-]
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/27/e2/38245eda88c09646e958e16cbdb960beb91c889f06b0c1ee4044979c1d56/grain-0.2.13-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:00a3befab959d46e559b31482ddbc1044b4afddd2e95ad36b3e11924133333f8", size = 437114, upload-time = "2025-10-15T16:37:58.125Z" },
-    { url = "https://files.pythonhosted.org/packages/d1/81/6e321886cbda421218a2c4192cb790f619dd79d6aefe3dff4240e08dd1c8/grain-0.2.13-cp313-cp313-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:94e92790fc2f09d54ac9dedbaf16761cfd505bdf022d936dfca46ce3ff7558c8", size = 510108, upload-time = "2025-10-15T16:37:59.146Z" },
-    { url = "https://files.pythonhosted.org/packages/00/d3/f8ba86d1e216fc945a1cfe88cfffba9f0e73d61317497c97d0f992e63b8a/grain-0.2.13-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:e877ca7ed8ae32508e1264385d659969e3492e1138949dfaf6410572203300ae", size = 510536, upload-time = "2025-10-15T16:38:00.081Z" },
-    { url = "https://files.pythonhosted.org/packages/04/29/e6b41ebdf8922e594aac0ba922db2a6816ca94deb02d1294bd6985562d00/grain-0.2.13-cp313-cp313-win_amd64.whl", hash = "sha256:496017e4485ea4643364d08e4ba96c0a3f433f09a10c89e62c0555c5afc7211e", size = 428735, upload-time = "2025-10-15T16:38:01.066Z" },
-]
-
-[[package]]
 name = "griffe"
 version = "1.15.0"
 source = { registry = "https://pypi.org/simple" }
@@ -979,25 +941,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/22/1c/9baf805e6c969a1a7afeb37d359e8a10585e8b2621f103626998b42ae838/jax-0.8.0.tar.gz", hash = "sha256:0ea5a7be7068c25934450dfd87d7d80a18a5d30e0a53454e7aade525b23accd5", size = 2489031, upload-time = "2025-10-15T23:10:11.839Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b3/77/4e6c9a54247810eff8ac8a1af7dc1be0779b52df0d82f3fc8586061914f3/jax-0.8.0-py3-none-any.whl", hash = "sha256:d190158bc019756c6a0f6b3d5fc8783471fb407e6deaff559eaac60dd5ee850a", size = 2900279, upload-time = "2025-10-15T23:10:09.88Z" },
-]
-
-[[package]]
-name = "jax-ai-stack"
-version = "2025.10.28"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "chex" },
-    { name = "flax" },
-    { name = "grain" },
-    { name = "jax" },
-    { name = "ml-dtypes" },
-    { name = "optax" },
-    { name = "orbax-checkpoint" },
-    { name = "orbax-export" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/a1/c7/d3ebf75e6a31d0452d78d9869ac5bbd9390edf2140caf89d100c79869113/jax_ai_stack-2025.10.28.tar.gz", hash = "sha256:f8fcd712bd2519bb45c38101282d822f5d15b58f4043a77165386627940fa581", size = 8597, upload-time = "2025-10-28T22:11:34.589Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/26/54/b139aa130259b113ea0901d32a678803238f3e4c9d911a8da6279fcb5bd1/jax_ai_stack-2025.10.28-py3-none-any.whl", hash = "sha256:5450c64fe7aadd582ea1d08f222ca0da22f08b1ae17c22f1173bcec6c6b6f044", size = 11254, upload-time = "2025-10-28T22:11:33.468Z" },
 ]
 
 [[package]]
@@ -1679,15 +1622,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/53/21/783dfb51f40d2660afeb9bccf3612b99f6a803d980d2a09132b0f9d216ab/ml_dtypes-0.5.3-cp314-cp314t-macosx_10_13_universal2.whl", hash = "sha256:e12e29764a0e66a7a31e9b8bf1de5cc0423ea72979f45909acd4292de834ccd3", size = 689324, upload-time = "2025-07-29T18:39:07.567Z" },
     { url = "https://files.pythonhosted.org/packages/09/f7/a82d249c711abf411ac027b7163f285487f5e615c3e0716c61033ce996ab/ml_dtypes-0.5.3-cp314-cp314t-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:19f6c3a4f635c2fc9e2aa7d91416bd7a3d649b48350c51f7f715a09370a90d93", size = 5275917, upload-time = "2025-07-29T18:39:09.339Z" },
     { url = "https://files.pythonhosted.org/packages/7f/3c/541c4b30815ab90ebfbb51df15d0b4254f2f9f1e2b4907ab229300d5e6f2/ml_dtypes-0.5.3-cp314-cp314t-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:5ab039ffb40f3dc0aeeeba84fd6c3452781b5e15bef72e2d10bcb33e4bbffc39", size = 5285284, upload-time = "2025-07-29T18:39:11.532Z" },
-]
-
-[[package]]
-name = "more-itertools"
-version = "10.8.0"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/ea/5d/38b681d3fce7a266dd9ab73c66959406d565b3e85f21d5e66e1181d93721/more_itertools-10.8.0.tar.gz", hash = "sha256:f638ddf8a1a0d134181275fb5d58b086ead7c6a72429ad725c67503f13ba30bd", size = 137431, upload-time = "2025-09-02T15:23:11.018Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/a4/8e/469e5a4a2f5855992e425f3cb33804cc07bf18d48f2db061aec61ce50270/more_itertools-10.8.0-py3-none-any.whl", hash = "sha256:52d4362373dcf7c52546bc4af9a86ee7c4579df9a8dc268be0a2f949d376cc9b", size = 69667, upload-time = "2025-09-02T15:23:09.635Z" },
 ]
 
 [[package]]
@@ -2968,8 +2902,9 @@ dependencies = [
     { name = "flax" },
     { name = "gymnasium", extra = ["other"] },
     { name = "jax" },
-    { name = "jax-ai-stack" },
     { name = "optax" },
+    { name = "orbax-checkpoint" },
+    { name = "orbax-export" },
     { name = "rlax" },
     { name = "safetensors" },
     { name = "tensorboard" },
@@ -2998,8 +2933,9 @@ requires-dist = [
     { name = "flax", specifier = ">=0.12.0" },
     { name = "gymnasium", extras = ["other"], specifier = ">=1.2.3" },
     { name = "jax", specifier = ">=0.8.0" },
-    { name = "jax-ai-stack", specifier = ">=2025.10.28" },
     { name = "optax", specifier = ">=0.2.6" },
+    { name = "orbax-checkpoint", specifier = ">=0.11.26" },
+    { name = "orbax-export", specifier = ">=0.0.8" },
     { name = "rlax", specifier = ">=0.1.8" },
     { name = "safetensors", specifier = ">=0.7.0" },
     { name = "tensorboard", specifier = ">=2.20.0" },
