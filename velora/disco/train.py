@@ -29,6 +29,8 @@ import orbax.checkpoint as ocp
 from velora.cli.disco.dashboard import DiscoConsoleDashboard
 from velora.cli.disco.settings import DiscoParamsSettings
 from velora.cli.disco.simple import SimpleDashboard
+from velora.compute.loss import compute_entropy_loss, compute_policy_gradient_loss
+from velora.compute.mixflow import fwdrev_value_and_grad
 from velora.disco.agent import DiscoAgent, DiscoValueAgent, PolicyAgent
 from velora.disco.config.metadata import RuleTrainerMetadata
 from velora.disco.config.settings import AgentTrainerSettings, RuleTrainerSettings
@@ -52,13 +54,7 @@ from velora.disco.pool import TrainerPool
 from velora.disco.rollouts import Rollout
 from velora.disco.utils.budget import sample_budget
 from velora.disco.utils.compute import compute_value_outputs
-from velora.disco.utils.loss import (
-    compute_entropy_loss,
-    compute_meta_reg_loss,
-    compute_policy_gradient_loss,
-    compute_policy_loss,
-)
-from velora.disco.utils.mixflow import fwdrev_value_and_grad
+from velora.disco.utils.loss import compute_meta_reg_loss, compute_policy_loss
 from velora.gym.envs import EnvGroup, EnvSet, MakeFn
 from velora.gym.workers import EnvWorkerPool
 from velora.nn.optim import scale_by_adan_no_denom

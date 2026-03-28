@@ -18,37 +18,12 @@ from typing import TYPE_CHECKING, Tuple
 import chex
 import jax
 import jax.numpy as jnp
-import rlax
 
-from velora.compute.softmax import Softmax
+from velora.compute.utils import categorical_kl_divergence
 
 if TYPE_CHECKING:
     from velora.disco.config.settings import LossCostSettings
     from velora.disco.outputs import AgentLosses, DiscoAgentOutput
-
-
-def compute_kl_loss(
-    target: chex.Array,
-    preds: chex.Array,
-) -> chex.Array:
-    """
-    Compute KL divergence loss between target and predicted logits.
-
-    Uses softmax to convert logits to probabilities internally.
-
-    Parameters
-    ----------
-    target : chex.Array
-        Target logits from the meta-network
-    preds : chex.Array
-        Predicted logits from the policy agent
-
-    Returns
-    -------
-    loss : chex.Array
-        Per-element KL divergence loss
-    """
-    return rlax.categorical_kl_divergence(target, preds)
 
 
 def compute_z_loss(
@@ -82,7 +57,7 @@ def compute_z_loss(
         axis=2,
     ).squeeze(2)  # (B, T, Z)
 
-    return compute_kl_loss(z_targets, action_preds)
+    return categorical_kl_divergence(z_targets, action_preds)
 
 
 def compute_aux_policy_loss(
@@ -120,79 +95,13 @@ def compute_aux_policy_loss(
         axis=2,
     )
 
-    loss = compute_kl_loss(
+    loss = categorical_kl_divergence(
         jax.lax.stop_gradient(next_pi[:, 1:]),  # (B, T-1, A), # type: ignore
         jnp.squeeze(aux_pi_a, axis=2),  # (B, T-1, A)
     )
 
     # Mask out terminal states
     return loss * jnp.squeeze(discounts[:, :-1], axis=-1)  # type: ignore
-
-
-def compute_entropy_loss(logits: chex.Array, coef: float = 1e-2) -> chex.Array:
-    """
-    Compute entropy loss for policy regularization.
-
-    Encourages exploration by penalizing low-entropy (overly deterministic)
-    policies. Returns negative entropy so that minimizing the loss
-    maximizes entropy.
-
-    Parameters
-    ----------
-    logits : chex.Array
-        Policy logits. Shape: `(B, T, A)` or `(B, A)`
-
-        - batch_size (`B`) - the number of samples per timestep
-        - seq_length (`T`) - the number of timesteps (optional)
-        - n_actions (`A`) - the number of discrete actions
-
-    coef : float (optional)
-        Entropy coefficient. Higher values promote more exploration.
-        Default is `0.01`
-
-    Returns
-    -------
-    loss : chex.Array
-        Scalar negative mean entropy loss
-    """
-    return -coef * jnp.mean(Softmax(logits).entropy())
-
-
-def compute_policy_gradient_loss(
-    logits: chex.Array,
-    actions: chex.Array,
-    advantages: chex.Array,
-) -> chex.Array:
-    """
-    Compute differentiable policy gradient loss (REINFORCE-style).
-
-    Calculates `-log π(a|s) * A(s, a)` for each timestep. Advantages are
-    stopped from gradient flow as they should not influence the meta-network
-    through this path.
-
-    Parameters
-    ----------
-    logits : chex.Array
-        Policy logits. Shape: `(B, T, A)`
-    actions : chex.Array
-        Actions taken. Shape: `(B, T, 1)`
-    advantages : chex.Array
-        Advantage estimates. Shape: `(T, B)`
-
-    Returns
-    -------
-    loss : chex.Array
-        Per-timestep policy gradient loss. Shape: `(B, T)`
-    """
-    logits = logits[:, :-1]  # (B, T-1), # type: ignore
-    actions = actions[:, :-1]  # (B, T-1, 1), # type: ignore
-
-    advantages = jnp.transpose(advantages)  # (B, T)
-    actions = jnp.squeeze(actions, axis=-1)  # (B, T)
-
-    log_pi = jax.nn.log_softmax(logits)
-    log_pi_a = rlax.batched_index(log_pi, actions)
-    return -log_pi_a * jax.lax.stop_gradient(advantages)  # type: ignore
 
 
 def compute_meta_reg_loss(
@@ -224,13 +133,13 @@ def compute_meta_reg_loss(
     reg_loss : chex.Array
         Total regularization loss
     """
-    from velora.disco.utils.compute import compute_l2_mean_penalty
+    from velora.compute.utils import compute_l2_mean_penalty
 
     pi_reg = compute_l2_mean_penalty(targets.pi)
     y_reg = compute_l2_mean_penalty(targets.y)
     z_reg = compute_l2_mean_penalty(targets.z)
 
-    target_kl = compute_kl_loss(
+    target_kl = categorical_kl_divergence(
         jax.lax.stop_gradient(target_pi),
         targets.pi,
     ).mean()
@@ -287,8 +196,8 @@ def compute_policy_loss(
     """
     from velora.disco.outputs import AgentLosses
 
-    pi_loss = compute_kl_loss(targets.pi, preds_pi).mean()
-    y_loss = compute_kl_loss(targets.y, preds_y).mean()
+    pi_loss = categorical_kl_divergence(targets.pi, preds_pi).mean()
+    y_loss = categorical_kl_divergence(targets.y, preds_y).mean()
     z_loss = compute_z_loss(preds_z, targets.z, actions).mean()
     aux_pi_loss = compute_aux_policy_loss(
         preds_aux_pi,

@@ -15,8 +15,9 @@
 
 import chex
 import jax.numpy as jnp
-import rlax
 from flax import nnx, struct
+
+from velora.compute.rl_ops import transform_from_2hot, transform_to_2hot
 
 
 @struct.dataclass(frozen=True)
@@ -25,7 +26,7 @@ class CategoricalBins:
     Categorical bin values for distributional Q-values.
 
     Handles conversion between scalar values and categorical distributions
-    using 2-hot encoding for differentiable, soft bin assignments via the
+    using 2-hot encoding for differentiable, soft bin assignments like the
     `rlax` library.
 
     Parameters
@@ -66,7 +67,7 @@ class CategoricalBins:
         probs : jax.Array
             Categorical distribution over bins
         """
-        return rlax.transform_to_2hot(
+        return transform_to_2hot(
             scalar,
             self.min_value,
             self.max_value,
@@ -87,7 +88,7 @@ class CategoricalBins:
         scalar : jax.Array
             Expected scalar values
         """
-        return rlax.transform_from_2hot(
+        return transform_from_2hot(
             probs,
             self.min_value,
             self.max_value,

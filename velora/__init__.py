@@ -1,4 +1,4 @@
-from velora import base, cli, disco, gym, lnn, nn, tracking, utils
+from velora import base, cli, compute, disco, gym, lnn, nn, tracking, utils
 from velora.disco import (
     DiscoAgent,
     DiscoAgentSettings,
