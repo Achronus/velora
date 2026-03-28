@@ -16,10 +16,11 @@
 from typing import TYPE_CHECKING, Tuple
 
 import chex
-import distrax
 import jax
 import jax.numpy as jnp
 import rlax
+
+from velora.compute.softmax import Softmax
 
 if TYPE_CHECKING:
     from velora.disco.config.settings import LossCostSettings
@@ -154,7 +155,7 @@ def compute_entropy_loss(logits: chex.Array, coef: float = 1e-2) -> chex.Array:
     loss : chex.Array
         Scalar negative mean entropy loss
     """
-    return -coef * jnp.mean(distrax.Softmax(logits).entropy())
+    return -coef * jnp.mean(Softmax(logits).entropy())
 
 
 def compute_policy_gradient_loss(

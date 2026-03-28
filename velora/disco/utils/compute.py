@@ -16,11 +16,11 @@
 from typing import Tuple
 
 import chex
-import distrax
 import jax
 import jax.numpy as jnp
 import rlax
 
+from velora.compute.softmax import Softmax
 from velora.disco.ema import EMAState, MovingAverage
 from velora.disco.outputs import ValueOutputs
 from velora.disco.rollouts import Rollout
@@ -48,8 +48,8 @@ def compute_importance_weights(
     rho : chex.Array
         Importance weights. Shape: `(T, B)`
     """
-    log_pi = distrax.Softmax(pi_logits).log_prob(actions)
-    log_mu = distrax.Softmax(mu_logits).log_prob(actions)
+    log_pi = Softmax(pi_logits).log_prob(actions)
+    log_mu = Softmax(mu_logits).log_prob(actions)
     rho = jax.lax.stop_gradient(jnp.exp(log_pi - log_mu))  # type: ignore
     return rho
 
