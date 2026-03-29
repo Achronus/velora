@@ -20,7 +20,7 @@ import jax.numpy as jnp
 from velora.compute.softmax import Softmax
 
 
-def compute_importance_weights(
+def compute_softmax_importance_weights(
     pi_logits: chex.Array,
     mu_logits: chex.Array,
     actions: chex.Array,
@@ -45,6 +45,57 @@ def compute_importance_weights(
     log_pi = Softmax(pi_logits).log_prob(actions)
     log_mu = Softmax(mu_logits).log_prob(actions)
     rho = jax.lax.stop_gradient(jnp.exp(log_pi - log_mu))  # type: ignore
+    return rho
+
+
+def compute_gaussian_importance_weights(
+    mu_pi: chex.Array,
+    log_std_pi: chex.Array,
+    mu_mu: chex.Array,
+    log_std_mu: chex.Array,
+    actions: chex.Array,
+    action_dim_mask: chex.Array | None = None,
+) -> chex.Array:
+    """
+    Compute importance sampling weights for off-policy correction
+    with Gaussian policies.
+
+    Parameters
+    ----------
+    mu_pi : chex.Array
+        Current policy mean. Shape: `(T, B, D)`
+    log_std_pi : chex.Array
+        Current policy log-std. Shape: `(T, B, D)`
+    mu_mu : chex.Array
+        Behavior policy mean. Shape: `(T, B, D)`
+    log_std_mu : chex.Array
+        Behavior policy log-std. Shape: `(T, B, D)`
+    actions : chex.Array
+        Actions taken. Shape: `(T, B, D)`
+    action_dim_mask : chex.Array (optional)
+        Boolean mask `(D,)` for valid action dimensions. Default is `None`
+
+    Returns
+    -------
+    rho : chex.Array
+        Importance weights. Shape: `(T, B)`
+    """
+
+    def _log_prob(mu, log_std, a):
+        std = jnp.exp(log_std)
+        per_dim = (
+            -0.5 * jnp.square((a - mu) / (std + 1e-8))
+            - log_std
+            - 0.5 * jnp.log(2 * jnp.pi)
+        )
+        if action_dim_mask is not None:
+            per_dim = per_dim * action_dim_mask
+
+        return jnp.sum(per_dim, axis=-1)
+
+    log_pi = _log_prob(mu_pi, log_std_pi, actions)
+    log_mu = _log_prob(mu_mu, log_std_mu, actions)
+    rho = jax.lax.stop_gradient(jnp.exp(log_pi - log_mu))
     return rho
 
 
@@ -126,3 +177,53 @@ def transform_from_2hot(
     """
     support = jnp.linspace(min_value, max_value, num_bins)
     return jnp.sum(probs * support, axis=-1)
+
+
+def compute_gaussian_kl(
+    mu_target: chex.Array,
+    log_std_target: chex.Array,
+    mu_pred: chex.Array,
+    log_std_pred: chex.Array,
+    action_dim_mask: chex.Array | None = None,
+) -> chex.Array:
+    """
+    Compute KL divergence between two diagonal Gaussian distributions.
+
+    `KL(target || pred)` computed analytically per dimension, then summed
+    over valid action dimensions.
+
+    Parameters
+    ----------
+    mu_target : chex.Array
+        Target mean. Shape: `(B, T, D)`
+    log_std_target : chex.Array
+        Target log standard deviation. Shape: `(B, T, D)`
+    mu_pred : chex.Array
+        Predicted mean. Shape: `(B, T, D)`
+    log_std_pred : chex.Array
+        Predicted log standard deviation. Shape: `(B, T, D)`
+    action_dim_mask : chex.Array (optional)
+        Boolean mask `(D,)` for valid action dimensions. Default is `None`
+
+    Returns
+    -------
+    kl : chex.Array
+        Per-sample KL divergence. Shape: `(B, T)`
+    """
+    std_target = jnp.exp(log_std_target)
+    std_pred = jnp.exp(log_std_pred)
+    var_pred = jnp.square(std_pred)
+
+    # Per-dimension KL: log(σ₂/σ₁) + (σ₁² + (μ₁-μ₂)²) / (2σ₂²) - ½
+    per_dim_kl = (
+        log_std_pred
+        - log_std_target  # type: ignore
+        + (jnp.square(std_target) + jnp.square(mu_target - mu_pred))  # type: ignore
+        / (2.0 * var_pred + 1e-8)
+        - 0.5
+    )
+
+    if action_dim_mask is not None:
+        per_dim_kl = per_dim_kl * action_dim_mask
+
+    return jnp.sum(per_dim_kl, axis=-1)  # (B, T)

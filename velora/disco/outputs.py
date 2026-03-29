@@ -951,3 +951,136 @@ class MetaStepStats:
         """
         mean_losses: LossStatistics = jax.tree.map(jnp.mean, self._losses)
         return mean_losses.to_dict()
+
+
+@struct.dataclass
+class ContinuousPolicyAgentOutput:
+    """
+    Dataclass for the `ContinuousPolicyAgent` output.
+
+    If `T` dimension on values is `T=1` use `ContinuousPolicyAgentOutput.create()`.
+
+    Parameters
+    ----------
+    encoding : chex.Array
+        Encoder embedding output `(B, T, F)`
+    mu : chex.Array
+        Policy mean with shape `(B, T, D)` or `(B, D)`.
+        Padded to `max_action_dim`.
+    log_std : chex.Array
+        Policy log standard deviation with shape `(B, T, D)` or `(B, D)`.
+        Padded to `max_action_dim`.
+    y : chex.Array
+        Observation-conditioned prediction vector `(B, T, Y)` or `(B, Y)`.
+    z : chex.Array
+        Action-conditioned prediction vector `(B, T, Z)` or `(B, Z)`.
+        Conditioned on the action taken — no action dimension.
+    aux_pi : chex.Array
+        Auxiliary policy prediction — predicted next-step Gaussian parameters
+        `(μ', log σ')` with shape `(B, T, 2D)` or `(B, 2D)`.
+        Conditioned on the action taken — no action indexing needed.
+    q : chex.Array
+        Scalar action-value estimate `(B, T, 1)` or `(B, 1)`.
+        Conditioned on the action taken — no distributional bins.
+    """
+
+    encoding: chex.Array
+    mu: chex.Array
+    log_std: chex.Array
+    y: chex.Array
+    z: chex.Array
+    aux_pi: chex.Array
+    q: chex.Array
+
+    @classmethod
+    def create(
+        cls,
+        encoding: chex.Array,
+        mu: chex.Array,
+        log_std: chex.Array,
+        y: chex.Array,
+        z: chex.Array,
+        aux_pi: chex.Array,
+        q: chex.Array,
+    ) -> Self:
+        """Create a new instance with time dimension squeezed if `T=1`."""
+        return cls(
+            *jax.tree.map(squeeze_time, (encoding, mu, log_std, y, z, aux_pi, q))
+        )
+
+    def to_numpy(self) -> Self:
+        """Convert all fields to numpy arrays."""
+        return jax.tree.map(np.asarray, self)
+
+    @classmethod
+    def from_numpy(
+        cls,
+        encoding: np.ndarray,
+        mu: np.ndarray,
+        log_std: np.ndarray,
+        y: np.ndarray,
+        z: np.ndarray,
+        aux_pi: np.ndarray,
+        q: np.ndarray,
+    ) -> Self:
+        """Create a new instance from numpy arrays."""
+        return cls(*jax.tree.map(jnp.asarray, (encoding, mu, log_std, y, z, aux_pi, q)))
+
+
+@struct.dataclass
+class ContinuousDiscoAgentOutput:
+    """
+    Dataclass for the `ContinuousDiscoAgent` output (meta-network targets).
+
+    Does not include `aux_pi` — auxiliary policy prediction has pre-defined
+    semantics and is not part of the discovered target set.
+
+    Parameters
+    ----------
+    mu : chex.Array
+        Policy mean targets (`μ̂`) with shape `(B, T, D)`
+    log_std : chex.Array
+        Policy log-std targets (`log σ̂`) with shape `(B, T, D)`
+    y : chex.Array
+        Observation-conditioned targets (`ŷ`) with shape `(B, T, Y)`
+    z : chex.Array
+        Action-conditioned targets (`ẑ`) with shape `(B, T, Z)`
+    """
+
+    mu: chex.Array
+    log_std: chex.Array
+    y: chex.Array
+    z: chex.Array
+
+    def output_values(self) -> Tuple[chex.Array, ...]:
+        return tuple(getattr(self, f.name) for f in fields(self))
+
+
+@struct.dataclass
+class ContinuousDiscoPredictions:
+    """
+    Dataclass for `ContinuousDiscoNetwork` predictions.
+
+    Parameters
+    ----------
+    embedding : chex.Array
+        Command layer output with shape `(B, T, F)`
+    mu : chex.Array
+        Policy mean targets (`μ̂`) with shape `(B, T, D)`
+    log_std : chex.Array
+        Policy log-std targets (`log σ̂`) with shape `(B, T, D)`
+    y : chex.Array
+        Observation-conditioned targets (`ŷ`) with shape `(B, T, Y)`
+    z : chex.Array
+        Action-conditioned targets (`ẑ`) with shape `(B, T, Z)`
+    """
+
+    embedding: chex.Array
+    mu: chex.Array
+    log_std: chex.Array
+    y: chex.Array
+    z: chex.Array
+
+    def output_values(self, ignore_embed: bool = True) -> Tuple[chex.Array, ...]:
+        skip = {"embedding"} if ignore_embed else set()
+        return tuple(getattr(self, f.name) for f in fields(self) if f.name not in skip)

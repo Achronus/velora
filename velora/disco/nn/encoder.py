@@ -16,18 +16,76 @@
 from typing import Tuple
 
 import chex
-import gymnasium as gym
 import jax
 import jax.numpy as jnp
 from flax import nnx
 
 from velora.disco.config.settings import DiscoEncoderSettings
 from velora.disco.outputs import PolicyAgentOutput
-from velora.disco.rollouts import Rollout
+from velora.disco.rollouts import ContinuousRollout, Rollout
 from velora.utils.nn import active_parameters, total_parameters
 
 
-class DiscoInputEncoder(nnx.Module):
+class DiscoInputEncoderBase(nnx.Module):
+    """
+    Base input encoder for Disco networks
+
+    Parameters
+    ----------
+    config : DiscoEncoderSettings
+        Encoder configuration
+    rngs : nnx.Rngs
+        Random number generator
+    """
+
+    def __init__(self, *, config: DiscoEncoderSettings, rngs: nnx.Rngs) -> None:
+        self.config = config
+        self.rngs = rngs
+
+        self._total_params = 0
+
+    @property
+    def total_params(self) -> int:
+        """
+        Gets the network's total parameter count.
+
+        Returns
+        -------
+        count : int
+            The total parameter count.
+        """
+        return self._total_params
+
+    @property
+    def active_params(self) -> int:
+        """
+        Gets the network's active parameter count.
+
+        Returns
+        -------
+        count : int
+            The active parameter count.
+        """
+        return self._total_params
+
+    def _encode(self, x: chex.Array) -> chex.Array:
+        """
+        Encodes an array using Softmax.
+
+        Parameters
+        ----------
+        x : chex.Array
+            Input to encode in shape `(B, T, F)`
+
+        Returns
+        -------
+        embedding : chex.Array
+            Output embedding in shape: `(B, T, E)`
+        """
+        return nnx.softmax(x, axis=-1)
+
+
+class DiscoInputEncoder(DiscoInputEncoderBase):
     """
     Encodes the policy agent predictions and environment signals into a readable format for the Disco network.
 
@@ -48,7 +106,7 @@ class DiscoInputEncoder(nnx.Module):
     """
 
     def __init__(self, *, config: DiscoEncoderSettings, rngs: nnx.Rngs) -> None:
-        self.config = config
+        super().__init__(config=config, rngs=rngs)
 
         self.out_features = self.config.output_dim
 
@@ -74,30 +132,6 @@ class DiscoInputEncoder(nnx.Module):
         )
 
         self._total_params = total_parameters(self)
-
-    @property
-    def total_params(self) -> int:
-        """
-        Gets the network's total parameter count.
-
-        Returns
-        -------
-        count : int
-            The total parameter count.
-        """
-        return self._total_params
-
-    @property
-    def active_params(self) -> int:
-        """
-        Gets the network's active parameter count.
-
-        Returns
-        -------
-        count : int
-            The active parameter count.
-        """
-        return self._total_params
 
     def __call__(
         self,
@@ -157,22 +191,6 @@ class DiscoInputEncoder(nnx.Module):
         )
 
         return embedding, action_emb
-
-    def _encode(self, x: chex.Array) -> chex.Array:
-        """
-        Encodes an array using Softmax.
-
-        Parameters
-        ----------
-        x : chex.Array
-            Input to encode in shape `(B, T, F)`
-
-        Returns
-        -------
-        embedding : chex.Array
-            Output embedding in shape: `(B, T, E)`
-        """
-        return nnx.softmax(x, axis=-1)
 
     def _encode_states(
         self,
@@ -310,6 +328,260 @@ class DiscoInputEncoder(nnx.Module):
         rewards = jnp.sign(rewards) * jnp.log1p(jnp.abs(rewards) + 1e-3)
         scalars = jnp.stack([rewards, discounts], axis=-1)
         return self.scalar_encoder(scalars)
+
+
+class ContinuousDiscoInputEncoder(DiscoInputEncoderBase):
+    """
+    Encodes continuous policy agent predictions and environment signals into
+    a readable format for the Disco network.
+
+    Transforms raw inputs into fixed-size embeddings via single-layer projections:
+        - State-conditional `(y, y_target)` → Linear projection
+        - Policy encoder - encodes Gaussian policy parameters
+          `(μ, log σ, μ_target, log σ_target)` into a policy summary embedding
+        - Action-conditional encoder - encodes
+          `(z, q, z_target, q_target, action_taken)` into an
+          action-conditional embedding
+        - Scalars `(rewards, discounts)` → Linear projection
+
+    Parameters
+    ----------
+    config : DiscoEncoderSettings
+        Encoder configuration
+    max_action_dim : int
+        Maximum continuous action dimensionality across all environments.
+        Used to size the policy and action-conditional encoder inputs.
+    rngs : nnx.Rngs
+        Random number generator
+    """
+
+    def __init__(
+        self,
+        config: DiscoEncoderSettings,
+        max_action_dim: int,
+        *,
+        rngs: nnx.Rngs,
+    ) -> None:
+        super().__init__(config=config, rngs=rngs)
+
+        self.max_action_dim = max_action_dim
+
+        # (B, T, Y) -> (B, T, E_y)
+        self.state_encoder = nnx.Linear(
+            self.config.prediction_size,
+            self.config.obs_embed_dim,
+            rngs=rngs,
+        )
+
+        # (B, T, 2) -> (B, T, E_s)
+        self.scalar_encoder = nnx.Linear(
+            2,  # reward + discount
+            self.config.scalar_embed_dim,
+            rngs=rngs,
+        )
+
+        # Policy summary: (mu, log_std, mu_target, log_std_target) -> embed
+        self.policy_encoder = nnx.Linear(
+            4 * max_action_dim,
+            config.action_embed_dim,
+            rngs=rngs,
+        )
+
+        # Action-conditional: (z, q, z_target, q_target, action) -> embed
+        # z: prediction_size, q: 1 (scalar), action: max_action_dim
+        self.action_cond_encoder = nnx.Linear(
+            2 * (config.prediction_size + 1) + max_action_dim,
+            config.action_embed_dim,
+            rngs=rngs,
+        )
+
+        self._total_params = total_parameters(self)
+
+    def __call__(self, rollout: ContinuousRollout) -> chex.Array:
+        """
+        Performs a forward pass through the encoding.
+
+        Parameters
+        ----------
+        rollout : ContinuousRollout
+            A trajectory of experience containing:
+                - `actions`: Continuous actions taken. Shape: `(B, T, D)`
+                - `rewards`: Rewards received. Shape: `(B, T, 1)`
+                - `discounts`: Episode continuation signals. Shape: `(B, T, 1)`
+                - `preds`: policy network predictions
+                - `target_preds`: target network predictions
+
+        Returns
+        -------
+        embedding : chex.Array
+            Flattened embedding for the Disco network. Shape: `(B, T, E)`
+            where `E = output_dim` (same as discrete variant).
+        """
+        # State encoding — inherited from parent
+        y, y_target = self._encode_states(rollout.preds.y, rollout.target_preds.y)
+
+        # Policy summary encoding — Gaussian parameters
+        policy_emb = self._encode_policy(
+            rollout.preds.mu,
+            rollout.preds.log_std,
+            rollout.target_preds.mu,
+            rollout.target_preds.log_std,
+        )
+
+        # Action-conditional encoding — z, q conditioned on taken action
+        action_cond_emb = self._encode_action_conditional(
+            rollout.preds.z,
+            rollout.preds.q,
+            rollout.target_preds.z,
+            rollout.target_preds.q,
+            rollout.actions,
+        )
+
+        # Scalar encoding — inherited from parent
+        scalar = self._encode_scalars(rollout.rewards, rollout.discounts)
+
+        # Same structure as discrete: (y, y_target, policy_summary, action_cond, scalar)
+        # Matches output_dim = obs_embed_dim * 2 + action_embed_dim * 2 + scalar_embed_dim
+        embedding = jnp.concatenate(
+            [y, y_target, policy_emb, action_cond_emb, scalar],
+            axis=-1,
+        )
+
+        return embedding
+
+    def _encode_states(
+        self,
+        y: chex.Array,
+        y_target: chex.Array,
+    ) -> Tuple[chex.Array, chex.Array]:
+        """
+        Encode state-conditional predictions.
+
+        Parameters
+        ----------
+        y : chex.Array
+            Observation-conditioned predictions. Shape: `(B, T, Y)`
+        y_target : chex.Array
+            Target observation-conditioned predictions. Shape: `(B, T, Y)`
+
+        Returns
+        -------
+        y_embed : chex.Array
+            Y State embedding. Shape: `(B, T, E_y)`
+        y_target_embed : chex.Array
+            Y target state embedding. Shape: `(B, T, E_y)`
+        """
+        y_embed = self.state_encoder(self._encode(y))  # type: ignore
+        y_target_embed = self.state_encoder(self._encode(y_target))  # type: ignore
+        return y_embed, y_target_embed
+
+    def _encode_scalars(self, rewards: chex.Array, discounts: chex.Array) -> chex.Array:
+        """
+        Encode scalar inputs (rewards, discounts).
+
+        Applies sign-preserving log transform to rewards before encoding:
+        `sign(r) * log(1 + |r|)`.
+
+        Parameters
+        ----------
+        rewards : chex.Array
+            Rewards. Shape: `(B, T, 1)`
+        discounts : chex.Array
+            Discounts. Shape: `(B, T, 1)`
+
+        Returns
+        -------
+        scalar_emb : chex.Array
+            Scalar embedding. Shape: `(B, T, E_s)`
+        """
+        rewards = jnp.squeeze(rewards, axis=-1)  # (B, T)
+        discounts = jnp.squeeze(discounts, axis=-1)  # (B, T)
+
+        rewards = jnp.sign(rewards) * jnp.log1p(jnp.abs(rewards) + 1e-3)
+        scalars = jnp.stack([rewards, discounts], axis=-1)
+        return self.scalar_encoder(scalars)
+
+    def _encode_policy(
+        self,
+        mu: chex.Array,
+        log_std: chex.Array,
+        mu_target: chex.Array,
+        log_std_target: chex.Array,
+    ) -> chex.Array:
+        """
+        Encode Gaussian policy parameters into a summary embedding.
+
+        Provides the meta-network with a view of the full policy distribution,
+        analogous to the average-over-all-actions embedding in discrete.
+
+        Parameters
+        ----------
+        mu : chex.Array
+            Policy mean. Shape: `(B, T, D)`
+        log_std : chex.Array
+            Policy log standard deviation. Shape: `(B, T, D)`
+        mu_target : chex.Array
+            Target policy mean. Shape: `(B, T, D)`
+        log_std_target : chex.Array
+            Target policy log standard deviation. Shape: `(B, T, D)`
+
+        Returns
+        -------
+        policy_emb : chex.Array
+            Policy summary embedding. Shape: `(B, T, action_embed_dim)`
+        """
+        policy_input = jnp.concatenate(
+            [mu, log_std, mu_target, log_std_target],
+            axis=-1,
+        )  # (B, T, 4 * max_action_dim)
+
+        return self.policy_encoder(policy_input)
+
+    def _encode_action_conditional(
+        self,
+        z: chex.Array,
+        q: chex.Array,
+        z_target: chex.Array,
+        q_target: chex.Array,
+        actions: chex.Array,
+    ) -> chex.Array:
+        """
+        Encode action-conditional predictions and the taken action.
+
+        Since `z` and `q` are already conditioned on the taken action
+        (no action dimension), we concatenate them directly with the
+        continuous action vector.
+
+        Parameters
+        ----------
+        z : chex.Array
+            Action-conditioned predictions. Shape: `(B, T, Z)`
+        q : chex.Array
+            Scalar Q-value. Shape: `(B, T, 1)`
+        z_target : chex.Array
+            Target z predictions. Shape: `(B, T, Z)`
+        q_target : chex.Array
+            Target Q-value. Shape: `(B, T, 1)`
+        actions : chex.Array
+            Continuous action taken. Shape: `(B, T, D)`
+
+        Returns
+        -------
+        action_cond_emb : chex.Array
+            Action-conditional embedding. Shape: `(B, T, action_embed_dim)`
+        """
+        action_cond_input = jnp.concatenate(
+            [
+                self._encode(z),  # softmax(z) — learned representation
+                q,  # scalar Q — no softmax
+                self._encode(z_target),
+                q_target,
+                actions,  # continuous action taken
+            ],
+            axis=-1,
+        )  # (B, T, 2 * prediction_size + 2 + max_action_dim)
+
+        return self.action_cond_encoder(action_cond_input)
 
 
 class ImageEncoder(nnx.Module):
@@ -513,6 +785,11 @@ class VectorEncoder(nnx.Module):
         """Active parameter count."""
         return self._active_params
 
+    @property
+    def encoding_dim(self) -> int:
+        """Output feature dimensionality of the encoder."""
+        return self.output_dim
+
     def __call__(self, x: chex.Array) -> chex.Array:
         """
         Forward pass through the encoder.
@@ -548,17 +825,17 @@ PolicyEncoder = ImageEncoder | VectorEncoder
 
 
 def build_obs_encoder(
-    obs_spec: gym.spaces.Box,
+    obs_shape: Tuple[int, ...],
     n_hidden: int,
     key: chex.PRNGKey,
 ) -> PolicyEncoder:
     """
-    Dynamically build an observation encoder based on `obs_spec` shape.
+    Dynamically build an observation encoder based on an observation space's shape.
 
     Parameters
     ----------
-    obs_spec : gym.spaces.Box
-        Observation space specification
+    obs_shape : Tuple[int, ...]
+        Observation space shape
     n_hidden : int
         Number of hidden units for scaling
     key : chex.PRNGKey
@@ -569,8 +846,6 @@ def build_obs_encoder(
     encoder : ImageEncoder | VectorEncoder
         Image encoder for 3D obs `(H, W, C)`, vector encoder for 1D obs `(D,)`
     """
-    obs_shape = obs_spec.shape
-
     if len(obs_shape) == 3:
         # Image observations: (H, W, C)
         return ImageEncoder(obs_shape[-1], n_hidden, key=key)

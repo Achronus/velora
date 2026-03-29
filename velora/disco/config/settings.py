@@ -39,18 +39,28 @@ class PolicyAgentSettings:
         Size of the observation/action-conditioned prediction vectors (y, z).
         Must match `DiscoAgent` size. Default is `128`
     q_size : int (optional)
-        Size of action-value prediction head. Controls the number of discrete bins
-        for distributional Q-values (`n_atoms`).
-        Must match `DiscoAgent` size. Default is `101`
+        Discrete action spaces only. Size of action-value prediction head.
+        Controls the number of discrete bins for distributional Q-values
+        (`n_atoms`). Must match `DiscoAgent` size. Default is `101`
+    bin_resolution : float (optional)
+        Discrete action spaces only. Target bin resolution (width) for
+        distributional Q-values. Dynamically sets the range of Q-values that can
+        be represented for `[min, max]` based on `q_size`. Smaller resolutions
+        provide finer granularity for value predictions but reduce the
+        representable range. Default is `0.4`
+    min_log_std : float (optional)
+        Continuous action spaces only. Minimum log standard deviation for
+        the Gaussian policy. Prevents the policy from becoming too deterministic,
+        which would cause gradient explosion in the Gaussian KL divergence.
+        Default is `-5.0`
+    max_log_std : float (optional)
+        Continuous action spaces only. Maximum log standard deviation for the
+        Gaussian policy. Prevents excessively noisy policies early in training.
+        Default is `2.0`
     lr : float (optional)
         Learning rate for the agent's optimizer. Default is `0.0003`
     max_grad_norm : float (optional)
         Maximum gradient norm for gradient clipping. Default is `1.0`
-    bin_resolution : float (optional)
-        Target bin resolution (width) for distributional Q-values. Dynamically
-        sets the range of Q-values that can be represented for `[min, max]` based
-        on `q_size`. Smaller resolutions provide finer granularity for value
-        predictions but reduce the representable range. Default is `0.4`
     sparsity : float (optional)
         Network connection sparsity between neurons used for the Liquid Neural
         Networks (LNNs). Default is `0.5`.
@@ -63,11 +73,15 @@ class PolicyAgentSettings:
 
     n_hidden: int = 64
     prediction_size: int = 128
+
     q_size: int = 101
+    bin_resolution: float = 0.4
+
+    min_log_std: float = -5.0
+    max_log_std: float = 2.0
 
     lr: float = 3e-4
     max_grad_norm: float = 1.0
-    bin_resolution: float = 0.4
     sparsity: float = 0.5
 
     def categorical_bins(self) -> CategoricalBins:
@@ -219,14 +233,25 @@ class DiscoAgentSettings:
             - `scalar_embed_dim` = `max(prediction_size // 8, 4)`
 
     obs_embed_dim : int (optional)
-        Manual embedding dimension for state-conditional predictions (y).
+        Manual embedding dimension for state-conditional predictions `(y)`.
         Only used when `dynamic_embed_dims=False`. Default is `64`
     action_embed_dim : int (optional)
-        Manual embedding dimension for action-conditional inputs (z, q, pi).
+        Manual embedding dimension for action-conditional inputs `(z, q, pi)`.
         Only used when `dynamic_embed_dims=False`. Default is `64`
     scalar_embed_dim : int (optional)
-        Manual embedding dimension for scalars (rewards, discounts).
+        Manual embedding dimension for scalars `(rewards, discounts)`.
         Only used when `dynamic_embed_dims=False`. Default is `16`
+    max_action_dim : int (optional)
+        Maximum continuous action dimensionality across all environments in
+        the training set. Determined at runtime by probing environment action
+        spaces — not a tunable hyperparameter.
+
+        Used by `ContinuousDiscoNetwork` to size the policy target projections
+        `(μ̂, log σ̂)` and by `ContinuousDiscoInputEncoder` to size the policy
+        and action-conditional encoder inputs. Serialized with the config so
+        that `load()` can reconstruct the correct network shapes.
+
+        Set to `0` for discrete action spaces (unused). Default is `0`
     """
 
     n_hidden: int = 128
@@ -241,6 +266,8 @@ class DiscoAgentSettings:
     obs_embed_dim: int = 64
     action_embed_dim: int = 64
     scalar_embed_dim: int = 16
+
+    max_action_dim: int = 0
 
     def encoder_config(self) -> DiscoEncoderSettings:
         """

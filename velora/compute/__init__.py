@@ -1,6 +1,6 @@
 from velora.compute.mixflow import fwdrev_grad, fwdrev_value_and_grad
 from velora.compute.rl_ops import (
-    compute_importance_weights,
+    compute_softmax_importance_weights,
     transform_from_2hot,
     transform_to_2hot,
 )
@@ -20,7 +20,7 @@ __all__ = [
     "Softmax",
     "fwdrev_grad",
     "fwdrev_value_and_grad",
-    "compute_importance_weights",
+    "compute_softmax_importance_weights",
     "transform_from_2hot",
     "transform_to_2hot",
     "batched_index",

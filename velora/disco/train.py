@@ -23,15 +23,24 @@ import chex
 import gymnasium as gym
 import jax
 import jax.numpy as jnp
+import numpy as np
 import optax
 import orbax.checkpoint as ocp
 
 from velora.cli.disco.dashboard import DiscoConsoleDashboard
 from velora.cli.disco.settings import DiscoParamsSettings
 from velora.cli.disco.simple import SimpleDashboard
-from velora.compute.loss import compute_entropy_loss, compute_policy_gradient_loss
+from velora.compute.loss import (
+    compute_discrete_policy_gradient_loss,
+    compute_entropy_loss,
+)
 from velora.compute.mixflow import fwdrev_value_and_grad
-from velora.disco.agent import DiscoAgent, DiscoValueAgent, PolicyAgent
+from velora.disco.agent import (
+    ContinuousPolicyAgent,
+    DiscoAgent,
+    DiscoValueAgent,
+    PolicyAgent,
+)
 from velora.disco.config.metadata import RuleTrainerMetadata
 from velora.disco.config.settings import AgentTrainerSettings, RuleTrainerSettings
 from velora.disco.config.state import (
@@ -51,9 +60,12 @@ from velora.disco.outputs import (
     ValueOutputs,
 )
 from velora.disco.pool import TrainerPool
-from velora.disco.rollouts import Rollout
+from velora.disco.rollouts import ContinuousRollout, Rollout
 from velora.disco.utils.budget import sample_budget
-from velora.disco.utils.compute import compute_value_outputs
+from velora.disco.utils.compute import (
+    compute_continuous_value_outputs,
+    compute_value_outputs,
+)
 from velora.disco.utils.loss import compute_meta_reg_loss, compute_policy_loss
 from velora.gym.envs import EnvGroup, EnvSet, MakeFn
 from velora.gym.workers import EnvWorkerPool
@@ -67,28 +79,9 @@ from velora.utils.format import cache_status
 from velora.utils.transforms import squeeze_time, unstack_pytree
 
 
-class AgentTrainer:
+class AgentTrainerBase:
     """
-    Factory for a single agent training slot in the `TrainerPool`.
-
-    Creates `PolicyAgent`, `DiscoValueAgent`, environments, and
-    optimizer states. After construction, `TrainerPool` extracts
-    the agents, params, and state — this class serves as an initializer
-    and is recreated on trainer resets.
-
-    Environments are created temporarily during construction for
-    metadata extraction (action space, observation space) and then
-    closed — stepping is handled by `EnvWorkerPool` subprocesses.
-
-    Lifetime
-    ---------
-    Each trainer is assigned a step budget on construction, sampled from the
-    DiscoRL distribution `{20M, 50M, 100M, 200M}` environment steps with
-    weights inversely proportional to budget size. When the budget is
-    exhausted, `TrainerPool` detects the overspend and `RuleTrainer`
-    replaces this trainer with a freshly initialized one before the next
-    collection step. This ensures the meta-learner continually observes
-    agents learning from scratch rather than converged policies.
+    Base class for agent trainers.
 
     Parameters
     ----------
@@ -102,9 +95,6 @@ class AgentTrainer:
         Factory function to create the environment
     budget_rng : random.Random
         Python RNG used to sample the initial step budget
-    max_actions : int
-        Maximum number of discrete actions across all environments in the
-        training set
     jit_compile : bool (optional)
         Flag to enable/disable JIT compilation. Default is `False`
     """
@@ -117,7 +107,6 @@ class AgentTrainer:
         key: chex.PRNGKey,
         make_fn: MakeFn,
         budget_rng: random.Random,
-        max_actions: int,
         jit_compile: bool = False,
     ) -> None:
         self.config = config
@@ -126,53 +115,13 @@ class AgentTrainer:
         self.envs = make_fn(self.env_name, self.config.batch_size)
 
         self.jit_compile = jit_compile
-        self.max_actions = max_actions
-
-        self.action_space: gym.spaces.Discrete = self.envs.single_action_space  # type: ignore
-        self.obs_space: gym.spaces.Box = self.envs.single_observation_space  # type: ignore
-
-        self.n_actions = self.action_space.n.item()
-        self.key, agent_key, target_key, value_key = jax.random.split(key, 4)
-
-        self.policy_agent = PolicyAgent(
-            self.obs_space,
-            self.action_space,
-            config=self.config.agent,
-            key=agent_key,
-            max_actions=self.max_actions,
-            jit_compile=self.jit_compile,
-        )
-
-        self.target_agent = PolicyAgent(
-            self.obs_space,
-            self.action_space,
-            config=self.config.agent,
-            key=target_key,
-            max_actions=self.max_actions,
-            jit_compile=self.jit_compile,
-        )
-
-        self.value_agent = DiscoValueAgent(
-            self.obs_space,
-            self.config.agent.n_hidden,
-            config=self.config.value,
-            key=value_key,
-            sparsity=self.config.agent.sparsity,
-            jit_compile=self.jit_compile,
-        )
+        self.key = key
 
         # Init state
-        current_obs, _ = self.envs.reset()
-
         self.policy_optim = self._create_optim()
         self.value_optim = self._create_optim()
 
         self.ema_utils = MovingAverage(self.config.ema)
-        self.state = AgentTrainerState.create(
-            self.policy_optim.init(self.policy_agent.get_params()),
-            self.value_optim.init(self.value_agent.get_params()),
-            current_obs=current_obs,
-        )  # (B, H)
 
         self.meta_optim: optax.GradientTransformation = None  # type: ignore
         self.meta_opt_state: optax.OptState = None  # type: ignore
@@ -227,6 +176,117 @@ class AgentTrainer:
             if self.jit_compile
             else self.meta_optim.update
         )
+
+    def close(self) -> None:
+        """Clean up resources."""
+        self.envs.close()
+
+
+class AgentTrainer(AgentTrainerBase):
+    """
+    Factory for a single agent training slot in the `TrainerPool`.
+
+    Creates `PolicyAgent`, `DiscoValueAgent`, environments, and
+    optimizer states. After construction, `TrainerPool` extracts
+    the agents, params, and state — this class serves as an initializer
+    and is recreated on trainer resets.
+
+    Environments are created temporarily during construction for
+    metadata extraction (action space, observation space) and then
+    closed — stepping is handled by `EnvWorkerPool` subprocesses.
+
+    Lifetime
+    ---------
+    Each trainer is assigned a step budget on construction, sampled from the
+    DiscoRL distribution `{20M, 50M, 100M, 200M}` environment steps with
+    weights inversely proportional to budget size. When the budget is
+    exhausted, `TrainerPool` detects the overspend and `RuleTrainer`
+    replaces this trainer with a freshly initialized one before the next
+    collection step. This ensures the meta-learner continually observes
+    agents learning from scratch rather than converged policies.
+
+    Parameters
+    ----------
+    env_name : str
+        The gymnasium environment name to train on
+    config : AgentTrainerSettings
+        Configuration for individual agent training
+    key : chex.PRNGKey
+        Random number generator key
+    make_fn : MakeFn
+        Factory function to create the environment
+    budget_rng : random.Random
+        Python RNG used to sample the initial step budget
+    max_actions : int
+        Maximum number of discrete actions across all environments in the
+        training set
+    jit_compile : bool (optional)
+        Flag to enable/disable JIT compilation. Default is `False`
+    """
+
+    def __init__(
+        self,
+        env_name: str,
+        config: AgentTrainerSettings,
+        *,
+        key: chex.PRNGKey,
+        make_fn: MakeFn,
+        budget_rng: random.Random,
+        max_actions: int,
+        jit_compile: bool = False,
+    ) -> None:
+        super().__init__(
+            env_name,
+            config,
+            key=key,
+            make_fn=make_fn,
+            budget_rng=budget_rng,
+            jit_compile=jit_compile,
+        )
+
+        self.max_actions = max_actions
+
+        self.action_space: gym.spaces.Discrete = self.envs.single_action_space  # type: ignore
+        self.obs_space: gym.spaces.Box = self.envs.single_observation_space  # type: ignore
+
+        self.n_actions = self.action_space.n.item()
+        self.key, agent_key, target_key, value_key = jax.random.split(key, 4)
+
+        self.policy_agent = PolicyAgent(
+            self.obs_space,
+            self.action_space,
+            config=self.config.agent,
+            key=agent_key,
+            max_actions=self.max_actions,
+            jit_compile=self.jit_compile,
+        )
+
+        self.target_agent = PolicyAgent(
+            self.obs_space,
+            self.action_space,
+            config=self.config.agent,
+            key=target_key,
+            max_actions=self.max_actions,
+            jit_compile=self.jit_compile,
+        )
+
+        self.value_agent = DiscoValueAgent(
+            self.obs_space,
+            self.config.agent.n_hidden,
+            config=self.config.value,
+            key=value_key,
+            sparsity=self.config.agent.sparsity,
+            jit_compile=self.jit_compile,
+        )
+
+        # Init state
+        current_obs, _ = self.envs.reset()
+
+        self.state = AgentTrainerState.create(
+            self.policy_optim.init(self.policy_agent.get_params()),
+            self.value_optim.init(self.value_agent.get_params()),
+            current_obs=current_obs,
+        )  # (B, H)
 
     def warm(self) -> None:
         """
@@ -290,9 +350,189 @@ class AgentTrainer:
             self.config.value.td_lambda,
         )
 
-    def close(self) -> None:
-        """Clean up resources."""
-        self.envs.close()
+
+class ContinuousAgentTrainer(AgentTrainerBase):
+    """
+    Factory for a single continuous-action agent training slot in the `TrainerPool`.
+
+    Creates `ContinuousPolicyAgent`, `ContinuousPolicyAgent`, environments, and
+    optimizer states. After construction, `TrainerPool` extracts
+    the agents, params, and state — this class serves as an initializer
+    and is recreated on trainer resets.
+
+    Environments are created temporarily during construction for
+    metadata extraction (action space, observation space) and then
+    closed — stepping is handled by `EnvWorkerPool` subprocesses.
+
+    Lifetime
+    ---------
+    Each trainer is assigned a step budget on construction, sampled from the
+    DiscoRL distribution `{20M, 50M, 100M, 200M}` environment steps with
+    weights inversely proportional to budget size. When the budget is
+    exhausted, `TrainerPool` detects the overspend and `RuleTrainer`
+    replaces this trainer with a freshly initialized one before the next
+    collection step. This ensures the meta-learner continually observes
+    agents learning from scratch rather than converged policies.
+
+    Parameters
+    ----------
+    env_name : str
+        The gymnasium environment name to train on
+    config : AgentTrainerSettings
+        Configuration for individual agent training
+    key : chex.PRNGKey
+        Random number generator key
+    make_fn : MakeFn
+        Factory function to create the environment
+    budget_rng : random.Random
+        Python RNG used to sample the initial step budget
+    max_action_dim : int
+        Maximum continuous action dimensionality across all environments
+    jit_compile : bool (optional)
+        Flag to enable/disable JIT compilation. Default is `False`
+    """
+
+    def __init__(
+        self,
+        env_name: str,
+        config: AgentTrainerSettings,
+        *,
+        key: chex.PRNGKey,
+        make_fn: MakeFn,
+        budget_rng: random.Random,
+        max_action_dim: int,
+        jit_compile: bool = False,
+    ) -> None:
+        super().__init__(
+            env_name,
+            config,
+            key=key,
+            make_fn=make_fn,
+            budget_rng=budget_rng,
+            jit_compile=jit_compile,
+        )
+
+        self.max_action_dim = max_action_dim
+
+        self.action_space: gym.spaces.Box = self.envs.single_action_space  # type: ignore
+        self.obs_space: gym.spaces.Box = self.envs.single_observation_space  # type: ignore
+
+        self.action_dim = int(np.prod(self.action_space.shape))
+        self.key, agent_key, target_key, value_key = jax.random.split(key, 4)
+
+        self.policy_agent = ContinuousPolicyAgent(
+            self.obs_space,
+            self.action_space,
+            config=self.config.agent,
+            key=agent_key,
+            max_action_dim=self.max_action_dim,
+            jit_compile=self.jit_compile,
+        )
+
+        self.target_agent = ContinuousPolicyAgent(
+            self.obs_space,
+            self.action_space,
+            config=self.config.agent,
+            key=target_key,
+            max_action_dim=self.max_action_dim,
+            jit_compile=self.jit_compile,
+        )
+
+        self.value_agent = DiscoValueAgent(
+            self.obs_space,
+            self.config.agent.n_hidden,
+            config=self.config.value,
+            key=value_key,
+            sparsity=self.config.agent.sparsity,
+            jit_compile=self.jit_compile,
+        )
+
+        # Init state
+        current_obs, _ = self.envs.reset()
+        self.state = AgentTrainerState.create(
+            self.policy_optim.init(self.policy_agent.get_params()),
+            self.value_optim.init(self.value_agent.get_params()),
+            current_obs=current_obs,
+        )  # (B, H)
+
+        # Pre-compute action dim mask
+        self.action_dim_mask = jnp.arange(self.max_action_dim) < self.action_dim
+
+    @property
+    def n_actions(self) -> int:
+        """Get number of actions."""
+        return self.action_dim
+
+    def warm(self) -> None:
+        """
+        Performs an initial forward pass through the agent networks.
+
+        Includes -
+            1. Materializing parameters before optimizer init
+            2. JIT compile caching
+        """
+        dummy_obs = jnp.zeros(
+            (self.config.batch_size, *self.obs_space.shape),
+            dtype=self.obs_space.dtype,
+        )
+        dummy_action = jnp.zeros(
+            (self.config.batch_size, self.max_action_dim),
+            dtype=jnp.float32,
+        )
+
+        _, h_policy = self.policy_agent(dummy_obs, dummy_action)
+        _, h_target = self.target_agent(dummy_obs, dummy_action)
+        _, h_value = self.value_agent(dummy_obs)
+
+        self.state = self.state.update_hidden(
+            AgentTrainerHiddenStates(
+                policy_ocm=h_policy.ocm,
+                policy_acm=h_policy.acm,
+                target_ocm=h_target.ocm,
+                target_acm=h_target.acm,
+                value=h_value,
+            )
+        )
+
+    def compute_value_outs(
+        self,
+        rollout: ContinuousRollout,
+        adv_ema: EMAState,
+        td_ema: EMAState,
+        action_dim_mask: chex.Array | None = None,
+    ) -> Tuple[ValueOutputs, EMAState, EMAState]:
+        """
+        Compute value outputs using Gaussian importance weights.
+
+        Parameters
+        ----------
+        rollout : ContinuousRollout
+            Trajectory to compute value targets on
+        adv_ema : EMAState
+            Current advantage EMA state
+        td_ema : EMAState
+            Current TD-error EMA state
+        action_dim_mask : chex.Array (optional)
+            Boolean mask `(max_action_dim,)`. Default is `None`
+
+        Returns
+        -------
+        value_outs : ValueOutputs
+            Value function outputs (targets, advantages, normalized advantages)
+        adv_ema : EMAState
+            Updated advantage EMA state
+        td_ema : EMAState
+            Updated TD-error EMA state
+        """
+        return compute_continuous_value_outputs(
+            rollout,
+            self.ema_utils,
+            adv_ema,
+            td_ema,
+            self.config.value.gamma,
+            self.config.value.td_lambda,
+            action_dim_mask=action_dim_mask,
+        )
 
 
 class RuleTrainer:
@@ -1020,7 +1260,7 @@ class RuleTrainer:
             )
             adv = jax.lax.stop_gradient(value_outs.normalized_advantages)
 
-            pg_loss = compute_policy_gradient_loss(
+            pg_loss = compute_discrete_policy_gradient_loss(
                 valid_rollout.preds.pi,
                 valid_rollout.actions,
                 adv,
