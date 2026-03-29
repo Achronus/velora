@@ -1519,7 +1519,7 @@ class RuleTrainer:
         self.console.start_training()
 
         try:
-            for step in range(self.state.meta_step, self.n_steps):
+            for _ in range(self.state.meta_step, self.n_steps):
                 stats = MetaStepStats(self.num_trainers)
                 meta_params = self.meta_agent.get_params()
 
@@ -1561,9 +1561,9 @@ class RuleTrainer:
                 metrics = {
                     "meta/grad_norm": grad_norm,
                     **stats.summary("meta/"),
-                    "meta/step": step,
+                    "meta/step": self.state.meta_step,
                 }
-                self.logger.log("meta", step, metrics)
+                self.logger.log("meta", self.state.meta_step, metrics)
 
                 self.console.update_stats(**stats.rewards_as_dict())
                 self.console.update_losses(
