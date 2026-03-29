@@ -480,7 +480,7 @@ class RuleTrainerState:
                 disco_h_size,
                 meta_h_size,
             ),
-            meta_step=0,
+            meta_step=jnp.int32(0),
         )
 
     def update_opt(self, new_opt_state: optax.OptState) -> Self:

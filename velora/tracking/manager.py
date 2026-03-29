@@ -17,11 +17,12 @@ import json
 from pathlib import Path
 from typing import Any, List, Self, Type, TypeVar
 
+import jax
 import orbax.checkpoint as ocp
 from orbax.checkpoint.checkpoint_managers import LatestN
 
 from velora.tracking.metadata import CheckpointMetadata
-from velora.tracking.settings import CheckpointSettings
+from velora.tracking.settings import RunSettings
 
 CheckpointState = Any  # Any flax.struct.dataclass instance
 M = TypeVar("M", bound=CheckpointMetadata)
@@ -39,14 +40,16 @@ class CheckpointManager:
 
     Parameters
     ----------
-    config : CheckpointSettings
+    config : RunSettings
         Configuration settings for the manager
     """
 
-    def __init__(self, config: CheckpointSettings) -> None:
-        self.cp_dir = config.dirpath
+    def __init__(self, config: RunSettings) -> None:
+        self.run_dir = config.dirpath
+        self.cp_dir = config.checkpoint_dir
         self.config = config
 
+        self.run_dir.mkdir(parents=True, exist_ok=True)
         self.cp_dir.mkdir(parents=True, exist_ok=True)
 
         # Configure checkpointing
@@ -90,7 +93,7 @@ class CheckpointManager:
         self._manager.save(step, args=ocp.args.PyTreeSave(state), force=force)  # type: ignore
 
         if metadata is not None:
-            meta_path = self.cp_dir / "metadata.json"
+            meta_path = self.run_dir / "metadata.json"
             meta_path.write_text(json.dumps(metadata.to_dict(), indent=2))
 
         return True
@@ -106,9 +109,11 @@ class CheckpointManager:
         Parameters
         ----------
         step : int (optional)
-            Specific step to restore, or None for latest. Default is `None`
+            Specific step to restore, or `None` for latest.
+            Default is `None`
         state_template : CheckpointState (optional)
-            Template for restoration (helps with structure). Default is `None`
+            Template for restoration (helps with structure).
+            Default is `None`
 
         Returns
         -------
@@ -129,9 +134,26 @@ class CheckpointManager:
         restore_step = step if step is not None else self._manager.latest_step()
 
         if state_template is not None:
+            # Build restore_args with explicit local device sharding
+            # to handle cross-device restore (e.g., cuda checkpoint on cpu)
+            local_sharding = jax.sharding.SingleDeviceSharding(
+                jax.local_devices()[0]
+            )
+            restore_args = jax.tree.map(
+                lambda x: ocp.type_handlers.ArrayRestoreArgs(
+                    sharding=local_sharding
+                )
+                if isinstance(x, jax.ShapeDtypeStruct)
+                else x,
+                state_template,
+            )
+
             restored = self._manager.restore(
                 restore_step,
-                args=ocp.args.PyTreeRestore(state_template),  # type: ignore
+                args=ocp.args.PyTreeRestore(
+                    state_template,
+                    restore_args=restore_args,
+                ),
             )
         else:
             restored = self._manager.restore(restore_step)
@@ -161,11 +183,11 @@ class CheckpointManager:
         file_error : FileNotFoundError
             If `metadata.json` does not exist in the checkpoint directory
         """
-        meta_path = self.cp_dir / "metadata.json"
+        meta_path = self.run_dir / "metadata.json"
 
         if not meta_path.exists():
             raise FileNotFoundError(
-                f"No 'metadata.json' found in '{self.cp_dir}'. "
+                f"No 'metadata.json' found in '{self.run_dir}'. "
                 "Ensure the checkpoint was saved with metadata."
             )
 

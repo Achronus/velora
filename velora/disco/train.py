@@ -15,8 +15,6 @@
 
 import math
 import random
-import shutil
-from pathlib import Path
 from typing import Callable, Dict, List, Self, Tuple
 
 import chex
@@ -73,9 +71,10 @@ from velora.nn.optim import scale_by_adan_no_denom
 from velora.tracking.episode import EpisodeTracker
 from velora.tracking.logger import MetricsLogger, RuntimeLogger
 from velora.tracking.manager import CheckpointManager
-from velora.tracking.settings import CheckpointSettings
+from velora.tracking.settings import RunSettings
 from velora.utils.config import dump_config, load_config
 from velora.utils.format import cache_status
+from velora.utils.seed import get_rng_key_data
 from velora.utils.transforms import squeeze_time, unstack_pytree
 
 
@@ -653,18 +652,20 @@ class RuleTrainer:
         self._cpu = jax.devices("cpu")[0]
 
         # Init logger - one writer per unique env
-        self.logger = MetricsLogger(self.config.logger)
+        self.logger = MetricsLogger(self.config.run.log_dir)
         self.logger.add_writer("meta")
 
         # Init runtime logger - capture warnings and stderr to runtime.log
-        self.runtime_logger = RuntimeLogger(self.logger.root_dir)
+        self.runtime_logger = RuntimeLogger(self.config.run.dirpath)
 
         for name, _ in self._unique_env_specs:
             self.logger.add_writer(f"envs/{name}")
 
         # Configure RNG keys
         key = jax.random.key(seed)
-        self.key, meta_key, *trainer_keys = jax.random.split(key, self.num_trainers + 2)
+        self.key, meta_key, *self.trainer_keys = jax.random.split(
+            key, self.num_trainers + 2
+        )
 
         # Init meta-agent and optimizer
         self.meta_agent = DiscoAgent(
@@ -684,8 +685,7 @@ class RuleTrainer:
         self.trainers: List[AgentTrainer] = []
 
         # Checkpointing
-        self.cp_manager = CheckpointManager(self.config.checkpoint)
-        self.rule_path = Path(self.cp_manager.cp_dir, "final_disco").resolve()
+        self.cp_manager = CheckpointManager(self.config.run)
 
         # Batch functions
         self.max_actions = self._compute_max_actions()
@@ -711,18 +711,14 @@ class RuleTrainer:
                     envs=envs.env_categories(),
                     num_trainers=self.num_trainers,
                     n_chunks=_n_chunks,
-                    params=self._dummy_params(trainer_keys[0]),
-                    complete_path=str(self.rule_path),
+                    params=self._dummy_params(self.trainer_keys[0]),
+                    complete_path=str(self.config.run.dirpath),
                     jit_compile=jit_compile,
                     cache_status=_cache_status,
                 )
             )
         else:
             self.console = SimpleDashboard(self.n_steps)
-
-        # Setup - build trainers, warm networks, compile gradient functions
-        self._initial_setup(trainer_keys)
-        self.console.finish_setup()
 
     def _dummy_params(self, rng_key: chex.PRNGKey) -> DiscoParamsSettings:
         """
@@ -1516,6 +1512,10 @@ class RuleTrainer:
 
         2. Log metrics and checkpoints periodically
         """
+        # Setup - build trainers, warm networks, compile gradient functions
+        self._initial_setup(self.trainer_keys)
+        self.console.finish_setup()
+
         self.console.start_training()
 
         try:
@@ -1584,7 +1584,6 @@ class RuleTrainer:
 
         # Final cleanup
         self.save_checkpoint(force=True)
-        self.save_rule()
 
         self.close()
         self.console.finish_training()
@@ -1592,8 +1591,9 @@ class RuleTrainer:
     @classmethod
     def restore(
         cls,
-        checkpoint_dir: str,
+        run_dir: str,
         *,
+        checkpoint_step: int | None = None,
         additional_steps: int | None = None,
         max_group_size: int = 8,
         num_env_workers: int = 16,
@@ -1602,7 +1602,7 @@ class RuleTrainer:
         verbose: bool = True,
     ) -> Self:
         """
-        Restore meta-training state from the latest checkpoint.
+        Restore meta-training state from a run directory.
 
         Loads meta-agent parameters, optimizer state, and hidden states,
         then resets all agent trainers.
@@ -1611,9 +1611,12 @@ class RuleTrainer:
 
         Parameters
         ----------
-        checkpoint_dir : str
-            Path to the checkpoint directory containing `metadata.json`
-            and the Orbax checkpoint subdirectories
+        run_dir : str
+            Path to the run directory containing `metadata.json`,
+            `checkpoints/`, and `logs/`
+        checkpoint_step : int (optional)
+            Specific checkpoint step to restore. When `None`, restores
+            the latest checkpoint. Default is `None`
         additional_steps : int (optional)
             Number of additional meta-training steps beyond the restored
             `meta_step`. When `None`, continues to the original
@@ -1643,14 +1646,15 @@ class RuleTrainer:
         Raises
         ------
         file_error : FileNotFoundError
-            If `metadata.json` is not found in `checkpoint_dir`
+            If `metadata.json` is not found in `run_dir`
         checkpoint_error : ValueError
-            If no checkpoint exists in `checkpoint_dir`
+            If no checkpoint exists in `run_dir`
         """
-        cp_settings = CheckpointSettings.from_path(checkpoint_dir)
+        print("Restoring model... ", end="")
+        run_settings = RunSettings.from_path(run_dir)
 
         # Load metadata from the user-provided directory
-        with CheckpointManager(cp_settings) as manager:
+        with CheckpointManager(run_settings) as manager:
             meta_run = manager.load_metadata(RuleTrainerMetadata)
 
         # Reconstruct environment groups and config from saved metadata
@@ -1660,8 +1664,8 @@ class RuleTrainer:
             meta_run.config,
         )
 
-        # Point checkpoint config at the user-provided directory
-        config = config.__replace__(checkpoint=cp_settings)
+        # Point run config at the user-provided directory
+        config = config.__replace__(run=run_settings)
 
         # Construct trainer
         trainer = cls(
@@ -1678,12 +1682,13 @@ class RuleTrainer:
         )
 
         # Restore meta-agent params and RuleTrainerState (includes meta_step)
-        trainer.load_checkpoint()
+        trainer.load_checkpoint(step=checkpoint_step)
 
         # Extend training if additional steps requested
         if additional_steps is not None:
             trainer.n_steps = trainer.state.meta_step + additional_steps
 
+        print("Complete.")
         return trainer
 
     def _log_meta_metrics(
@@ -1784,6 +1789,7 @@ class RuleTrainer:
             seed=self._seed,
             envs=[g.dump() for g in self._env_groups],
             use_bfloat16=self.use_bfloat16,
+            disco_key=get_rng_key_data(self.meta_agent.key),
         )
 
         return self.cp_manager.save(
@@ -1803,7 +1809,8 @@ class RuleTrainer:
         Parameters
         ----------
         step : int (optional)
-            Specific step to restore, or `None` for latest. Default is `None`
+            Specific step to restore, or `None` for latest.
+            Default is `None`
 
         Raises
         ------
@@ -1827,8 +1834,8 @@ class RuleTrainer:
         self.meta_agent.update_params(restored["meta_params"])
         self.state = restored["state"]
 
-        # Reset all agent trainers
-        for idx in range(self.num_trainers):
+        # Reset all agent trainers (skip if not yet built — train() handles that)
+        for idx in range(len(self.trainers)):
             self.reset_trainer(idx)
 
     def reset_trainer(self, trainer_idx: int) -> None:
@@ -1882,23 +1889,3 @@ class RuleTrainer:
 
         self.cp_manager.close()
         self.runtime_logger.close()
-
-    def save_rule(self) -> Path:
-        """
-        Export the discovered update rule as a standalone `DiscoAgent`.
-
-        Saves the meta-agent's parameters and configuration so the rule
-        can be loaded independently with `DiscoAgent.load()` for use
-        in new environments and architectures.
-
-        Returns
-        -------
-        path : Path
-            Path where the rule was saved
-        """
-        root_dir, sub_dir = self.rule_path.parent, self.rule_path.name
-
-        if self.rule_path.exists():
-            shutil.rmtree(self.rule_path)
-
-        return self.meta_agent.save(root_dir, sub_dir, timestamp=False)

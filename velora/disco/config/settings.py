@@ -22,7 +22,7 @@ from flax import struct
 
 from velora.cli.disco.settings import DiscoDashboardSettings, DiscoParamsSettings
 from velora.disco.distributions import CategoricalBins
-from velora.tracking.settings import CheckpointSettings, MetricLoggerSettings
+from velora.tracking.settings import RunSettings
 
 
 @struct.dataclass(frozen=True)
@@ -463,10 +463,9 @@ class RuleTrainerSettings:
         Configuration for Exponential Moving Averages (EMAs). Default is `EMASettings()`
     loss_cost : LossCostSettings (optional)
         Loss component weights. Default is `LossCostSettings()`
-    checkpoint : CheckpointSettings (optional)
-        Configuration for checkpoints. Default is `CheckpointSettings()`
-    logger : MetricLoggerSettings (optional)
-        Configuration for `MetricsLogger`. Default is `MetricLoggerSettings()`
+    run : RunSettings (optional)
+        Configuration for the run directory `(checkpoints, logs, metadata)`.
+        Default is `RunSettings()`
     meta_lr : float (optional)
         Learning rate for meta-network optimizer. Default is `0.001`
     meta_grad_clip : float (optional)
@@ -503,8 +502,7 @@ class RuleTrainerSettings:
     ema: EMASettings = struct.field(default_factory=EMASettings)
 
     loss_cost: LossCostSettings = struct.field(default_factory=LossCostSettings)
-    checkpoint: CheckpointSettings = struct.field(default_factory=CheckpointSettings)
-    logger: MetricLoggerSettings = struct.field(default_factory=MetricLoggerSettings)
+    run: RunSettings = struct.field(default_factory=RunSettings)
 
     meta_lr: float = 0.001
     meta_grad_clip: float = 1.0
@@ -653,8 +651,8 @@ class RuleTrainerSettings:
             n_agents=num_trainers,
             total_steps=self.total_env_steps,
             n_chunks=n_chunks,
-            log_dir=str(self.logger.dirpath),
-            cp_dir=str(self.checkpoint.dirpath),
+            log_dir=str(self.run.log_dir),
+            cp_dir=str(self.run.checkpoint_dir),
             env_categories=envs,
             params=params,
             complete_path=complete_path,

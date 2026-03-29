@@ -18,7 +18,7 @@ from velora.gym import (
     EnvGroup,
     EnvSet,
 )
-from velora.tracking import CheckpointSettings, MetricLoggerSettings
+from velora.tracking import RunSettings
 
 __all__ = [
     "RuleTrainer",
@@ -29,8 +29,7 @@ __all__ = [
     "DiscoValueSettings",
     "EMASettings",
     "LossCostSettings",
-    "CheckpointSettings",
-    "MetricLoggerSettings",
+    "RunSettings",
     "ATARI_BASE",
     "ATARI_EASY",
     "ATARI_MEDIUM",

@@ -23,8 +23,6 @@ from typing import Dict
 
 from tensorboardX import SummaryWriter
 
-from velora.tracking.settings import MetricLoggerSettings
-
 
 class _TeeWriter:
     """
@@ -142,16 +140,16 @@ class MetricsLogger:
     the training loop. Uses a single-worker thread pool to ensure writes
     are sequential and non-blocking.
 
-    Example root directory format: `logs/disco_250126_174222/`.
+    Example root directory format: `runs/trainer_250126_174222/logs/`.
 
     Parameters
     ----------
-    config : MetricLoggerSettings
-        Configuration for the metric logger
+    log_dir : Path | str
+        Root directory for TensorBoard log writers
 
     Examples
     --------
-    >>> logger = MetricsLogger(MetricLoggerSettings())
+    >>> logger = MetricsLogger("runs/my_run/logs")
     >>> logger.add_writer("meta")
     >>> logger.add_writer("envs/Pong")
     >>> logger.add_writer("envs/Breakout")
@@ -160,10 +158,8 @@ class MetricsLogger:
     >>> logger.close()
     """
 
-    def __init__(self, config: MetricLoggerSettings) -> None:
-        self.config = config
-
-        self.root_dir = self.config.dirpath
+    def __init__(self, log_dir: Path | str) -> None:
+        self.root_dir = Path(log_dir)
         self.root_dir.mkdir(parents=True, exist_ok=True)
 
         self.writers: Dict[str, SummaryWriter] = {}

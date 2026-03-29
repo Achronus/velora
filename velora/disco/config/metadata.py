@@ -43,6 +43,9 @@ class RuleTrainerMetadata(CheckpointMetadata):
         Serialized environment groups
     use_bfloat16 : bool
         Whether half-precision rollout buffers are enabled
+    disco_key : List[int]
+        Serialized JAX RNG key for the DiscoAgent. Used by
+        `DiscoAgent.load()` to reconstruct the agent from a run directory
     """
 
     config: Dict[str, Any]
@@ -52,3 +55,4 @@ class RuleTrainerMetadata(CheckpointMetadata):
     seed: int
     envs: List[Dict[str, Any]]
     use_bfloat16: bool
+    disco_key: List[int]

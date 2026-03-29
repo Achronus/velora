@@ -13,7 +13,6 @@
 # limitations under the License.
 # ==============================================================================
 
-import json
 from pathlib import Path
 from typing import Optional, Self, Tuple
 
@@ -27,12 +26,13 @@ import orbax.checkpoint as ocp
 from flax import nnx
 
 from velora.base.outputs import ParamCount
+from velora.disco.config.metadata import RuleTrainerMetadata
 from velora.disco.config.settings import (
     DiscoAgentSettings,
     DiscoValueSettings,
     PolicyAgentSettings,
 )
-from velora.disco.config.state import PolicyAgentHiddenStates
+from velora.disco.config.state import PolicyAgentHiddenStates, RuleTrainerState
 from velora.disco.nn.decoder import ActionDecoder, GaussianPolicyDecoder
 from velora.disco.nn.encoder import (
     ContinuousDiscoInputEncoder,
@@ -53,6 +53,8 @@ from velora.disco.outputs import (
 )
 from velora.disco.rollouts import ContinuousRollout, Rollout
 from velora.lnn.ncp import LNN
+from velora.tracking.manager import CheckpointManager
+from velora.tracking.settings import RunSettings
 from velora.utils.format import create_directory
 from velora.utils.nn import total_parameters
 from velora.utils.seed import get_rng_key_data, restore_rng_key
@@ -957,17 +959,27 @@ class DiscoAgent:
     @classmethod
     def load(
         cls,
-        path: Path | str,
+        run_dir: Path | str,
+        *,
+        checkpoint_step: int | None = None,
         freeze: bool = True,
         jit_compile: bool = False,
     ) -> Self:
         """
-        Restore a saved agents state. Useful for loading a discovered update rule.
+        Load a discovered update rule from a run directory.
+
+        Reads agent configuration and key from `metadata.json`,
+        then restores parameters from the specified (or latest) step
+        checkpoint.
 
         Parameters
         ----------
-        path : Path | str
-            Directory path to load from
+        run_dir : Path | str
+            Path to the run directory containing `metadata.json`
+            and `checkpoints/`
+        checkpoint_step : int (optional)
+            Specific checkpoint step to restore. When `None`,
+            restores the latest. Default is `None`
         freeze : bool (optional)
             Freezes parameters so they cannot be trained. Default is `True`
         jit_compile : bool (optional)
@@ -978,12 +990,13 @@ class DiscoAgent:
         disco_agent : DiscoAgent
             Agent with restored parameters
         """
-        path = Path(path).resolve()
+        run_settings = RunSettings.from_path(run_dir)
 
-        # Load config
-        config_dict: dict = json.loads((path / "config.json").read_text())
-        key = restore_rng_key(config_dict.pop("key"))
-        config = DiscoAgentSettings(**config_dict)
+        with CheckpointManager(run_settings) as manager:
+            meta = manager.load_metadata(RuleTrainerMetadata)
+
+        config = DiscoAgentSettings(**meta.config["disco_agent"])
+        key = restore_rng_key(meta.disco_key)
 
         agent = cls(
             config=config,
@@ -992,16 +1005,34 @@ class DiscoAgent:
             jit_compile=jit_compile,
         )
 
-        # Restore parameters
-        abstract_params = jax.tree.map(
-            ocp.utils.to_shape_dtype_struct,
-            agent.get_params(),
+        # Build full checkpoint template
+        params = agent.get_params()
+        meta_lr = meta.config.get("meta_lr", 0.001)
+        num_trainers = len(meta.envs) * meta.agents_per_env
+        batch_size = meta.config.get("batch_size", 20)
+
+        dummy_state = RuleTrainerState.create(
+            optax.adam(meta_lr).init(params),
+            num_trainers,
+            batch_size,
+            *agent.hidden_sizes,
         )
 
-        cp = ocp.StandardCheckpointer()
-        params = cp.restore(path / "params", abstract_params)
+        abstract_checkpoint = {
+            "meta_params": jax.tree.map(
+                ocp.utils.to_shape_dtype_struct,
+                params,
+            ),
+            "state": jax.tree.map(
+                lambda x: ocp.utils.to_shape_dtype_struct(x) if x is not None else None,
+                dummy_state,
+            ),
+        }
 
-        agent.update_params(params)
+        with CheckpointManager(run_settings) as manager:
+            restored = manager.restore(checkpoint_step, abstract_checkpoint)
+
+        agent.update_params(restored["meta_params"])
         return agent
 
 
@@ -1616,17 +1647,27 @@ class ContinuousDiscoAgent:
     @classmethod
     def load(
         cls,
-        path: Path | str,
+        run_dir: Path | str,
+        *,
+        checkpoint_step: int | None = None,
         freeze: bool = True,
         jit_compile: bool = False,
     ) -> Self:
         """
-        Restore a saved agents state. Useful for loading a discovered update rule.
+        Load a discovered update rule from a run directory.
+
+        Reads agent configuration and key from `metadata.json`,
+        then restores parameters from the specified (or latest) step
+        checkpoint.
 
         Parameters
         ----------
-        path : Path | str
-            Directory path to load from
+        run_dir : Path | str
+            Path to the run directory containing `metadata.json`
+            and `checkpoints/`
+        checkpoint_step : int (optional)
+            Specific checkpoint step to restore. When `None`,
+            restores the latest. Default is `None`
         freeze : bool (optional)
             Freezes parameters so they cannot be trained. Default is `True`
         jit_compile : bool (optional)
@@ -1634,15 +1675,16 @@ class ContinuousDiscoAgent:
 
         Returns
         -------
-        disco_agent : DiscoAgent
+        disco_agent : ContinuousDiscoAgent
             Agent with restored parameters
         """
-        path = Path(path).resolve()
+        run_settings = RunSettings.from_path(run_dir)
 
-        # Load config
-        config_dict: dict = json.loads((path / "config.json").read_text())
-        key = restore_rng_key(config_dict.pop("key"))
-        config = DiscoAgentSettings(**config_dict)
+        with CheckpointManager(run_settings) as manager:
+            meta = manager.load_metadata(RuleTrainerMetadata)
+
+        config = DiscoAgentSettings(**meta.config["disco_agent"])
+        key = restore_rng_key(meta.disco_key)
 
         agent = cls(
             config=config,
@@ -1651,16 +1693,34 @@ class ContinuousDiscoAgent:
             jit_compile=jit_compile,
         )
 
-        # Restore parameters
-        abstract_params = jax.tree.map(
-            ocp.utils.to_shape_dtype_struct,
-            agent.get_params(),
+        # Build full checkpoint template
+        params = agent.get_params()
+        meta_lr = meta.config.get("meta_lr", 0.001)
+        num_trainers = len(meta.envs) * meta.agents_per_env
+        batch_size = meta.config.get("batch_size", 20)
+
+        dummy_state = RuleTrainerState.create(
+            optax.adam(meta_lr).init(params),
+            num_trainers,
+            batch_size,
+            *agent.hidden_sizes,
         )
 
-        cp = ocp.StandardCheckpointer()
-        params = cp.restore(path / "params", abstract_params)
+        abstract_checkpoint = {
+            "meta_params": jax.tree.map(
+                ocp.utils.to_shape_dtype_struct,
+                params,
+            ),
+            "state": jax.tree.map(
+                lambda x: ocp.utils.to_shape_dtype_struct(x) if x is not None else None,
+                dummy_state,
+            ),
+        }
 
-        agent.update_params(params)
+        with CheckpointManager(run_settings) as manager:
+            restored = manager.restore(checkpoint_step, abstract_checkpoint)
+
+        agent.update_params(restored["meta_params"])
         return agent
 
 
