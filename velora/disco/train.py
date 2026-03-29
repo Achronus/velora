@@ -1581,11 +1581,9 @@ class RuleTrainer:
 
         except (KeyboardInterrupt, SystemExit):
             exit()
+        finally:
+            self.close()
 
-        # Final cleanup
-        self.save_checkpoint(force=True)
-
-        self.close()
         self.console.finish_training()
 
     @classmethod
