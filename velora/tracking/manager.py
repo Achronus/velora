@@ -136,22 +136,20 @@ class CheckpointManager:
         if state_template is not None:
             # Build restore_args with explicit local device sharding
             # to handle cross-device restore (e.g., cuda checkpoint on cpu)
-            local_sharding = jax.sharding.SingleDeviceSharding(
-                jax.local_devices()[0]
-            )
+            local_sharding = jax.sharding.SingleDeviceSharding(jax.local_devices()[0])
             restore_args = jax.tree.map(
-                lambda x: ocp.type_handlers.ArrayRestoreArgs(
-                    sharding=local_sharding
-                )
-                if isinstance(x, jax.ShapeDtypeStruct)
-                else x,
+                lambda x: (
+                    ocp.type_handlers.ArrayRestoreArgs(sharding=local_sharding)
+                    if isinstance(x, jax.ShapeDtypeStruct)
+                    else x
+                ),
                 state_template,
             )
 
             restored = self._manager.restore(
                 restore_step,
                 args=ocp.args.PyTreeRestore(
-                    state_template,
+                    state_template,  # type: ignore
                     restore_args=restore_args,
                 ),
             )
