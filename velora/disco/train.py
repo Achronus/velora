@@ -1359,7 +1359,7 @@ class RuleTrainer:
             if metrics := tracker.metrics():
                 self.logger.log(
                     f"envs/{self.pool.env_names[i]}",
-                    self.pool._collection_steps[i] - 1,
+                    self.state.meta_step,
                     metrics,
                 )
 
