@@ -13,7 +13,7 @@
 # limitations under the License.
 # ==============================================================================
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, List
 
 from velora.tracking.metadata import CheckpointMetadata
@@ -46,6 +46,12 @@ class RuleTrainerMetadata(CheckpointMetadata):
     disco_key : List[int]
         Serialized JAX RNG key for the DiscoAgent. Used by
         `DiscoAgent.load()` to reconstruct the agent from a run directory
+    parent_run : str | None (optional)
+        Path to the parent run directory this training was extended from.
+        `None` for fresh runs. Default is `None`
+    parent_checkpoint_step : int | None (optional)
+        Checkpoint step restored from in the parent run.
+        `None` for fresh runs. Default is `None`
     """
 
     config: Dict[str, Any]
@@ -56,3 +62,5 @@ class RuleTrainerMetadata(CheckpointMetadata):
     envs: List[Dict[str, Any]]
     use_bfloat16: bool
     disco_key: List[int]
+    parent_run: str | None = field(default=None)
+    parent_checkpoint_step: int | None = field(default=None)

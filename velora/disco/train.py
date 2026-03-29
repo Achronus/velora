@@ -651,6 +651,10 @@ class RuleTrainer:
         self._env_groups = envs.groups
         self._cpu = jax.devices("cpu")[0]
 
+        # Init lineage
+        self._parent_run: str | None = None
+        self._parent_checkpoint_step: int | None = None
+
         # Init logger - one writer per unique env
         self.logger = MetricsLogger(self.config.run.log_dir)
         self.logger.add_writer("meta")
@@ -1592,7 +1596,8 @@ class RuleTrainer:
         run_dir: str,
         *,
         checkpoint_step: int | None = None,
-        additional_steps: int | None = None,
+        total_env_steps: int | None = None,
+        run: RunSettings | None = None,
         max_group_size: int = 8,
         num_env_workers: int = 16,
         jit_compile: bool = True,
@@ -1600,25 +1605,31 @@ class RuleTrainer:
         verbose: bool = True,
     ) -> Self:
         """
-        Restore meta-training state from a run directory.
+        Restore meta-agent parameters from a previous run and create a
+        fresh training run.
 
-        Loads meta-agent parameters, optimizer state, and hidden states,
-        then resets all agent trainers.
+        Creates a new run directory with fresh checkpoints, logs, and
+        training state (`meta_step=0`). Only the meta-agent parameters
+        are carried over from the parent run. The parent run is left
+        untouched.
 
-        Call `train()` after to continue training from the restored `meta_step`.
+        Call `train()` after to start training with the restored parameters.
 
         Parameters
         ----------
         run_dir : str
-            Path to the run directory containing `metadata.json`,
-            `checkpoints/`, and `logs/`
+            Path to the parent run directory containing `metadata.json`
+            and `checkpoints/`
         checkpoint_step : int (optional)
-            Specific checkpoint step to restore. When `None`, restores
-            the latest checkpoint. Default is `None`
-        additional_steps : int (optional)
-            Number of additional meta-training steps beyond the restored
-            `meta_step`. When `None`, continues to the original
-            `n_meta_steps` target from config. Default is `None`
+            Specific checkpoint step to restore from the parent run.
+            When `None`, restores the latest checkpoint. Default is `None`
+        total_env_steps : int (optional)
+            Total environment step budget for the new run. When `None`,
+            uses the same `total_env_steps` from the parent config.
+            Default is `None`
+        run : RunSettings (optional)
+            Run directory settings for the new run. When `None`, creates
+            a fresh `RunSettings()` with default values. Default is `None`
         max_group_size : int (optional)
             Maximum number of trainers to `vmap` simultaneously. Higher values
             improve GPU utilization but increase VRAM usage. Reduce if
@@ -1639,7 +1650,7 @@ class RuleTrainer:
         Returns
         -------
         trainer : RuleTrainer
-            A restored `RuleTrainer` ready to use normally
+            A fresh `RuleTrainer` with restored meta-agent parameters
 
         Raises
         ------
@@ -1649,42 +1660,54 @@ class RuleTrainer:
             If no checkpoint exists in `run_dir`
         """
         print("Restoring model... ", end="")
-        run_settings = RunSettings.from_path(run_dir)
+        parent_settings = RunSettings.from_path(run_dir)
 
-        # Load metadata from the user-provided directory
-        with CheckpointManager(run_settings) as manager:
-            meta_run = manager.load_metadata(RuleTrainerMetadata)
+        # Load metadata from the parent run
+        with CheckpointManager(parent_settings) as parent_manager:
+            meta_run = parent_manager.load_metadata(RuleTrainerMetadata)
+            restored_step = checkpoint_step or parent_manager.latest_step
 
-        # Reconstruct environment groups and config from saved metadata
-        envs = EnvSet(*[EnvGroup.load(g) for g in meta_run.envs])
-        config: RuleTrainerSettings = load_config(
-            RuleTrainerSettings,
-            meta_run.config,
-        )
+            # Reconstruct environment groups and config from saved metadata
+            envs = EnvSet(*[EnvGroup.load(g) for g in meta_run.envs])
+            config: RuleTrainerSettings = load_config(
+                RuleTrainerSettings,
+                meta_run.config,
+            )
 
-        # Point run config at the user-provided directory
-        config = config.__replace__(run=run_settings)
+            # Fresh run directory with optional overrides
+            config = config.__replace__(
+                run=run if run is not None else RunSettings(),
+                total_env_steps=(
+                    total_env_steps
+                    if total_env_steps is not None
+                    else config.total_env_steps
+                ),
+            )
 
-        # Construct trainer
-        trainer = cls(
-            envs,
-            config=config,
-            agents_per_env=meta_run.agents_per_env,
-            max_group_size=max_group_size,
-            num_env_workers=num_env_workers,
-            seed=meta_run.seed,
-            jit_compile=jit_compile,
-            cache_dir=cache_dir,
-            verbose=verbose,
-            use_bfloat16=meta_run.use_bfloat16,
-        )
+            # Construct fresh trainer (new run dir, meta_step=0)
+            trainer = cls(
+                envs,
+                config=config,
+                agents_per_env=meta_run.agents_per_env,
+                max_group_size=max_group_size,
+                num_env_workers=num_env_workers,
+                seed=meta_run.seed,
+                jit_compile=jit_compile,
+                cache_dir=cache_dir,
+                verbose=verbose,
+                use_bfloat16=meta_run.use_bfloat16,
+            )
 
-        # Restore meta-agent params and RuleTrainerState (includes meta_step)
-        trainer.load_checkpoint(step=checkpoint_step)
+            # Restore meta-agent params from parent checkpoint (fresh state)
+            trainer.load_checkpoint(
+                step=checkpoint_step,
+                params_only=True,
+                source=parent_manager,
+            )
 
-        # Extend training if additional steps requested
-        if additional_steps is not None:
-            trainer.n_steps = trainer.state.meta_step + additional_steps
+        # Track lineage
+        trainer._parent_run = str(parent_settings.dirpath)
+        trainer._parent_checkpoint_step = int(restored_step or 0)
 
         print("Complete.")
         return trainer
@@ -1788,6 +1811,8 @@ class RuleTrainer:
             envs=[g.dump() for g in self._env_groups],
             use_bfloat16=self.use_bfloat16,
             disco_key=get_rng_key_data(self.meta_agent.key),
+            parent_run=self._parent_run,
+            parent_checkpoint_step=self._parent_checkpoint_step,
         )
 
         return self.cp_manager.save(
@@ -1797,24 +1822,37 @@ class RuleTrainer:
             force=force,
         )
 
-    def load_checkpoint(self, step: int | None = None) -> None:
+    def load_checkpoint(
+        self,
+        step: int | None = None,
+        *,
+        params_only: bool = False,
+        source: CheckpointManager | None = None,
+    ) -> None:
         """
         Restore training state from a checkpoint.
-
-        All agent trainers are reset to a fresh state after restoring the
-        meta-agent parameters and optimizer state.
 
         Parameters
         ----------
         step : int (optional)
             Specific step to restore, or `None` for latest.
             Default is `None`
+        params_only : bool (optional)
+            When `True`, only restores meta-agent parameters and keeps
+            the current training state (optimizer, hidden states,
+            `meta_step`). Used when extending training in a fresh run.
+            Default is `False`
+        source : CheckpointManager (optional)
+            Checkpoint manager to restore from. When `None`, uses
+            `self.cp_manager`. Default is `None`
 
         Raises
         ------
         checkpoint_error : ValueError
             If no checkpoint exists in the checkpoint directory
         """
+        manager = source if source is not None else self.cp_manager
+
         abstract_checkpoint = {
             "meta_params": jax.tree.map(
                 ocp.utils.to_shape_dtype_struct,
@@ -1826,11 +1864,13 @@ class RuleTrainer:
             ),
         }
 
-        restored = self.cp_manager.restore(step, abstract_checkpoint)
+        restored = manager.restore(step, abstract_checkpoint)
 
-        # Restore meta-agent params and state
+        # Restore meta-agent params (and optionally full state)
         self.meta_agent.update_params(restored["meta_params"])
-        self.state = restored["state"]
+
+        if not params_only:
+            self.state = restored["state"]
 
         # Reset all agent trainers (skip if not yet built — train() handles that)
         for idx in range(len(self.trainers)):
