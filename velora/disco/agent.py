@@ -13,8 +13,18 @@
 # limitations under the License.
 # ==============================================================================
 
+from abc import abstractmethod
 from pathlib import Path
-from typing import Optional, Self, Tuple
+from typing import (
+    Dict,
+    Generic,
+    NamedTuple,
+    Optional,
+    Self,
+    Tuple,
+    TypeVar,
+    get_args,
+)
 
 import chex
 import gymnasium as gym
@@ -52,6 +62,7 @@ from velora.disco.outputs import (
     PolicyAgentOutput,
 )
 from velora.disco.rollouts import ContinuousRollout, Rollout
+from velora.lnn.base import BaseCfC
 from velora.lnn.ncp import LNN
 from velora.tracking.manager import CheckpointManager
 from velora.tracking.settings import RunSettings
@@ -61,7 +72,510 @@ from velora.utils.seed import get_rng_key_data, restore_rng_key
 from velora.utils.transforms import squeeze_time
 
 
-class PolicyAgent:
+class DiscoModules(NamedTuple):
+    encoder: DiscoInputEncoder
+    disco_net: DiscoNetwork
+    meta_lnn: LNN
+    meta_proj: nnx.Linear
+
+
+class ContinuousDiscoModules(NamedTuple):
+    encoder: ContinuousDiscoInputEncoder
+    disco_net: ContinuousDiscoNetwork
+    meta_lnn: LNN
+    meta_proj: nnx.Linear
+
+
+class PolicyModules(NamedTuple):
+    encoder: ImageEncoder
+    ocm: OCM
+    acm: ACM
+    decoder: ActionDecoder
+
+
+class ContinuousPolicyModules(NamedTuple):
+    encoder: PolicyEncoder
+    ocm: OCM
+    acm: ContinuousACM
+    decoder: GaussianPolicyDecoder
+
+
+class ValueModules(NamedTuple):
+    encoder: ImageEncoder
+    net: LNN
+
+
+ModulesT = TypeVar("ModulesT", bound=tuple)
+
+
+class BaseAgent(Generic[ModulesT]):
+    """
+    Base class for all agents. Auto-discovers sub-modules and provides
+    shared parameter management, compilation, and merge logic.
+
+    Sub-modules are auto-detected by scanning `self.__dict__` for private
+    attributes (`_[name]`) that have an `active_params` property — these are
+    neural network modules. Detection happens during `_compile()`.
+
+    Provides
+    --------
+    - `active_params`, `total_params`, `param_count` — aggregate counts
+    - `get_params()`, `update_params()` — extract / apply parameter states
+    - `merge_params()` — reconstruct modules from explicit parameters
+    - `_compile()` — cache graphdefs, optionally JIT-compile all modules
+    """
+
+    _module_registry: Dict[str, str]
+    _modules_type: type
+
+    def _discover_modules(self) -> Dict[str, str]:
+        """
+        Scan `self.__dict__` for private attributes that are NN modules.
+
+        A module is identified by having an `active_params` attribute.
+
+        Returns
+        -------
+        registry : Dict[str, str]
+            Mapping of public name to private attribute name,
+            e.g., `{"encoder": "_encoder", "disco_net": "_disco_net"}`
+        """
+        registry = {}
+        for attr_name, obj in self.__dict__.items():
+            if attr_name.startswith("_") and isinstance(obj, nnx.Module):
+                public_name = attr_name.lstrip("_")
+                registry[public_name] = attr_name
+
+        return registry
+
+    def _resolve_modules_type(self) -> type:
+        """
+        Resolve the concrete `NamedTuple` type bound to `ModulesT`
+        by walking the class MRO.
+
+        Returns
+        -------
+        modules_type : type
+            The concrete NamedTuple class (e.g., `DiscoModules`)
+        """
+        for cls in type(self).__mro__:
+            for base in getattr(cls, "__orig_bases__", ()):
+                for arg in get_args(base):
+                    if isinstance(arg, type) and issubclass(arg, tuple):
+                        return arg
+
+        raise TypeError(
+            f"{type(self).__name__} must bind ModulesT to a NamedTuple "
+            f"(e.g., class MyAgent(BaseAgent[MyModules]))"
+        )
+
+    def _get_param_count(self, counter: str) -> int:
+        """
+        Sum a parameter count across all registered modules.
+
+        Uses the module's own `counter` property (e.g., `active_params`,
+        `total_params`) when available. Falls back to `total_parameters()`
+        for plain `nnx.Module` instances that don't track counts.
+
+        Parameters
+        ----------
+        counter : str
+            Name of the property to read from each module
+
+        Returns
+        -------
+        count : int
+            Aggregate parameter count
+        """
+        total = 0
+        for attr in self._module_registry.values():
+            module = getattr(self, attr)
+
+            if hasattr(module, counter):
+                total += getattr(module, counter)
+            else:
+                total += total_parameters(module)
+
+        return total
+
+    @property
+    def active_params(self) -> int:
+        """Get the agent's active parameter count."""
+        return self._get_param_count("active_params")
+
+    @property
+    def total_params(self) -> int:
+        """Get the agent's total parameter count."""
+        return self._get_param_count("total_params")
+
+    @property
+    def param_count(self) -> ParamCount:
+        """Get the agent's parameter count."""
+        return ParamCount(active=self.active_params, total=self.total_params)
+
+    def get_params(self) -> nnx.State:
+        """
+        Extract trainable parameters from all sub-modules.
+
+        Returns
+        -------
+        params : nnx.State
+            Combined parameter states from all registered modules
+        """
+        return nnx.State(
+            {
+                name: nnx.state(getattr(self, attr), nnx.Param)
+                for name, attr in self._module_registry.items()
+            }
+        )
+
+    def update_params(self, params: nnx.State) -> None:
+        """
+        Update parameters for all sub-modules.
+
+        Parameters
+        ----------
+        params : nnx.State
+            Parameter states to apply
+        """
+        for name, attr in self._module_registry.items():
+            nnx.update(getattr(self, attr), params[name])
+
+    def merge_params(self, params: nnx.State) -> ModulesT:
+        """
+        Reconstruct all modules from cached graphdefs and explicit parameters.
+
+        Parameters
+        ----------
+        params : nnx.State
+            Module parameters from `get_params()`
+
+        Returns
+        -------
+        modules : ModulesT
+            Reconstructed modules in registration order
+        """
+        return self._modules_type._make(  # type: ignore[attr-defined]
+            nnx.merge(
+                getattr(self, f"_{name}_graphdef"),
+                params[name],
+                getattr(self, f"_{name}_rest"),
+            )
+            for name in self._module_registry
+        )
+
+    def _compile(self, jit_compile: bool) -> ModulesT:
+        """
+        Auto-discover modules, cache graphdefs, and optionally JIT-compile.
+
+        Must be called at the end of subclass `__init__` after all
+        `self._xxx` module attributes have been set.
+
+        Parameters
+        ----------
+        jit_compile : bool
+            Whether to JIT compile the modules
+
+        Returns
+        -------
+        modules : ModulesT
+            Compiled (or original) modules in registration order
+        """
+        self._module_registry = self._discover_modules()
+        self._modules_type = self._resolve_modules_type()
+
+        for name, attr in self._module_registry.items():
+            module = getattr(self, attr)
+            graphdef, _, rest = nnx.split(module, nnx.Param, ...)
+            setattr(self, f"_{name}_graphdef", graphdef)
+            setattr(self, f"_{name}_rest", rest)
+
+        modules = [getattr(self, attr) for attr in self._module_registry.values()]
+
+        if jit_compile:
+            modules = [nnx.jit(m) for m in modules]
+
+        return self._modules_type._make(modules)  # type: ignore[attr-defined]
+
+
+class BaseDiscoAgent(BaseAgent[ModulesT]):
+    """
+    Base class for disco target agents.
+    """
+
+    config: DiscoAgentSettings
+    key: chex.PRNGKey
+    is_frozen: bool
+
+    _encoder: nnx.Module
+    _disco_net: BaseCfC
+
+    def __init__(
+        self,
+        *,
+        config: DiscoAgentSettings,
+        key: chex.PRNGKey,
+        freeze: bool = False,
+        jit_compile: bool = False,
+    ) -> None:
+        self.config = config
+        self.key = key
+        self.is_frozen = freeze
+        self.encoder_config = config.encoder_config()
+
+        encoder_key, disco_key, meta_key, proj_key = jax.random.split(key, 4)
+
+        # Subclass sets self._encoder and self._disco_net
+        self._build_modules(encoder_key, disco_key)
+
+        # Shared across both variants
+        self._meta_lnn = LNN(
+            self.encoder_config.output_dim,
+            self.config.n_hidden,
+            self._disco_net.hidden_size,
+            key=meta_key,
+            sparsity=self.config.sparsity,
+        )
+
+        self._meta_proj = nnx.Linear(
+            self._meta_lnn.hidden_size,
+            self.encoder_config.output_dim,
+            rngs=nnx.Rngs(proj_key),
+        )
+
+        self.encoder, self.disco_net, self.meta_lnn, self.meta_proj = self._compile(
+            jit_compile
+        )
+
+        self.optimizer = optax.chain(
+            optax.clip_by_global_norm(self.config.max_grad_norm),
+            optax.adan(self.config.lr),
+        )
+
+    @abstractmethod
+    def _build_modules(
+        self,
+        encoder_key: chex.PRNGKey,
+        disco_key: chex.PRNGKey,
+    ) -> None:
+        """
+        Subclass hook to build encoder and disco network.
+
+        Must set `self._encoder` and `self._disco_net`.
+
+        Parameters
+        ----------
+        encoder_key : chex.PRNGKey
+            RNG key for encoder initialization
+        disco_key : chex.PRNGKey
+            RNG key for disco network initialization
+        """
+        raise NotImplementedError
+
+    @property
+    def hidden_sizes(self) -> Tuple[int, int]:
+        """
+        Get the agent's hidden sizes.
+
+        Returns
+        -------
+        disco_h_size : int
+            Disco network hidden size
+        meta_h_size : int
+            Meta LNN hidden size
+        """
+        return (self._disco_net.hidden_size, self._meta_lnn.hidden_size)
+
+    def _meta_conditioning(
+        self,
+        meta_proj: nnx.Linear,
+        embedding: chex.Array,
+        meta_h_state: chex.Array,
+    ) -> chex.Array:
+        """
+        Applies multiplicative interaction with meta conditioning to encoder output.
+
+        Parameters
+        ----------
+        meta_proj : nnx.Linear
+            The active meta projection layer
+        embedding : chex.Array
+            Encoder output. Shape: `(B, T, E)`
+        meta_h_state : chex.Array
+            Meta-LNN hidden state. Shape: `(B, H_meta)`
+
+        Returns
+        -------
+        result : chex.Array
+            Conditioned embedding. Shape: `(B, T, E)`
+        """
+        # (B, H_meta) -> (B, E)
+        new_h = meta_proj(meta_h_state)  # type: ignore
+        new_h = jnp.expand_dims(new_h, axis=1)  # (B, E) -> (B, 1, E)
+        return embedding * new_h
+
+    def save(
+        self,
+        root_path: Path | str = "checkpoints/models",
+        model_dir: str = "disco",
+        timestamp: bool = True,
+    ) -> Path:
+        """
+        Saves the agent's network parameters and configuration to disk.
+
+        Useful for saving discovered update rules.
+
+        Default directory path: `./checkpoints/models/disco_[ddmmyy]_[hhmmss]/`.
+
+        Parameters
+        ----------
+        root_path : Path | str (optional)
+            Directory path for saving. Default is `checkpoints/models`
+        model_dir : str (optional)
+            The folder name to save the agents state. Gets merged with `root_path`.
+            Default is `disco`
+        timestamp : bool (optional)
+            Whether to append timestamps to experiment directory.
+            Uses timestamp format: `ddmmyy_hhmmss`. Default is `True`
+
+        Returns
+        -------
+        path : Path
+            Path where the rule was saved
+        """
+        dirpath = create_directory(root_path, model_dir, timestamp)
+        dirpath.mkdir(parents=True, exist_ok=True)
+
+        cp = ocp.StandardCheckpointer()
+
+        # Set config as JSON
+        key_data = get_rng_key_data(self.key)
+        config_json = self.config.to_json(key=key_data)
+
+        # Save params and config
+        cp.save(dirpath / "params", self.get_params())
+        (dirpath / "config.json").write_text(config_json)
+
+        cp.wait_until_finished()
+        return dirpath
+
+    @classmethod
+    def load(
+        cls,
+        run_dir: Path | str,
+        *,
+        checkpoint_step: int | None = None,
+        freeze: bool = True,
+        jit_compile: bool = False,
+    ) -> Self:
+        """
+        Load a discovered update rule from a run directory.
+
+        Reads agent configuration and key from `metadata.json`,
+        then restores parameters from the specified (or latest) step
+        checkpoint.
+
+        Parameters
+        ----------
+        run_dir : Path | str
+            Path to the run directory containing `metadata.json`
+            and `checkpoints/`
+        checkpoint_step : int (optional)
+            Specific checkpoint step to restore. When `None`,
+            restores the latest. Default is `None`
+        freeze : bool (optional)
+            Freezes parameters so they cannot be trained. Default is `True`
+        jit_compile : bool (optional)
+            Whether to JIT compile. Default is `False`
+
+        Returns
+        -------
+        agent : Self
+            Agent with restored parameters
+        """
+        run_settings = RunSettings.from_path(run_dir)
+
+        with CheckpointManager(run_settings) as manager:
+            meta = manager.load_metadata(RuleTrainerMetadata)
+
+        config = DiscoAgentSettings(**meta.config["disco_agent"])
+        key = restore_rng_key(meta.disco_key)
+
+        agent = cls(
+            config=config,
+            key=key,
+            freeze=freeze,
+            jit_compile=jit_compile,
+        )
+
+        # Build full checkpoint template
+        params = agent.get_params()
+        meta_lr = meta.config.get("meta_lr", 0.001)
+        num_trainers = len(meta.envs) * meta.agents_per_env
+        batch_size = meta.config.get("batch_size", 20)
+
+        dummy_state = RuleTrainerState.create(
+            optax.adam(meta_lr).init(params),
+            num_trainers,
+            batch_size,
+            *agent.hidden_sizes,
+        )
+
+        abstract_checkpoint = {
+            "meta_params": jax.tree.map(
+                ocp.utils.to_shape_dtype_struct,
+                params,
+            ),
+            "state": jax.tree.map(
+                lambda x: ocp.utils.to_shape_dtype_struct(x) if x is not None else None,
+                dummy_state,
+            ),
+        }
+
+        with CheckpointManager(run_settings) as manager:
+            restored = manager.restore(checkpoint_step, abstract_checkpoint)
+
+        agent.update_params(restored["meta_params"])
+        return agent
+
+
+class BasePolicyAgent(BaseAgent[ModulesT]):
+    """
+    Base class for policy agents.
+    """
+
+    config: PolicyAgentSettings
+    key: chex.PRNGKey
+
+    _encoder: PolicyEncoder
+
+    @property
+    def encoding_dim(self) -> int:
+        """Output feature dimensionality of the encoder."""
+        return self._encoder.encoding_dim
+
+    def soft_param_update(self, tau: float, new_params: nnx.State) -> None:
+        """
+        Performs a soft parameter update on the networks parameters.
+
+        Formula: `θ_target ← τ * θ_online + (1 - τ) * θ_target`
+
+        Parameters
+        ----------
+        tau : float
+            Soft update coefficient
+        new_params : nnx.State
+            New parameters to use for updating (`θ_target`)
+        """
+        new_params = jax.tree.map(
+            lambda old, new: tau * old + (1.0 - tau) * new,
+            self.get_params(),
+            new_params,
+        )
+        self.update_params(new_params)
+
+
+class PolicyAgent(BasePolicyAgent[PolicyModules]):
     """
     Creates a policy agent used to discover Reinforcement Learning (RL) rules.
 
@@ -167,74 +681,6 @@ class PolicyAgent:
         )
 
         self.encoder, self.ocm, self.acm, self.decoder = self._compile(jit_compile)
-
-    @property
-    def active_params(self) -> int:
-        """Get the agents active parameters."""
-        return (
-            self._encoder.active_params
-            + self._ocm.active_params
-            + self._acm.active_params
-            + self._decoder.active_params
-        )
-
-    @property
-    def total_params(self) -> int:
-        """Get the agents total parameters."""
-        return (
-            self._encoder.total_params
-            + self._ocm.total_params
-            + self._acm.total_params
-            + self._decoder.total_params
-        )
-
-    @property
-    def param_count(self) -> ParamCount:
-        """Get the agents parameter count."""
-        return ParamCount(active=self.active_params, total=self.total_params)
-
-    @property
-    def encoding_dim(self) -> int:
-        """Output feature dimensionality of the encoder."""
-        return self._encoder.encoding_dim
-
-    def _compile(
-        self, jit_compile: bool
-    ) -> Tuple[ImageEncoder, OCM, ACM, ActionDecoder]:
-        """
-        Returns JIT-compiled or original modules based on compilation flag.
-
-        Parameters
-        ----------
-        jit_compile : bool
-            Whether to JIT compile the modules
-
-        Returns
-        -------
-        encoder : ImageEncoder
-            Input encoder (possibly JIT-wrapped)
-        ocm : OCM
-            Observation-Conditional Model (possibly JIT-wrapped)
-        acm : ACM
-            Action-Conditional Model (possibly JIT-wrapped)
-        decoder : ActionDecoder
-            Action decoder (possibly JIT-wrapped)
-        """
-        # Cache graphdef + non-param state for functional forward pass
-        self._enc_graphdef, _, self._enc_rest = nnx.split(self._encoder, nnx.Param, ...)
-        self._ocm_graphdef, _, self._ocm_rest = nnx.split(self._ocm, nnx.Param, ...)
-        self._acm_graphdef, _, self._acm_rest = nnx.split(self._acm, nnx.Param, ...)
-        self._dec_graphdef, _, self._dec_rest = nnx.split(self._decoder, nnx.Param, ...)
-
-        if jit_compile:
-            return (
-                nnx.jit(self._encoder),
-                nnx.jit(self._ocm),
-                nnx.jit(self._acm),
-                nnx.jit(self._decoder),
-            )  # type: ignore
-
-        return self._encoder, self._ocm, self._acm, self._decoder
 
     def __call__(
         self,
@@ -417,7 +863,7 @@ class PolicyAgent:
         preds : AgentOutput
             Agent predictions at `max_actions` dimension
         """
-        ocm, acm, decoder = self.merge_params(params)
+        _, ocm, acm, decoder = self.merge_params(params)
 
         ocm_preds, _ = ocm(encoding)
         acm_preds, _ = acm(ocm_preds.embedding)
@@ -463,112 +909,8 @@ class PolicyAgent:
 
         return actions.astype(np.int32)
 
-    def get_params(self) -> nnx.State:
-        """
-        Extract trainable parameters from all sub-modules.
 
-        Returns
-        -------
-        params : nnx.State
-            Combined parameter states from `(encoder, ocm, acm, decoder)`
-        """
-        return nnx.State(
-            {
-                "encoder": nnx.state(self._encoder, nnx.Param),
-                "ocm": nnx.state(self._ocm, nnx.Param),
-                "acm": nnx.state(self._acm, nnx.Param),
-                "decoder": nnx.state(self._decoder, nnx.Param),
-            }
-        )
-
-    def update_params(self, params: nnx.State) -> None:
-        """
-        Update parameters for all sub-modules.
-
-        Parameters
-        ----------
-        params : nnx.State
-            Parameter states to apply
-        """
-        nnx.update(self._encoder, params["encoder"])
-        nnx.update(self._ocm, params["ocm"])
-        nnx.update(self._acm, params["acm"])
-        nnx.update(self._decoder, params["decoder"])
-
-    def merge_params(self, params: nnx.State) -> Tuple[OCM, ACM, ActionDecoder]:
-        """
-        Reconstruct OCM, ACM, and ActionDecoder modules from explicit parameters.
-        Note: ignores encoder module for simplicity.
-
-        Parameters
-        ----------
-        params : nnx.State
-            OCM and ACM parameters
-
-        Returns
-        -------
-        ocm : OCM
-            An updated OCM with the given parameters
-        acm : ACM
-            An updated ACM with the given parameters
-        decoder : ActionDecoder
-            An updated decoder with the given parameters
-        """
-        ocm = nnx.merge(self._ocm_graphdef, params["ocm"], self._ocm_rest)
-        acm = nnx.merge(self._acm_graphdef, params["acm"], self._acm_rest)
-        decoder = nnx.merge(self._dec_graphdef, params["decoder"], self._dec_rest)
-        return ocm, acm, decoder
-
-    def merge_all_params(
-        self, params: nnx.State
-    ) -> Tuple[ImageEncoder, OCM, ACM, ActionDecoder]:
-        """
-        Reconstruct all modules from explicit parameters, including encoder.
-
-        Parameters
-        ----------
-        params : nnx.State
-            Full parameter states from `get_params()`
-
-        Returns
-        -------
-        encoder : ImageEncoder
-            Reconstructed encoder
-        ocm : OCM
-            Reconstructed OCM
-        acm : ACM
-            Reconstructed ACM
-        decoder : ActionDecoder
-            Reconstructed decoder
-        """
-        encoder = nnx.merge(self._enc_graphdef, params["encoder"], self._enc_rest)
-        ocm = nnx.merge(self._ocm_graphdef, params["ocm"], self._ocm_rest)
-        acm = nnx.merge(self._acm_graphdef, params["acm"], self._acm_rest)
-        decoder = nnx.merge(self._dec_graphdef, params["decoder"], self._dec_rest)
-        return encoder, ocm, acm, decoder
-
-    def soft_param_update(self, tau: float, new_params: nnx.State) -> None:
-        """
-        Performs a soft parameter update on the networks parameters.
-
-        Formula: `θ_target ← τ * θ_online + (1 - τ) * θ_target`
-
-        Parameters
-        ----------
-        tau : float
-            Soft update coefficient
-        new_params : nnx.State
-            New parameters to use for updating (`θ_target`)
-        """
-        new_params = jax.tree.map(
-            lambda old, new: tau * old + (1.0 - tau) * new,
-            self.get_params(),
-            new_params,
-        )
-        self.update_params(new_params)
-
-
-class DiscoAgent:
+class DiscoAgent(BaseDiscoAgent[DiscoModules]):
     """
     Creates a target agent used to discover RL update (target) rules.
 
@@ -576,9 +918,12 @@ class DiscoAgent:
 
     Architecture:
         - Input Encoder - converts samples into embeddings for the Disco network
-        - Disco Network - processes embeddings backwards through time to produce learned targets `(π̂, ŷ, ẑ)` for training the policy agent
-        - Meta LNN - captures learning dynamics across the agent's lifetime, providing conditioning signals that modulate target generation
-        - Meta Projection - projects meta conditioning to match encoder output to inject lifetime context into target generation
+        - Disco Network - processes embeddings backwards through time to produce
+          learned targets `(π̂, ŷ, ẑ)` for training the policy agent
+        - Meta LNN - captures learning dynamics across the agent's lifetime,
+          providing conditioning signals that modulate target generation
+        - Meta Projection - projects meta conditioning to match encoder output
+          to inject lifetime context into target generation
 
     Parameters
     ----------
@@ -593,21 +938,9 @@ class DiscoAgent:
         Flag to enable/disable JIT compilation. Default is `False`
     """
 
-    def __init__(
-        self,
-        *,
-        config: DiscoAgentSettings,
-        key: chex.PRNGKey,
-        freeze: bool = False,
-        jit_compile: bool = False,
+    def _build_modules(
+        self, encoder_key: chex.PRNGKey, disco_key: chex.PRNGKey
     ) -> None:
-        self.config = config
-        self.key = key
-        self.is_frozen = freeze
-        self.encoder_config = config.encoder_config()
-
-        encoder_key, disco_key, meta_key, proj_key = jax.random.split(key, 4)
-
         self._encoder = DiscoInputEncoder(
             config=self.encoder_config,
             rngs=nnx.Rngs(encoder_key),
@@ -621,114 +954,6 @@ class DiscoAgent:
             key=disco_key,
             sparsity=self.config.sparsity,
         )
-
-        self._meta_lnn = LNN(
-            self.encoder_config.output_dim,
-            self.config.n_hidden,
-            self._disco_net.hidden_size,
-            key=meta_key,
-            sparsity=self.config.sparsity,
-        )
-
-        self._meta_proj = nnx.Linear(
-            self._meta_lnn.hidden_size,
-            self.encoder_config.output_dim,
-            rngs=nnx.Rngs(proj_key),
-        )
-
-        self.encoder, self.disco_net, self.meta_lnn, self.meta_proj = self._compile(
-            jit_compile
-        )
-
-        self.optimizer = optax.chain(
-            optax.clip_by_global_norm(self.config.max_grad_norm),
-            optax.adan(self.config.lr),
-        )
-
-    @property
-    def hidden_sizes(self) -> Tuple[int, int]:
-        """
-        Get the agents hidden sizes.
-
-        Returns
-        -------
-        disco_h_size : int
-            Disco network hidden size
-        meta_h_size : int
-            Meta LNN hidden size
-        """
-        return (self._disco_net.hidden_size, self._meta_lnn.hidden_size)
-
-    @property
-    def active_params(self) -> int:
-        """Get the agents active parameters."""
-        return (
-            self._encoder.active_params
-            + self._disco_net.active_params
-            + self._meta_lnn.active_params
-            + total_parameters(self._meta_proj)
-        )
-
-    @property
-    def total_params(self) -> int:
-        """Get the agents total parameters."""
-        return (
-            self._encoder.total_params
-            + self._disco_net.total_params
-            + self._meta_lnn.total_params
-            + total_parameters(self._meta_proj)
-        )
-
-    @property
-    def param_count(self) -> ParamCount:
-        """Get the agents parameter count."""
-        return ParamCount(active=self.active_params, total=self.total_params)
-
-    def _compile(
-        self, jit_compile: bool
-    ) -> Tuple[DiscoInputEncoder, DiscoNetwork, LNN, nnx.Linear]:
-        """
-        Returns JIT-compiled or original modules based on compilation flag.
-
-        Parameters
-        ----------
-        jit_compile : bool
-            Whether to JIT compile the modules
-
-        Returns
-        -------
-        encoder : DiscoInputEncoder
-            Input encoder (possibly JIT-wrapped)
-        disco_net : DiscoNetwork
-            Disco network (possibly JIT-wrapped)
-        meta_lnn : LNN
-            Meta LNN (possibly JIT-wrapped)
-        meta_proj : nnx.Linear
-            Meta projection layer (possibly JIT-wrapped)
-        """
-        # Cache graphdef + non-param state for functional forward pass
-        self._disco_net_graphdef, _, self._disco_net_rest = nnx.split(
-            self._disco_net, nnx.Param, ...
-        )
-        self._meta_lnn_graphdef, _, self._meta_lnn_rest = nnx.split(
-            self._meta_lnn, nnx.Param, ...
-        )
-        self._meta_proj_graphdef, _, self._meta_proj_rest = nnx.split(
-            self._meta_proj, nnx.Param, ...
-        )
-        self._encoder_graphdef, _, self._encoder_rest = nnx.split(
-            self._encoder, nnx.Param, ...
-        )
-
-        if jit_compile:
-            return (
-                nnx.jit(self._encoder),
-                nnx.jit(self._disco_net),
-                nnx.jit(self._meta_lnn),
-                nnx.jit(self._meta_proj),
-            )  # type: ignore
-
-        return self._encoder, self._disco_net, self._meta_lnn, self._meta_proj
 
     def __call__(
         self,
@@ -807,236 +1032,8 @@ class DiscoAgent:
 
         return targets, disco_h_state, meta_h_state
 
-    def _meta_conditioning(
-        self,
-        meta_proj: nnx.Linear,
-        embedding: chex.Array,
-        meta_h_state: chex.Array,
-    ) -> chex.Array:
-        """
-        Applies multiplicative interaction with meta conditioning to encoder output.
 
-        Parameters
-        ----------
-        meta_proj : nnx.Linear
-            The active meta projection layer
-        embedding : chex.Array
-            Encoder output. Shape: `(B, T, E)`
-        meta_h_state : chex.Array
-            Meta-LNN hidden state. Shape: `(B, H_meta)`
-
-        Returns
-        -------
-        result : chex.Array
-            Conditioned embedding. Shape: `(B, T, E)`
-        """
-        # (B, H_meta) -> (B, E)
-        new_h = meta_proj(meta_h_state)  # type: ignore
-        new_h = jnp.expand_dims(new_h, axis=1)  # (B, E) -> (B, 1, E)
-        return embedding * new_h
-
-    def get_params(self) -> nnx.State:
-        """
-        Extract trainable parameters from all sub-modules.
-
-        Returns
-        -------
-        params : nnx.State
-            Combined parameter states from `(encoder, disco_net, meta_lnn, meta_proj)`
-        """
-        return nnx.State(
-            {
-                "encoder": nnx.state(self._encoder, nnx.Param),
-                "disco_net": nnx.state(self._disco_net, nnx.Param),
-                "meta_lnn": nnx.state(self._meta_lnn, nnx.Param),
-                "meta_proj": nnx.state(self._meta_proj, nnx.Param),
-            }
-        )
-
-    def update_params(self, params: nnx.State) -> None:
-        """
-        Update parameters for all sub-modules.
-
-        Parameters
-        ----------
-        params : nnx.State
-            Parameter states to apply
-        """
-        nnx.update(self._encoder, params["encoder"])
-        nnx.update(self._disco_net, params["disco_net"])
-        nnx.update(self._meta_lnn, params["meta_lnn"])
-        nnx.update(self._meta_proj, params["meta_proj"])
-
-    def merge_params(
-        self, params: nnx.State
-    ) -> Tuple[DiscoInputEncoder, DiscoNetwork, LNN, nnx.Linear]:
-        """
-        Reconstruct all Disco modules from explicit parameters.
-
-        Parameters
-        ----------
-        params : nnx.State
-            Module parameters
-
-        Returns
-        -------
-        encoder : DiscoInputEncoder
-            An updated encoder with the given parameters
-        disco_net : DiscoNetwork
-            An updated disco network with the given parameters
-        meta_lnn : LNN
-            An updated meta LNN with the given parameters
-        meta_proj : nnx.Linear
-            An updated projection layer with the given parameters
-        """
-        encoder = nnx.merge(
-            self._encoder_graphdef,
-            params["encoder"],
-            self._encoder_rest,
-        )
-        disco_net = nnx.merge(
-            self._disco_net_graphdef,
-            params["disco_net"],
-            self._disco_net_rest,
-        )
-        meta_lnn = nnx.merge(
-            self._meta_lnn_graphdef,
-            params["meta_lnn"],
-            self._meta_lnn_rest,
-        )
-        meta_proj = nnx.merge(
-            self._meta_proj_graphdef,
-            params["meta_proj"],
-            self._meta_proj_rest,
-        )
-        return encoder, disco_net, meta_lnn, meta_proj
-
-    def save(
-        self,
-        root_path: Path | str = "checkpoints/models",
-        model_dir: str = "disco",
-        timestamp: bool = True,
-    ) -> Path:
-        """
-        Saves the agent's network parameters and configuration to disk.
-
-        Useful for saving discovered update rules.
-
-        Default directory path: `./checkpoints/models/disco_[ddmmyy]_[hhmmss]/`.
-
-        Parameters
-        ----------
-        root_path : Path | str (optional)
-            Directory path for saving. Default is `checkpoints/models`
-        model_dir : str (optional)
-            The folder name to save the agents state. Gets merged with `root_path`.
-            Default is `disco`
-        timestamp : bool (optional)
-            Whether to append timestamps to experiment directory.
-            Uses timestamp format: `ddmmyy_hhmmss`. Default is `True`
-
-        Returns
-        -------
-        path : Path
-            Path where the rule was saved
-        """
-        dirpath = create_directory(root_path, model_dir, timestamp)
-        dirpath.mkdir(parents=True, exist_ok=True)
-
-        cp = ocp.StandardCheckpointer()
-
-        # Set config as JSON
-        key_data = get_rng_key_data(self.key)
-        config_json = self.config.to_json(key=key_data)
-
-        # Save params and config
-        cp.save(dirpath / "params", self.get_params())
-        (dirpath / "config.json").write_text(config_json)
-
-        cp.wait_until_finished()
-        return dirpath
-
-    @classmethod
-    def load(
-        cls,
-        run_dir: Path | str,
-        *,
-        checkpoint_step: int | None = None,
-        freeze: bool = True,
-        jit_compile: bool = False,
-    ) -> Self:
-        """
-        Load a discovered update rule from a run directory.
-
-        Reads agent configuration and key from `metadata.json`,
-        then restores parameters from the specified (or latest) step
-        checkpoint.
-
-        Parameters
-        ----------
-        run_dir : Path | str
-            Path to the run directory containing `metadata.json`
-            and `checkpoints/`
-        checkpoint_step : int (optional)
-            Specific checkpoint step to restore. When `None`,
-            restores the latest. Default is `None`
-        freeze : bool (optional)
-            Freezes parameters so they cannot be trained. Default is `True`
-        jit_compile : bool (optional)
-            Whether to JIT compile. Default is `False`
-
-        Returns
-        -------
-        disco_agent : DiscoAgent
-            Agent with restored parameters
-        """
-        run_settings = RunSettings.from_path(run_dir)
-
-        with CheckpointManager(run_settings) as manager:
-            meta = manager.load_metadata(RuleTrainerMetadata)
-
-        config = DiscoAgentSettings(**meta.config["disco_agent"])
-        key = restore_rng_key(meta.disco_key)
-
-        agent = cls(
-            config=config,
-            key=key,
-            freeze=freeze,
-            jit_compile=jit_compile,
-        )
-
-        # Build full checkpoint template
-        params = agent.get_params()
-        meta_lr = meta.config.get("meta_lr", 0.001)
-        num_trainers = len(meta.envs) * meta.agents_per_env
-        batch_size = meta.config.get("batch_size", 20)
-
-        dummy_state = RuleTrainerState.create(
-            optax.adam(meta_lr).init(params),
-            num_trainers,
-            batch_size,
-            *agent.hidden_sizes,
-        )
-
-        abstract_checkpoint = {
-            "meta_params": jax.tree.map(
-                ocp.utils.to_shape_dtype_struct,
-                params,
-            ),
-            "state": jax.tree.map(
-                lambda x: ocp.utils.to_shape_dtype_struct(x) if x is not None else None,
-                dummy_state,
-            ),
-        }
-
-        with CheckpointManager(run_settings) as manager:
-            restored = manager.restore(checkpoint_step, abstract_checkpoint)
-
-        agent.update_params(restored["meta_params"])
-        return agent
-
-
-class DiscoValueAgent:
+class DiscoValueAgent(BaseAgent[ValueModules]):
     """
     Value function agent for computing state values `V(s)` during meta-training.
 
@@ -1101,60 +1098,6 @@ class DiscoValueAgent:
         )
 
         self.encoder, self.net = self._compile(jit_compile)
-
-    @property
-    def active_params(self) -> int:
-        """Get the agents active parameters."""
-        return self._encoder.active_params + self._net.active_params
-
-    @property
-    def total_params(self) -> int:
-        """Get the agents total parameters."""
-        return self._encoder.total_params + self._net.total_params
-
-    @property
-    def param_count(self) -> ParamCount:
-        """Get the agents parameter count."""
-        return ParamCount(active=self.active_params, total=self.total_params)
-
-    def _compile(self, jit_compile: bool) -> Tuple[ImageEncoder, LNN]:
-        """
-        Returns JIT-compiled or original modules based on compilation flag.
-
-        Parameters
-        ----------
-        jit_compile : bool
-            Whether to JIT compile the modules
-
-        Returns
-        -------
-        encoder : ImageEncoder
-            Input encoder (possibly JIT-wrapped)
-        net : LNN
-            Value network (possibly JIT-wrapped)
-        """
-        self._net_graphdef, _, self._net_rest = nnx.split(self._net, nnx.Param, ...)
-
-        if jit_compile:
-            return nnx.jit(self._encoder), nnx.jit(self._net)  # type: ignore
-
-        return self._encoder, self._net
-
-    def merge_net(self, params: nnx.State) -> LNN:
-        """
-        Reconstruct value LNN from explicit parameters.
-
-        Parameters
-        ----------
-        params : nnx.State
-            Value agent parameters from `get_params()`
-
-        Returns
-        -------
-        net : LNN
-            Reconstructed value network
-        """
-        return nnx.merge(self._net_graphdef, params["net"], self._net_rest)
 
     def __call__(
         self,
@@ -1246,7 +1189,7 @@ class DiscoValueAgent:
         nnx.update(self._net, params["net"])
 
 
-class ContinuousDiscoAgent:
+class ContinuousDiscoAgent(BaseDiscoAgent[ContinuousDiscoModules]):
     """
     Creates a target agent used to discover RL update (target) rules.
 
@@ -1255,9 +1198,12 @@ class ContinuousDiscoAgent:
 
     Architecture:
         - Input Encoder - converts samples into embeddings for the Disco network
-        - Disco Network - processes embeddings backwards through time to produce learned targets `(μ̂, log σ̂, ŷ, ẑ)` for training the policy agent
-        - Meta LNN - captures learning dynamics across the agent's lifetime, providing conditioning signals that modulate target generation
-        - Meta Projection - projects meta conditioning to match encoder output to inject lifetime context into target generation
+        - Disco Network - processes embeddings backwards through time to produce
+          learned targets `(μ̂, log σ̂, ŷ, ẑ)` for training the policy agent
+        - Meta LNN - captures learning dynamics across the agent's lifetime,
+          providing conditioning signals that modulate target generation
+        - Meta Projection - projects meta conditioning to match encoder output
+          to inject lifetime context into target generation
 
     Parameters
     ----------
@@ -1272,21 +1218,11 @@ class ContinuousDiscoAgent:
         Flag to enable/disable JIT compilation. Default is `False`
     """
 
-    def __init__(
+    def _build_modules(
         self,
-        *,
-        config: DiscoAgentSettings,
-        key: chex.PRNGKey,
-        freeze: bool = False,
-        jit_compile: bool = False,
+        encoder_key: chex.PRNGKey,
+        disco_key: chex.PRNGKey,
     ) -> None:
-        self.config = config
-        self.key = key
-        self.is_frozen = freeze
-        self.encoder_config = config.encoder_config()
-
-        encoder_key, disco_key, meta_key, proj_key = jax.random.split(key, 4)
-
         self._encoder = ContinuousDiscoInputEncoder(
             self.encoder_config,
             self.config.max_action_dim,
@@ -1302,119 +1238,6 @@ class ContinuousDiscoAgent:
             sparsity=self.config.sparsity,
         )
 
-        self._meta_lnn = LNN(
-            self.encoder_config.output_dim,
-            self.config.n_hidden,
-            self._disco_net.hidden_size,
-            key=meta_key,
-            sparsity=self.config.sparsity,
-        )
-
-        self._meta_proj = nnx.Linear(
-            self._meta_lnn.hidden_size,
-            self.encoder_config.output_dim,
-            rngs=nnx.Rngs(proj_key),
-        )
-
-        self.encoder, self.disco_net, self.meta_lnn, self.meta_proj = self._compile(
-            jit_compile
-        )
-
-        self.optimizer = optax.chain(
-            optax.clip_by_global_norm(self.config.max_grad_norm),
-            optax.adan(self.config.lr),
-        )
-
-    @property
-    def hidden_sizes(self) -> Tuple[int, int]:
-        """
-        Get the agents hidden sizes.
-
-        Returns
-        -------
-        disco_h_size : int
-            Disco network hidden size
-        meta_h_size : int
-            Meta LNN hidden size
-        """
-        return (self._disco_net.hidden_size, self._meta_lnn.hidden_size)
-
-    @property
-    def active_params(self) -> int:
-        """Get the agents active parameters."""
-        return (
-            self._encoder.active_params
-            + self._disco_net.active_params
-            + self._meta_lnn.active_params
-            + total_parameters(self._meta_proj)
-        )
-
-    @property
-    def total_params(self) -> int:
-        """Get the agents total parameters."""
-        return (
-            self._encoder.total_params
-            + self._disco_net.total_params
-            + self._meta_lnn.total_params
-            + total_parameters(self._meta_proj)
-        )
-
-    @property
-    def param_count(self) -> ParamCount:
-        """Get the agents parameter count."""
-        return ParamCount(active=self.active_params, total=self.total_params)
-
-    def _compile(
-        self, jit_compile: bool
-    ) -> Tuple[
-        ContinuousDiscoInputEncoder,
-        ContinuousDiscoNetwork,
-        LNN,
-        nnx.Linear,
-    ]:
-        """
-        Returns JIT-compiled or original modules based on compilation flag.
-
-        Parameters
-        ----------
-        jit_compile : bool
-            Whether to JIT compile the modules
-
-        Returns
-        -------
-        encoder : ContinuousDiscoInputEncoder
-            Input encoder (possibly JIT-wrapped)
-        disco_net : ContinuousDiscoNetwork
-            Disco network (possibly JIT-wrapped)
-        meta_lnn : LNN
-            Meta LNN (possibly JIT-wrapped)
-        meta_proj : nnx.Linear
-            Meta projection layer (possibly JIT-wrapped)
-        """
-        # Cache graphdef + non-param state for functional forward pass
-        self._disco_net_graphdef, _, self._disco_net_rest = nnx.split(
-            self._disco_net, nnx.Param, ...
-        )
-        self._meta_lnn_graphdef, _, self._meta_lnn_rest = nnx.split(
-            self._meta_lnn, nnx.Param, ...
-        )
-        self._meta_proj_graphdef, _, self._meta_proj_rest = nnx.split(
-            self._meta_proj, nnx.Param, ...
-        )
-        self._encoder_graphdef, _, self._encoder_rest = nnx.split(
-            self._encoder, nnx.Param, ...
-        )
-
-        if jit_compile:
-            return (
-                nnx.jit(self._encoder),
-                nnx.jit(self._disco_net),
-                nnx.jit(self._meta_lnn),
-                nnx.jit(self._meta_proj),
-            )  # type: ignore
-
-        return self._encoder, self._disco_net, self._meta_lnn, self._meta_proj
-
     def __call__(
         self,
         rollout: ContinuousRollout,
@@ -1428,7 +1251,7 @@ class ContinuousDiscoAgent:
 
         Parameters
         ----------
-        rollout : Rollout
+        rollout : ContinuousRollout
             A trajectory of experience
         disco_h_state : chex.Array (optional)
             Hidden state for DiscoNetwork. Shape: `(B, H)`.
@@ -1489,242 +1312,8 @@ class ContinuousDiscoAgent:
 
         return targets, disco_h_state, meta_h_state
 
-    def _meta_conditioning(
-        self,
-        meta_proj: nnx.Linear,
-        embedding: chex.Array,
-        meta_h_state: chex.Array,
-    ) -> chex.Array:
-        """
-        Applies multiplicative interaction with meta conditioning to
-        encoder output.
 
-        Parameters
-        ----------
-        meta_proj : nnx.Linear
-            The active meta projection layer
-        embedding : chex.Array
-            Encoder output. Shape: `(B, T, E)`
-        meta_h_state : chex.Array
-            Meta-LNN hidden state. Shape: `(B, H_meta)`
-
-        Returns
-        -------
-        result : chex.Array
-            Conditioned embedding. Shape: `(B, T, E)`
-        """
-        # (B, H_meta) -> (B, E)
-        new_h = meta_proj(meta_h_state)  # type: ignore
-        new_h = jnp.expand_dims(new_h, axis=1)  # (B, E) -> (B, 1, E)
-        return embedding * new_h
-
-    def get_params(self) -> nnx.State:
-        """
-        Extract trainable parameters from all sub-modules.
-
-        Returns
-        -------
-        params : nnx.State
-            Combined parameter states from `(encoder, disco_net, meta_lnn, meta_proj)`
-        """
-        return nnx.State(
-            {
-                "encoder": nnx.state(self._encoder, nnx.Param),
-                "disco_net": nnx.state(self._disco_net, nnx.Param),
-                "meta_lnn": nnx.state(self._meta_lnn, nnx.Param),
-                "meta_proj": nnx.state(self._meta_proj, nnx.Param),
-            }
-        )
-
-    def update_params(self, params: nnx.State) -> None:
-        """
-        Update parameters for all sub-modules.
-
-        Parameters
-        ----------
-        params : nnx.State
-            Parameter states to apply
-        """
-        nnx.update(self._encoder, params["encoder"])
-        nnx.update(self._disco_net, params["disco_net"])
-        nnx.update(self._meta_lnn, params["meta_lnn"])
-        nnx.update(self._meta_proj, params["meta_proj"])
-
-    def merge_params(
-        self, params: nnx.State
-    ) -> Tuple[
-        ContinuousDiscoInputEncoder,
-        ContinuousDiscoNetwork,
-        LNN,
-        nnx.Linear,
-    ]:
-        """
-        Reconstruct all Disco modules from explicit parameters.
-
-        Parameters
-        ----------
-        params : nnx.State
-            Module parameters
-
-        Returns
-        -------
-        encoder : ContinuousDiscoInputEncoder
-            An updated encoder with the given parameters
-        disco_net : ContinuousDiscoNetwork
-            An updated disco network with the given parameters
-        meta_lnn : LNN
-            An updated meta LNN with the given parameters
-        meta_proj : nnx.Linear
-            An updated projection layer with the given parameters
-        """
-        encoder = nnx.merge(
-            self._encoder_graphdef,
-            params["encoder"],
-            self._encoder_rest,
-        )
-        disco_net = nnx.merge(
-            self._disco_net_graphdef,
-            params["disco_net"],
-            self._disco_net_rest,
-        )
-        meta_lnn = nnx.merge(
-            self._meta_lnn_graphdef,
-            params["meta_lnn"],
-            self._meta_lnn_rest,
-        )
-        meta_proj = nnx.merge(
-            self._meta_proj_graphdef,
-            params["meta_proj"],
-            self._meta_proj_rest,
-        )
-        return encoder, disco_net, meta_lnn, meta_proj
-
-    def save(
-        self,
-        root_path: Path | str = "checkpoints/models",
-        model_dir: str = "disco",
-        timestamp: bool = True,
-    ) -> Path:
-        """
-        Saves the agent's network parameters and configuration to disk.
-
-        Useful for saving discovered update rules.
-
-        Default directory path: `./checkpoints/models/disco_[ddmmyy]_[hhmmss]/`.
-
-        Parameters
-        ----------
-        root_path : Path | str (optional)
-            Directory path for saving. Default is `checkpoints/models`
-        model_dir : str (optional)
-            The folder name to save the agents state. Gets merged with `root_path`.
-            Default is `disco`
-        timestamp : bool (optional)
-            Whether to append timestamps to experiment directory.
-            Uses timestamp format: `ddmmyy_hhmmss`. Default is `True`
-
-        Returns
-        -------
-        path : Path
-            Path where the rule was saved
-        """
-        dirpath = create_directory(root_path, model_dir, timestamp)
-        dirpath.mkdir(parents=True, exist_ok=True)
-
-        cp = ocp.StandardCheckpointer()
-
-        # Set config as JSON
-        key_data = get_rng_key_data(self.key)
-        config_json = self.config.to_json(key=key_data)
-
-        # Save params and config
-        cp.save(dirpath / "params", self.get_params())
-        (dirpath / "config.json").write_text(config_json)
-
-        cp.wait_until_finished()
-        return dirpath
-
-    @classmethod
-    def load(
-        cls,
-        run_dir: Path | str,
-        *,
-        checkpoint_step: int | None = None,
-        freeze: bool = True,
-        jit_compile: bool = False,
-    ) -> Self:
-        """
-        Load a discovered update rule from a run directory.
-
-        Reads agent configuration and key from `metadata.json`,
-        then restores parameters from the specified (or latest) step
-        checkpoint.
-
-        Parameters
-        ----------
-        run_dir : Path | str
-            Path to the run directory containing `metadata.json`
-            and `checkpoints/`
-        checkpoint_step : int (optional)
-            Specific checkpoint step to restore. When `None`,
-            restores the latest. Default is `None`
-        freeze : bool (optional)
-            Freezes parameters so they cannot be trained. Default is `True`
-        jit_compile : bool (optional)
-            Whether to JIT compile. Default is `False`
-
-        Returns
-        -------
-        disco_agent : ContinuousDiscoAgent
-            Agent with restored parameters
-        """
-        run_settings = RunSettings.from_path(run_dir)
-
-        with CheckpointManager(run_settings) as manager:
-            meta = manager.load_metadata(RuleTrainerMetadata)
-
-        config = DiscoAgentSettings(**meta.config["disco_agent"])
-        key = restore_rng_key(meta.disco_key)
-
-        agent = cls(
-            config=config,
-            key=key,
-            freeze=freeze,
-            jit_compile=jit_compile,
-        )
-
-        # Build full checkpoint template
-        params = agent.get_params()
-        meta_lr = meta.config.get("meta_lr", 0.001)
-        num_trainers = len(meta.envs) * meta.agents_per_env
-        batch_size = meta.config.get("batch_size", 20)
-
-        dummy_state = RuleTrainerState.create(
-            optax.adam(meta_lr).init(params),
-            num_trainers,
-            batch_size,
-            *agent.hidden_sizes,
-        )
-
-        abstract_checkpoint = {
-            "meta_params": jax.tree.map(
-                ocp.utils.to_shape_dtype_struct,
-                params,
-            ),
-            "state": jax.tree.map(
-                lambda x: ocp.utils.to_shape_dtype_struct(x) if x is not None else None,
-                dummy_state,
-            ),
-        }
-
-        with CheckpointManager(run_settings) as manager:
-            restored = manager.restore(checkpoint_step, abstract_checkpoint)
-
-        agent.update_params(restored["meta_params"])
-        return agent
-
-
-class ContinuousPolicyAgent:
+class ContinuousPolicyAgent(BasePolicyAgent[ContinuousPolicyModules]):
     """
     Creates a policy agent used to discover Reinforcement Learning (RL) rules.
 
@@ -1832,74 +1421,6 @@ class ContinuousPolicyAgent:
         )
 
         self.encoder, self.ocm, self.acm, self.decoder = self._compile(jit_compile)
-
-    @property
-    def active_params(self) -> int:
-        """Get the agents active parameters."""
-        return (
-            self._encoder.active_params
-            + self._ocm.active_params
-            + self._acm.active_params
-            + self._decoder.active_params
-        )
-
-    @property
-    def total_params(self) -> int:
-        """Get the agents total parameters."""
-        return (
-            self._encoder.total_params
-            + self._ocm.total_params
-            + self._acm.total_params
-            + self._decoder.total_params
-        )
-
-    @property
-    def param_count(self) -> ParamCount:
-        """Get the agents parameter count."""
-        return ParamCount(active=self.active_params, total=self.total_params)
-
-    @property
-    def encoding_dim(self) -> int:
-        """Output feature dimensionality of the encoder."""
-        return self._encoder.encoding_dim
-
-    def _compile(
-        self, jit_compile: bool
-    ) -> Tuple[PolicyEncoder, OCM, ContinuousACM, GaussianPolicyDecoder]:
-        """
-        Returns JIT-compiled or original modules based on compilation flag.
-
-        Parameters
-        ----------
-        jit_compile : bool
-            Whether to JIT compile the modules
-
-        Returns
-        -------
-        encoder : ImageEncoder | VectorEncoder
-            Input encoder (possibly JIT-wrapped)
-        ocm : OCM
-            Observation-Conditional Model (possibly JIT-wrapped)
-        acm : ContinuousACM
-            Action-Conditional Model (possibly JIT-wrapped)
-        decoder : GaussianPolicyDecoder
-            Action decoder (possibly JIT-wrapped)
-        """
-        # Cache graphdef + non-param state for functional forward pass
-        self._enc_graphdef, _, self._enc_rest = nnx.split(self._encoder, nnx.Param, ...)
-        self._ocm_graphdef, _, self._ocm_rest = nnx.split(self._ocm, nnx.Param, ...)
-        self._acm_graphdef, _, self._acm_rest = nnx.split(self._acm, nnx.Param, ...)
-        self._dec_graphdef, _, self._dec_rest = nnx.split(self._decoder, nnx.Param, ...)
-
-        if jit_compile:
-            return (
-                nnx.jit(self._encoder),
-                nnx.jit(self._ocm),
-                nnx.jit(self._acm),
-                nnx.jit(self._decoder),
-            )  # type: ignore
-
-        return self._encoder, self._ocm, self._acm, self._decoder
 
     def __call__(
         self,
@@ -2032,7 +1553,7 @@ class ContinuousPolicyAgent:
         preds : ContinuousPolicyAgentOutput
             Agent predictions
         """
-        ocm, acm, decoder = self.merge_params(params)
+        _, ocm, acm, decoder = self.merge_params(params)
 
         ocm_preds, _ = ocm(encoding)
         acm_preds, _ = acm(ocm_preds.embedding, action)
@@ -2092,109 +1613,3 @@ class ContinuousPolicyAgent:
         )
         actions[:, self.action_dim :] = 0.0
         return actions.astype(np.float32)
-
-    def get_params(self) -> nnx.State:
-        """
-        Extract trainable parameters from all sub-modules.
-
-        Returns
-        -------
-        params : nnx.State
-            Combined parameter states from `(encoder, ocm, acm, decoder)`
-        """
-        return nnx.State(
-            {
-                "encoder": nnx.state(self._encoder, nnx.Param),
-                "ocm": nnx.state(self._ocm, nnx.Param),
-                "acm": nnx.state(self._acm, nnx.Param),
-                "decoder": nnx.state(self._decoder, nnx.Param),
-            }
-        )
-
-    def update_params(self, params: nnx.State) -> None:
-        """
-        Update parameters for all sub-modules.
-
-        Parameters
-        ----------
-        params : nnx.State
-            Parameter states to apply
-        """
-        nnx.update(self._encoder, params["encoder"])
-        nnx.update(self._ocm, params["ocm"])
-        nnx.update(self._acm, params["acm"])
-        nnx.update(self._decoder, params["decoder"])
-
-    def merge_params(
-        self, params: nnx.State
-    ) -> Tuple[OCM, ContinuousACM, GaussianPolicyDecoder]:
-        """
-        Reconstruct OCM, ACM, and Decoder modules from explicit parameters.
-        Note: ignores encoder module for simplicity.
-
-        Parameters
-        ----------
-        params : nnx.State
-            OCM and ACM parameters
-
-        Returns
-        -------
-        ocm : OCM
-            An updated OCM with the given parameters
-        acm : ContinuousACM
-            An updated ACM with the given parameters
-        decoder : GaussianPolicyDecoder
-            An updated decoder with the given parameters
-        """
-        ocm = nnx.merge(self._ocm_graphdef, params["ocm"], self._ocm_rest)
-        acm = nnx.merge(self._acm_graphdef, params["acm"], self._acm_rest)
-        decoder = nnx.merge(self._dec_graphdef, params["decoder"], self._dec_rest)
-        return ocm, acm, decoder
-
-    def merge_all_params(
-        self, params: nnx.State
-    ) -> Tuple[PolicyEncoder, OCM, ContinuousACM, GaussianPolicyDecoder]:
-        """
-        Reconstruct all modules from explicit parameters, including encoder.
-
-        Parameters
-        ----------
-        params : nnx.State
-            Full parameter states from `get_params()`
-
-        Returns
-        -------
-        encoder : PolicyEncoder
-            Reconstructed encoder
-        ocm : OCM
-            Reconstructed OCM
-        acm : ContinuousACM
-            Reconstructed ACM
-        decoder : GaussianPolicyDecoder
-            Reconstructed decoder
-        """
-        encoder = nnx.merge(self._enc_graphdef, params["encoder"], self._enc_rest)
-        ocm = nnx.merge(self._ocm_graphdef, params["ocm"], self._ocm_rest)
-        acm = nnx.merge(self._acm_graphdef, params["acm"], self._acm_rest)
-        decoder = nnx.merge(self._dec_graphdef, params["decoder"], self._dec_rest)
-        return encoder, ocm, acm, decoder
-
-    def soft_param_update(self, tau: float, new_params: nnx.State) -> None:
-        """
-        Performs a soft parameter update on the networks parameters.
-
-        Formula: `θ_target ← τ * θ_online + (1 - τ) * θ_target`
-
-        Parameters
-        ----------
-        tau : float
-            Soft update coefficient
-        new_params : nnx.State
-            New parameters to use for updating (`θ_target`)
-        """
-        new_params = jax.tree.map(
-            lambda old, new: tau * old + (1.0 - tau) * new,
-            self.get_params(),
-            new_params,
-        )
-        self.update_params(new_params)

@@ -1042,9 +1042,9 @@ class RuleTrainer:
             a_mask,
         ):
             # Reconstruct all modules from explicit params
-            encoder, p_ocm, p_acm, p_dec = t.policy_agent.merge_all_params(p_params)
-            _, t_ocm, t_acm, t_dec = t.target_agent.merge_all_params(t_params)
-            v_net = t.value_agent.merge_net(v_params)
+            encoder, p_ocm, p_acm, p_dec = t.policy_agent.merge_params(p_params)
+            _, t_ocm, t_acm, t_dec = t.target_agent.merge_params(t_params)
+            v_net = t.value_agent.merge_params(v_params).net
 
             # Shared encoding
             encoding = encoder(obs)
