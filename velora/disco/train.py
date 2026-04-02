@@ -1588,6 +1588,7 @@ class RuleTrainer:
         finally:
             self.close()
 
+        self.save_checkpoint(force=True)
         self.console.finish_training()
 
     @classmethod
