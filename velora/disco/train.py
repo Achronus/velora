@@ -1588,7 +1588,10 @@ class RuleTrainer:
         finally:
             self.close()
 
-        self.save_checkpoint(force=True)
+        # Save last step if not already saved
+        if self.cp_manager.latest_step != self.state.meta_step:
+            self.save_checkpoint(force=True)
+
         self.console.finish_training()
 
     @classmethod
