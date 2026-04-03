@@ -23,7 +23,7 @@ from flax import nnx
 from flax.typing import Initializer
 
 from velora.base.spec import HeadSpec, LayerSpec
-from velora.lnn.cell import NCPLiquidCell
+from velora.lnn.cell import CellConfig, NCPLiquidCell
 from velora.lnn.constants import DEFAULT_HIDDEN_INIT
 from velora.lnn.spec import NCPWiringSpec
 from velora.utils.nn import active_parameters, total_parameters
@@ -87,6 +87,16 @@ class BaseCfC(nnx.Module):
         Initializer function for the weight matrix.
         Default is `lecun_uniform()`
 
+    cell : CellConfig (optional)
+        Cell configuration created via an `NCPLiquidCell.config()` class method.
+        Default is `None` (uses `NCPLiquidCell`).
+
+        Examples:
+
+            AdaptiveLiquidCell.config(alpha_rank=8)
+            DecayLiquidCell.config(alpha_rank=4)
+            DeltaErasureLiquidCell.config()
+
     Raises
     ------
     not_implemented : NotImplementedError
@@ -103,12 +113,15 @@ class BaseCfC(nnx.Module):
         key: chex.PRNGKey,
         sparsity: float = 0.5,
         init_type: Initializer = DEFAULT_HIDDEN_INIT,
+        cell: CellConfig | None = None,
     ) -> None:
         self.in_features = in_features
         self.n_neurons = n_neurons
         self.sparsity = sparsity
         self.init_type = init_type
         self.key = key
+
+        self._cell = cell or CellConfig(NCPLiquidCell)
 
         self.seed = jax.random.key_data(key)[-1].item()
         self.rngs = nnx.Rngs(params=self.key)
@@ -119,7 +132,7 @@ class BaseCfC(nnx.Module):
         self.hidden_split_indices = nnx.data(self.wiring.h_split_indices())
 
         # Inter layer: sensory -> inter
-        self.inter = NCPLiquidCell(
+        self.inter = self._cell.build(
             self.in_features,
             self.wiring.inter.n_hidden,
             self.wiring.inter.mask,
@@ -128,7 +141,7 @@ class BaseCfC(nnx.Module):
         )
 
         # Command layer: inter -> command
-        self.command = NCPLiquidCell(
+        self.command = self._cell.build(
             self.wiring.inter.n_hidden,
             self.wiring.command.n_hidden,
             self.wiring.command.mask,
@@ -180,7 +193,7 @@ class BaseCfC(nnx.Module):
             name = field.name
             layer_spec: LayerSpec = getattr(self.motor, name)
 
-            head = NCPLiquidCell(
+            head = self._cell.build(
                 self.wiring.command.n_hidden,
                 layer_spec.n_hidden,
                 layer_spec.mask,

@@ -19,6 +19,7 @@ import chex
 from flax.typing import Initializer
 
 from velora.lnn.base import BaseCfC
+from velora.lnn.cell import CellConfig
 from velora.lnn.constants import DEFAULT_HIDDEN_INIT
 from velora.lnn.spec import NCPWiringSpec, SingleHeadSpec
 from velora.lnn.wiring import NCPWiringBuilder
@@ -68,6 +69,15 @@ class LNN(BaseCfC):
     init_type : flax.nnx.nn.initializers (optional)
         Initializer function for the weight matrix.
         Default is `lecun_uniform()`
+    cell : CellConfig (optional)
+        Cell configuration created via an `NCPLiquidCell.config()` class method.
+        Default is `None` (uses `NCPLiquidCell`).
+
+        Examples:
+
+            AdaptiveLiquidCell.config(alpha_rank=8)
+            DecayLiquidCell.config(alpha_rank=4)
+            DeltaErasureLiquidCell.config()
     """
 
     motor: SingleHeadSpec  # type: ignore
@@ -81,6 +91,7 @@ class LNN(BaseCfC):
         key: chex.PRNGKey,
         sparsity: float = 0.5,
         init_type: Initializer = DEFAULT_HIDDEN_INIT,
+        cell: CellConfig | None = None,
     ) -> None:
         self.out_features = out_features
 
@@ -90,6 +101,7 @@ class LNN(BaseCfC):
             key=key,
             sparsity=sparsity,
             init_type=init_type,
+            cell=cell,
         )
 
     def _build_wiring(self) -> NCPWiringSpec:

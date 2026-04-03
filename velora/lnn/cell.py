@@ -13,7 +13,7 @@
 # limitations under the License.
 # ==============================================================================
 
-from typing import Dict, Tuple
+from typing import Any, Dict, Tuple
 
 import chex
 import jax.numpy as jnp
@@ -22,6 +22,73 @@ from flax.typing import Initializer
 
 from velora.lnn.constants import DEFAULT_HIDDEN_INIT
 from velora.lnn.sparse import SparseLinear
+
+
+class CellConfig:
+    """
+    Configuration for creating `NCPLiquidCell` variants.
+
+    Captures the cell class and any variant-specific keyword arguments.
+    Used by `BaseCfC` to construct cells at each layer.
+
+    Should not be instantiated directly — use `NCPLiquidCell.config()`
+    or a subclass's `.config()` class method instead.
+
+    Parameters
+    ----------
+    cell_type : type[NCPLiquidCell]
+        The cell class to use
+    **kwargs : Any
+        Variant-specific keyword arguments passed to the cell constructor.
+        E.g., `alpha_rank=8` for `AdaptiveLiquidCell`
+    """
+
+    def __init__(
+        self,
+        cell_type: type["NCPLiquidCell"],
+        **kwargs: Any,
+    ) -> None:
+        self.cell_type = cell_type
+        self.kwargs = kwargs
+
+    def build(
+        self,
+        in_features: int,
+        n_hidden: int,
+        mask: chex.Array,
+        *,
+        rngs: nnx.Rngs,
+        init_type: Initializer,
+    ) -> "NCPLiquidCell":
+        """
+        Construct a cell instance with the stored configuration.
+
+        Parameters
+        ----------
+        in_features : int
+            Number of input nodes
+        n_hidden : int
+            Number of hidden nodes
+        mask : jax.Array
+            A matrix of sparse connections
+        rngs : flax.nnx.Rngs
+            Random number generator key
+        init_type : flax.nnx.nn.initializers
+            Initializer function for the weight matrix
+
+        Returns
+        -------
+        cell : NCPLiquidCell
+            A configured cell instance
+        """
+        return self.cell_type(
+            in_features,
+            n_hidden,
+            mask,
+            rngs=rngs,
+            init_type=init_type,
+            **self.kwargs,
+        )
 
 
 class NCPLiquidCell(nnx.Module):
@@ -83,6 +150,18 @@ class NCPLiquidCell(nnx.Module):
         # LTC heads (f)
         self.f_head_to_g = self._make_layer()
         self.f_head_to_h = self._make_layer()
+
+    @classmethod
+    def config(cls) -> CellConfig:
+        """
+        Returns a `CellConfig` for this cell type.
+
+        Returns
+        -------
+        config : CellConfig
+            A cell configuration for constructing this cell variant
+        """
+        return CellConfig(cls)
 
     def _make_layer(self) -> SparseLinear:
         """
@@ -295,6 +374,24 @@ class DecayLiquidCell(NCPLiquidCell):
         self.alpha_down = nnx.Linear(self.head_size, self.alpha_rank, rngs=rngs)
         self.alpha_up = nnx.Linear(self.alpha_rank, self.n_hidden, rngs=rngs)
 
+    @classmethod
+    def config(cls, *, alpha_rank: int | None = None) -> CellConfig:
+        """
+        Returns a `CellConfig` for this cell type.
+
+        Parameters
+        ----------
+        alpha_rank : int (optional)
+            Rank of the low-rank α projection.
+            Default is `None` (uses `min(n_hidden, 4)`)
+
+        Returns
+        -------
+        config : CellConfig
+            A cell configuration for constructing this cell variant
+        """
+        return CellConfig(cls, alpha_rank=alpha_rank)
+
     def _new_hidden(
         self,
         x: chex.Array,
@@ -499,6 +596,24 @@ class AdaptiveLiquidCell(NCPLiquidCell):
         # Delta-rule erasure heads
         self.reconstruct_head = self._make_layer()
         self.beta_head = self._make_layer()
+
+    @classmethod
+    def config(cls, *, alpha_rank: int | None = None) -> CellConfig:
+        """
+        Returns a `CellConfig` for this cell type.
+
+        Parameters
+        ----------
+        alpha_rank : int (optional)
+            Rank of the low-rank α projection.
+            Default is `None` (uses `min(n_hidden, 4)`)
+
+        Returns
+        -------
+        config : CellConfig
+            A cell configuration for constructing this cell variant
+        """
+        return CellConfig(cls, alpha_rank=alpha_rank)
 
     def _new_hidden(
         self,
