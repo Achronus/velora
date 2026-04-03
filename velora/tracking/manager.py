@@ -90,7 +90,11 @@ class CheckpointManager:
         if not force and not self.should_save(step):
             return False
 
-        self._manager.save(step, args=ocp.args.PyTreeSave(state), force=force)  # type: ignore
+        self._manager.save(
+            step,
+            args=ocp.args.Composite(state=ocp.args.PyTreeSave(state)),  # type: ignore
+            force=force,
+        )
 
         if metadata is not None:
             meta_path = self.run_dir / "metadata.json"
@@ -148,15 +152,18 @@ class CheckpointManager:
 
             restored = self._manager.restore(
                 restore_step,
-                args=ocp.args.PyTreeRestore(
-                    state_template,  # type: ignore
-                    restore_args=restore_args,
+                args=ocp.args.Composite(
+                    state=ocp.args.PyTreeRestore(  # type: ignore
+                        state_template,  # type: ignore
+                        restore_args=restore_args,
+                    ),
                 ),
             )
         else:
             restored = self._manager.restore(restore_step)
+            restored = restored["state"] if isinstance(restored, dict) else restored
 
-        return restored  # type: ignore
+        return restored["state"]
 
     def load_metadata(
         self,
