@@ -66,7 +66,7 @@ class NCPWiringSpec:
             self.command.n_hidden,
             *self.motor.hidden_sizes(),
         ]
-        return tuple(jnp.cumsum(jnp.array(sizes[:-1])))
+        return tuple(jnp.cumsum(jnp.array(sizes[:-1])).tolist())
 
 
 @struct.dataclass(frozen=True)

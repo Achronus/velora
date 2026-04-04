@@ -129,7 +129,7 @@ class BaseCfC(nnx.Module):
         self.wiring: NCPWiringSpec = nnx.data(self._build_wiring())
 
         self.hidden_size = self.wiring.hidden_size
-        self.hidden_split_indices = nnx.data(self.wiring.h_split_indices())
+        self.hidden_split_indices = self.wiring.h_split_indices()
 
         # Inter layer: sensory -> inter
         self.inter = self._cell.build(
