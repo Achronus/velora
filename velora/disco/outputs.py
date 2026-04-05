@@ -318,6 +318,29 @@ class DiscoAgentOutput:
     y: chex.Array
     z: chex.Array
 
+    def mask_pi(self, mask: chex.Array, value: float = -1e9) -> Self:
+        """
+        Mask invalid action slots in the policy target logits.
+
+        Sets padded action dimensions to a large negative value so that
+        softmax assigns them zero probability, preventing spurious
+        KL gradients between meta-network targets and agent predictions.
+
+        Parameters
+        ----------
+        mask : chex.Array
+            Boolean mask `(max_actions,)` where `True` indicates a
+            valid action
+        value : float (optional)
+            Fill value for masked slots. Default is `-1e9`
+
+        Returns
+        -------
+        masked : Self
+            New instance with masked `pi` field
+        """
+        return self.__replace__(pi=jnp.where(mask, self.pi, value))
+
 
 @struct.dataclass
 class ActionDecoderOutput:

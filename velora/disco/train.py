@@ -1163,6 +1163,7 @@ class RuleTrainer:
                     params=meta_params,
                     action_mask=action_mask,
                 )
+                targets = targets.mask_pi(action_mask)
 
                 encoding = rollout.preds.encoding
                 actions, discounts = rollout.actions, rollout.discounts
@@ -1930,4 +1931,5 @@ class RuleTrainer:
             self.pool.close()
 
         self.cp_manager.close()
+        self.logger.close()
         self.runtime_logger.close()
