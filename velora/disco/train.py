@@ -1163,7 +1163,6 @@ class RuleTrainer:
                     params=meta_params,
                     action_mask=action_mask,
                 )
-                targets = targets.mask_pi(action_mask)
 
                 encoding = rollout.preds.encoding
                 actions, discounts = rollout.actions, rollout.discounts
@@ -1183,6 +1182,7 @@ class RuleTrainer:
                         act,
                         disc,
                         self.config.loss_cost,
+                        action_mask,
                     )
 
                 (_, _), p_grads = fwdrev_value_and_grad(
@@ -1275,6 +1275,7 @@ class RuleTrainer:
                 jax.tree.map(lambda x: x[-1], all_targets_pi),
                 self.config.reg_scale,
                 self.config.kl_reg,
+                action_mask,
             )
             meta_loss = pg_loss + entropy_loss + reg_loss
 

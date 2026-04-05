@@ -115,6 +115,7 @@ def compute_meta_reg_loss(
     target_pi: chex.Array,
     reg_scale: float,
     kl_reg_coef: float,
+    action_mask: chex.Array,
 ) -> chex.Array:
     """
     Compute regularization loss for meta-network targets.
@@ -133,6 +134,10 @@ def compute_meta_reg_loss(
         L2 regularization scale
     kl_reg_coef : float
         KL regularization coefficient
+    action_mask : chex.Array
+        Boolean mask `(max_actions,)` where `True` indicates a valid
+        action. Applied to policy logits before KL computation so both
+        distributions share the same support.
 
     Returns
     -------
@@ -145,9 +150,10 @@ def compute_meta_reg_loss(
     y_reg = compute_l2_mean_penalty(targets.y)
     z_reg = compute_l2_mean_penalty(targets.z)
 
+    targets_masked = targets.mask_pi(action_mask)
     target_kl = categorical_kl_divergence(
         jax.lax.stop_gradient(target_pi),
-        targets.pi,
+        targets_masked.pi,
     ).mean()
 
     l2_loss = reg_scale * (pi_reg + y_reg + z_reg)
@@ -164,6 +170,7 @@ def compute_policy_loss(
     actions: chex.Array,
     discounts: chex.Array,
     loss_costs: "LossCostSettings",
+    action_mask: chex.Array,
 ) -> Tuple[chex.Array, "AgentLosses"]:
     """
     Compute policy agent losses for training against disco targets.
@@ -192,6 +199,10 @@ def compute_policy_loss(
         Episode continuation signals. Shape: `(B, T, 1)`
     loss_costs : LossCostSettings
         Loss weighting coefficients
+    action_mask : chex.Array
+        Boolean mask `(max_actions,)` where `True` indicates a valid
+        action. Applied to policy logits before KL computation so both
+        distributions share the same support.
 
     Returns
     -------
@@ -202,7 +213,9 @@ def compute_policy_loss(
     """
     from velora.disco.outputs import AgentLosses
 
-    pi_loss = categorical_kl_divergence(targets.pi, preds_pi).mean()
+    targets_masked = targets.mask_pi(action_mask)
+
+    pi_loss = categorical_kl_divergence(targets_masked.pi, preds_pi).mean()
     y_loss = categorical_kl_divergence(targets.y, preds_y).mean()
     z_loss = compute_z_loss(preds_z, targets.z, actions).mean()
     aux_pi_loss = compute_aux_policy_loss(
