@@ -13,8 +13,9 @@
 # limitations under the License.
 # ==============================================================================
 
+from collections import defaultdict
 from dataclasses import fields
-from typing import Optional, Tuple, final
+from typing import Dict, List, Optional, Tuple, final
 
 import chex
 import jax
@@ -167,6 +168,21 @@ class BaseCfC(nnx.Module):
             The total parameter count.
         """
         return self._total_params
+
+    @property
+    def layer_names(self) -> List[str]:
+        """
+        Gets the network's layer names including a `network` average.
+
+        Returns
+        -------
+        names : List[str]
+            Layer names (inter, command, motor heads, network)
+        """
+        names = ["inter", "command"]
+        names += [f"motor_{f.name}" for f in fields(self.motor)]
+        names.append("network")
+        return names
 
     @property
     def active_params(self) -> int:
@@ -385,3 +401,49 @@ class BaseCfC(nnx.Module):
             Transformed predictions `(B, T, F)`
         """
         return jax.tree.map(to_batch_first, preds)
+
+    def diagnostics(self, x: chex.Array, hidden: chex.Array) -> Dict[str, float]:
+        """
+        Extract mechanism-specific metrics for logging.
+
+        Parameters
+        ----------
+        x : jax.Array
+            Current input `(B, in_features)`
+        hidden : jax.Array
+            Current hidden state `(B, n_hidden)`
+
+        Returns
+        -------
+        metrics : Dict[str, float]
+            Diagnostic scalars for logging
+        """
+        # Handle hidden states
+        h_split = tuple(jnp.split(hidden, self.hidden_split_indices, axis=1))
+        h_inter, h_command, *h_heads = h_split
+
+        # Standard forward pass through network
+        x_t, _ = self.inter(x, h_inter, jnp.array(1.0))
+        embed_t, _ = self.command(x_t, h_command, jnp.array(1.0))
+
+        # Get diagnostics
+        inter_diag = self.inter.diagnostics(x, h_inter, "inter")
+        command_diag = self.command.diagnostics(x_t, h_command, "command")
+        stats = {**inter_diag, **command_diag}
+
+        names = [field.name for field in fields(self.motor)]
+        for head, h_head, name in zip(self._head_cells, h_heads, names):
+            motor_diag = head.diagnostics(embed_t, h_head, f"motor_{name}")
+            stats.update(motor_diag)
+
+        # Compute network-level averages
+        groups = defaultdict(list)
+
+        for key, value in stats.items():
+            _, metric = key.split("/", 1)
+            groups[metric].append(value)
+
+        for metric, values in groups.items():
+            stats[f"network/{metric}"] = sum(values) / len(values)
+
+        return stats

@@ -286,7 +286,26 @@ class NCPLiquidCell(nnx.Module):
         new_hidden = self._new_hidden(x, g_out, h_out, timespans)
         return new_hidden, new_hidden
 
-    def diagnostics(self, x: chex.Array, hidden: chex.Array) -> Dict[str, float]:
+    def diagnostics(
+        self, x: chex.Array, hidden: chex.Array, name: str = "cell"
+    ) -> Dict[str, float]:
+        """
+        Extract mechanism-specific metrics for logging.
+
+        Parameters
+        ----------
+        x : jax.Array
+            Current input `(B, in_features)`
+        hidden : jax.Array
+            Current hidden state `(B, n_hidden)`
+        name : str (optional)
+            Layer/cell name for logging
+
+        Returns
+        -------
+        metrics : Dict[str, float]
+            Diagnostic scalars for logging
+        """
         x_cat = jnp.concat([x, hidden], axis=1)
 
         fh_g = self.f_head_to_g(x_cat)
@@ -296,10 +315,10 @@ class NCPLiquidCell(nnx.Module):
         gate = self.sigmoid(fh_g + fh_h)  # ts=1.0
 
         return {
-            "cell/gate_mean": float(jnp.mean(gate)),
-            "cell/gate_std": float(jnp.std(gate)),
-            "cell/gate_min": float(jnp.min(gate)),
-            "cell/gate_max": float(jnp.max(gate)),
+            f"{name}/gate_mean": float(jnp.mean(gate)),
+            f"{name}/gate_std": float(jnp.std(gate)),
+            f"{name}/gate_min": float(jnp.min(gate)),
+            f"{name}/gate_max": float(jnp.max(gate)),
         }
 
 
@@ -414,15 +433,17 @@ class DecayLiquidCell(NCPLiquidCell):
 
         return g_head * f_head + gate_out * h_head
 
-    def diagnostics(self, x: chex.Array, hidden: chex.Array) -> Dict[str, float]:
+    def diagnostics(
+        self, x: chex.Array, hidden: chex.Array, name: str = "cell"
+    ) -> Dict[str, float]:
         x_cat = jnp.concat([x, hidden], axis=1)
         alpha = self.sigmoid(self.alpha_up(self.tanh(self.alpha_down(x_cat))))
 
         return {
-            "cell/alpha_mean": float(jnp.mean(alpha)),
-            "cell/alpha_std": float(jnp.std(alpha)),
-            "cell/alpha_min": float(jnp.min(alpha)),
-            "cell/alpha_max": float(jnp.max(alpha)),
+            f"{name}/alpha_mean": float(jnp.mean(alpha)),
+            f"{name}/alpha_std": float(jnp.std(alpha)),
+            f"{name}/alpha_min": float(jnp.min(alpha)),
+            f"{name}/alpha_max": float(jnp.max(alpha)),
         }
 
 
@@ -511,7 +532,9 @@ class DeltaErasureLiquidCell(NCPLiquidCell):
         new_hidden = self._new_hidden(x, g_out, h_out, timespans)
         return new_hidden, new_hidden
 
-    def diagnostics(self, x: chex.Array, hidden: chex.Array) -> Dict[str, float]:
+    def diagnostics(
+        self, x: chex.Array, hidden: chex.Array, name: str = "cell"
+    ) -> Dict[str, float]:
         x_cat = jnp.concat([x, hidden], axis=1)
 
         expected = self.tanh(self.reconstruct_head(x_cat))
@@ -519,9 +542,9 @@ class DeltaErasureLiquidCell(NCPLiquidCell):
         recon_error = jnp.mean(jnp.abs(expected - hidden))
 
         return {
-            "cell/beta_mean": float(jnp.mean(beta)),
-            "cell/beta_std": float(jnp.std(beta)),
-            "cell/reconstruction_error": float(recon_error),
+            f"{name}/beta_mean": float(jnp.mean(beta)),
+            f"{name}/beta_std": float(jnp.std(beta)),
+            f"{name}/reconstruction_error": float(recon_error),
         }
 
 
@@ -660,38 +683,27 @@ class AdaptiveLiquidCell(NCPLiquidCell):
         new_hidden = self._new_hidden(x, g_out, h_out, timespans)
         return new_hidden, new_hidden
 
-    def diagnostics(self, x: chex.Array, hidden: chex.Array) -> Dict[str, float]:
-        """
-        Extract mechanism-specific metrics for logging.
-
-        Parameters
-        ----------
-        x : jax.Array
-            Current input `(B, in_features)`
-        hidden : jax.Array
-            Current hidden state `(B, n_hidden)`
-
-        Returns
-        -------
-        metrics : Dict[str, float]
-            Diagnostic scalars for logging
-        """
+    def diagnostics(
+        self, x: chex.Array, hidden: chex.Array, name: str = "cell"
+    ) -> Dict[str, float]:
         x_cat = jnp.concat([x, hidden], axis=1)
 
-        # V1: alpha distribution
-        alpha = nnx.sigmoid(self.alpha_up(jnp.tanh(self.alpha_down(x_cat))))
-
-        # V2: erasure metrics
-        expected = jnp.tanh(self.reconstruct_head(x_cat))
-        beta = nnx.sigmoid(self.beta_head(x_cat))
+        # Erasure metrics
+        expected = self.tanh(self.reconstruct_head(x_cat))
+        beta = self.sigmoid(self.beta_head(x_cat))
         recon_error = jnp.mean(jnp.abs(expected - hidden))
 
+        # Alpha distribution
+        hidden_corrected = hidden + beta * (expected - hidden)
+        x_corrected = jnp.concat([x, hidden_corrected], axis=1)
+        alpha = self.sigmoid(self.alpha_up(self.tanh(self.alpha_down(x_corrected))))
+
         return {
-            "cell/alpha_mean": float(jnp.mean(alpha)),
-            "cell/alpha_std": float(jnp.std(alpha)),
-            "cell/alpha_min": float(jnp.min(alpha)),
-            "cell/alpha_max": float(jnp.max(alpha)),
-            "cell/beta_mean": float(jnp.mean(beta)),
-            "cell/beta_std": float(jnp.std(beta)),
-            "cell/reconstruction_error": float(recon_error),
+            f"{name}/alpha_mean": float(jnp.mean(alpha).item()),
+            f"{name}/alpha_std": float(jnp.std(alpha).item()),
+            f"{name}/alpha_min": float(jnp.min(alpha).item()),
+            f"{name}/alpha_max": float(jnp.max(alpha).item()),
+            f"{name}/beta_mean": float(jnp.mean(beta).item()),
+            f"{name}/beta_std": float(jnp.std(beta).item()),
+            f"{name}/reconstruction_error": float(recon_error.item()),
         }

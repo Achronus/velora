@@ -15,6 +15,7 @@
 
 import math
 import random
+from collections import defaultdict
 from typing import Callable, Dict, List, Self, Tuple
 
 import chex
@@ -678,6 +679,9 @@ class RuleTrainer:
             jit_compile=self.jit_compile,
         )
         self.meta_optim = optax.adam(config.meta_lr)
+
+        # Init disco diagnostics writers
+        self.logger.add_writer_group("disco", self.meta_agent._disco_net.layer_names)
 
         # Init state
         self.state = RuleTrainerState.create(
@@ -1570,6 +1574,7 @@ class RuleTrainer:
                     "meta/step": self.state.meta_step,
                 }
                 self.logger.log("meta", self.state.meta_step, metrics)
+                self._compute_diagnostics()
 
                 self.console.update_stats(**stats.rewards_as_dict())
                 self.console.update_losses(
@@ -1761,6 +1766,33 @@ class RuleTrainer:
             self.state.meta_step,
             metrics,
         )
+
+    def _compute_diagnostics(self) -> None:
+        """
+        Compute DiscoNetwork cell diagnostics averaged across all trainers.
+
+        For each trainer, computes diagnostics from the current disco
+        hidden state, then averages scalar metrics across the trainer
+        population. Results are logged to per-layer TensorBoard writers
+        under `disco/` so that layers overlay on the same charts.
+        """
+        # Accumulate per-trainer diagnostics
+        accum: Dict[str, List[float]] = defaultdict(list)
+
+        disco_in_features = self.meta_agent._disco_net.in_features
+
+        for i in range(self.num_trainers):
+            disco_h, _ = self.state.hidden.get(i)
+            batch_size = jnp.shape(disco_h)[0]
+            x = jnp.zeros((batch_size, disco_in_features))
+
+            diag = self.meta_agent._disco_net.diagnostics(x, disco_h)
+            for key, value in diag.items():
+                accum[key].append(value)
+
+        # Average across trainers and log to per-layer writers
+        averaged = {key: sum(vals) / len(vals) for key, vals in accum.items()}
+        self.logger.log_group("disco", self.state.meta_step, averaged)
 
     def _apply_meta_update(self, avg_grad: chex.ArrayTree) -> None:
         """

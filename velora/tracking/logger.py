@@ -19,7 +19,7 @@ import sys
 from concurrent.futures import ThreadPoolExecutor
 from io import TextIOWrapper
 from pathlib import Path
-from typing import Dict
+from typing import Dict, List
 
 from tensorboardX import SummaryWriter
 
@@ -183,6 +183,45 @@ class MetricsLogger:
         writer_dir = self.root_dir / name
         writer_dir.mkdir(parents=True, exist_ok=True)
         self.writers[name] = SummaryWriter(str(writer_dir))
+
+    def add_writer_group(self, prefix: str, names: List[str]) -> None:
+        """
+        Add a group of related TensorBoard writers under a shared prefix.
+
+        Each writer is created as `prefix/name`, enabling TensorBoard to
+        overlay metrics with the same tag across writers on a single chart.
+
+        Parameters
+        ----------
+        prefix : str
+            Shared prefix for the group (e.g., `disco`)
+        names : List[str]
+            Writer names within the group (e.g., `["inter", "command", "network"]`)
+        """
+        for name in names:
+            self.add_writer(f"{prefix}/{name}")
+
+    def log_group(self, prefix: str, step: int, metrics: Dict[str, float]) -> None:
+        """
+        Log metrics to per-layer writers under a shared prefix.
+
+        Splits `"layer/metric"` keyed metrics by layer and logs each to
+        its corresponding `prefix/layer` writer with the tag `prefix/metric`.
+        TensorBoard overlays same-tagged metrics from different writers
+        as separate lines on a single chart.
+
+        Parameters
+        ----------
+        prefix : str
+            Shared prefix matching writers created via `add_writer_group`
+        step : int
+            Training step number
+        metrics : Dict[str, float]
+            Mapping of `"layer/metric"` keys to scalar values
+        """
+        for key, value in metrics.items():
+            layer, metric = key.split("/", 1)
+            self.log(f"{prefix}/{layer}", step, {f"{prefix}/{metric}": value})
 
     def log(self, writer_name: str, step: int, metrics: dict) -> None:
         """
