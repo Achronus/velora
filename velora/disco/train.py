@@ -659,12 +659,10 @@ class RuleTrainer:
         # Init logger - one writer per unique env
         self.logger = MetricsLogger(self.config.run.log_dir)
         self.logger.add_writer("meta")
+        self.logger.add_writer_group("envs", envs.unique_names())
 
         # Init runtime logger - capture warnings and stderr to runtime.log
         self.runtime_logger = RuntimeLogger(self.config.run.dirpath)
-
-        for name, _ in self._unique_env_specs:
-            self.logger.add_writer(f"envs/{name}")
 
         # Configure RNG keys
         key = jax.random.key(seed)

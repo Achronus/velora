@@ -384,7 +384,24 @@ class EnvSet:
         names = []
         for group in self._groups:
             names.extend(group.all_names(version))
+
         return names
+
+    def unique_names(self, version: str | None = None) -> List[str]:
+        """
+        Get all unique environment names across all groups.
+
+        Parameters
+        ----------
+        version : str (optional)
+            The version suffix. Default is `None`
+
+        Returns
+        -------
+        names : List[str]
+            List of unique environment names
+        """
+        return list(set(self.all_names(version)))
 
     def as_list(self) -> List[Tuple[str, MakeFn]]:
         """
