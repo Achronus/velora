@@ -23,7 +23,7 @@ from flax import nnx
 from flax.typing import Initializer
 
 from velora.base.spec import HeadSpec, LayerSpec
-from velora.lnn.cell import CellConfig, NCPLiquidCell
+from velora.lnn.cell import AdaptiveLiquidCell, CellConfig
 from velora.lnn.constants import DEFAULT_HIDDEN_INIT
 from velora.lnn.spec import NCPWiringSpec
 from velora.utils.nn import active_parameters, total_parameters
@@ -48,9 +48,9 @@ class BaseCfC(nnx.Module):
         - `_scan()` - Core forward pass logic
 
     Layers -
-        1. Inter (input) - a `NCPLiquidCell` layer
-        2. Command (hidden) - a `NCPLiquidCell` layer
-        3. Motor (output) - one or more `NCPLiquidCell` layers controlled through subclasses
+        1. Inter (input) - a `AdaptiveLiquidCell` layer
+        2. Command (hidden) - a `AdaptiveLiquidCell` layer
+        3. Motor (output) - one or more `AdaptiveLiquidCell` layers controlled through subclasses
 
     ??? note "Decision nodes"
 
@@ -89,7 +89,7 @@ class BaseCfC(nnx.Module):
 
     cell : CellConfig (optional)
         Cell configuration created via an `NCPLiquidCell.config()` class method.
-        Default is `None` (uses `NCPLiquidCell`).
+        Default is `None` (uses `AdaptiveLiquidCell`).
 
         Examples:
 
@@ -103,7 +103,7 @@ class BaseCfC(nnx.Module):
         When `_build_wiring()` is not implemented
     """
 
-    _head_cells: nnx.List[NCPLiquidCell]
+    _head_cells: nnx.List[AdaptiveLiquidCell]
 
     def __init__(
         self,
@@ -121,7 +121,7 @@ class BaseCfC(nnx.Module):
         self.init_type = init_type
         self.key = key
 
-        self._cell = cell or CellConfig(NCPLiquidCell)
+        self._cell = cell or CellConfig(AdaptiveLiquidCell)
 
         self.seed = jax.random.key_data(key)[-1].item()
         self.rngs = nnx.Rngs(params=self.key)
