@@ -1568,11 +1568,8 @@ class RuleTrainer:
 
                 # Log metrics
                 grad_norm = float(optax.global_norm(avg_grad))
-                metrics = {
-                    "meta/grad_norm": grad_norm,
-                    **stats.summary("meta/"),
-                    "meta/step": self.state.meta_step,
-                }
+
+                metrics = {"meta/grad_norm": grad_norm}
                 self.logger.log("meta", self.state.meta_step, metrics)
                 self._compute_diagnostics()
 
