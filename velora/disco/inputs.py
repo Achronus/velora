@@ -19,7 +19,9 @@ import chex
 import optax
 
 from velora.disco.ema import EMAState
-from velora.disco.rollouts import Rollout
+from velora.disco.rollouts import ContinuousRollout, Rollout
+
+AnyRollout = Rollout | ContinuousRollout
 
 
 class GradChunkInputs(NamedTuple):
@@ -47,12 +49,12 @@ class GradChunkInputs(NamedTuple):
         Advantage EMA states
     td_ema : EMAState
         TD-error EMA states
-    train_rollout : Rollout
+    train_rollout : Rollout | ContinuousRollout
         Training rollouts `(C, N, B, T, ...)`
-    valid_rollout : Rollout
+    valid_rollout : Rollout | ContinuousRollout
         Validation rollouts `(C, 1, B, T, ...)`
-    action_masks : chex.Array
-        Action masks `(C, max_actions)`
+    masks : chex.Array
+        Boolean masks `(C, max_action_size)` for valid actions/dims
     """
 
     p_params: optax.Params
@@ -63,6 +65,6 @@ class GradChunkInputs(NamedTuple):
     v_opt: optax.OptState
     adv_ema: EMAState
     td_ema: EMAState
-    train_rollout: Rollout
-    valid_rollout: Rollout
-    action_masks: chex.Array
+    train_rollout: AnyRollout
+    valid_rollout: AnyRollout
+    masks: chex.Array

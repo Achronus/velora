@@ -14,7 +14,7 @@
 # ==============================================================================
 
 from abc import abstractmethod
-from typing import List, Self
+from typing import Any, List, Self
 
 import chex
 import jax
@@ -476,6 +476,23 @@ class RolloutBufferBase:
         """Return all pre-allocated arrays."""
         pass
 
+    @abstractmethod
+    def write_step_batched(self, *args, **kwargs) -> None:
+        """
+        Write one timestep for ALL trainers simultaneously.
+
+        All inputs have a leading `(P, ...)` dimension. Uses
+        `np.copyto` into pre-allocated memory — zero allocations.
+        """
+        raise NotImplementedError()
+
+    @abstractmethod
+    def get_chunk(self, *args, **kwargs) -> Any:
+        """
+        Slice trainers `[start:end]` and transfer to accelerator as a `Rollout`.
+        """
+        raise NotImplementedError()
+
 
 class PoolRolloutBuffer(RolloutBufferBase):
     """
@@ -833,6 +850,21 @@ class ContinuousPoolRolloutBuffer(RolloutBufferBase):
 
         All inputs have a leading `(P, ...)` dimension. Uses
         `np.copyto` into pre-allocated memory — zero allocations.
+
+        Parameters
+        ----------
+        actions : np.ndarray
+            `(P, B, 1)` int32
+        rewards : np.ndarray
+            `(P, B, 1)` float32
+        discounts : np.ndarray
+            `(P, B, 1)` float32
+        values : np.ndarray
+            `(P, B, 1)` float32
+        preds : ContinuousPolicyAgentOutput
+            Policy predictions with fields `(P, B, ...)` as numpy
+        target_preds : ContinuousPolicyAgentOutput
+            Target predictions with fields `(P, B, ...)` as numpy
         """
         n = self._rollout_idx
         t = self._step_idx

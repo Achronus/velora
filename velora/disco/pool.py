@@ -13,7 +13,7 @@
 # limitations under the License.
 # ==============================================================================
 
-from typing import TYPE_CHECKING, Callable, Dict, List
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Type
 
 import chex
 import jax
@@ -23,13 +23,17 @@ import optax
 
 from velora.disco.inputs import GradChunkInputs
 from velora.disco.outputs import HiddenShapeCache, MetaGradOutput
-from velora.disco.rollouts import PoolRolloutBuffer
+from velora.disco.rollouts import (
+    ContinuousPoolRolloutBuffer,
+    PoolRolloutBuffer,
+    RolloutBufferBase,
+)
 from velora.gym.workers import EnvWorkerPool
 from velora.tracking.episode import EpisodeTracker
 from velora.utils.transforms import stack_pytrees
 
 if TYPE_CHECKING:
-    from velora.disco.train import AgentTrainer
+    from velora.disco.train import AgentTrainer, ContinuousAgentTrainer
 
 
 class TrainerPool:
@@ -76,11 +80,14 @@ class TrainerPool:
         Prediction vector size (`y` and `z`)
     q_dim : int
         Distributional Q-value bin count
+    env_worker_pool : EnvWorkerPool
+        Subprocess worker pool for parallel environment stepping
+    buffer_type : Type[RolloutBufferBase] (optional)
+        Rollout buffer class to use for train/valid buffers.
+        Default is `PoolRolloutBuffer`
     use_bfloat16 : bool (optional)
         Cast rollout floats to `bfloat16` on accelerator transfer.
         Default is `True`
-    env_worker_pool : EnvWorkerPool
-        Subprocess worker pool for parallel environment stepping
     """
 
     def __init__(
@@ -97,6 +104,7 @@ class TrainerPool:
         q_dim: int,
         env_worker_pool: EnvWorkerPool,
         *,
+        buffer_type: Type[RolloutBufferBase] = PoolRolloutBuffer,
         use_bfloat16: bool = True,
     ) -> None:
         self.num_trainers = len(trainers)
@@ -148,27 +156,29 @@ class TrainerPool:
         self.obs = self._env_workers.initial_obs.copy()
 
         # Rollout buffers — numpy (P, N, B, T, ...)
-        self.train_buffer = PoolRolloutBuffer(
-            num_trainers=self.num_trainers,
-            n_rollouts=n_updates,
+        buf_kwargs: Dict[str, Any] = dict(
             n_envs=batch_size,
-            seq_len=seq_len,
             n_actions=max_actions,
             encoding_dim=encoding_dim,
             prediction_dim=prediction_dim,
             q_dim=q_dim,
             use_bfloat16=use_bfloat16,
         )
-        self.valid_buffer = PoolRolloutBuffer(
+
+        if buffer_type is ContinuousPoolRolloutBuffer:
+            buf_kwargs.pop("q_dim")
+
+        self.train_buffer = buffer_type(
+            num_trainers=self.num_trainers,
+            n_rollouts=n_updates,
+            seq_len=seq_len,
+            **buf_kwargs,
+        )
+        self.valid_buffer = buffer_type(
             num_trainers=self.num_trainers,
             n_rollouts=1,
-            n_envs=batch_size,
             seq_len=seq_len * 2,
-            n_actions=max_actions,
-            encoding_dim=encoding_dim,
-            prediction_dim=prediction_dim,
-            q_dim=q_dim,
-            use_bfloat16=use_bfloat16,
+            **buf_kwargs,
         )
 
     def _init_hidden(self, trainers: List["AgentTrainer"]) -> None:
@@ -390,7 +400,7 @@ class TrainerPool:
             td_ema=_s(self.td_ema),
             train_rollout=self.train_buffer.get_chunk(start, end),
             valid_rollout=self.valid_buffer.get_chunk(start, end, squeeze_n=True),
-            action_masks=self.action_masks[s],
+            masks=self.action_masks[s],
         )
 
     def update_from_grad(
@@ -549,3 +559,196 @@ class TrainerPool:
     def close(self) -> None:
         """Close all environments and worker pool."""
         self._env_workers.close()
+
+
+class ContinuousTrainerPool(TrainerPool):
+    """
+    Manages multiple continuous-action agent trainer states as permanently
+    stacked arrays.
+
+    Extends `TrainerPool` for continuous action spaces by:
+        - Gaussian reparameterized action sampling instead of Gumbel-argmax
+        - Tracking previous actions for action-conditional forward passes
+
+    Parameters
+    ----------
+    trainers : List[ContinuousAgentTrainer]
+        Initialized trainers to pool
+    max_action_dim : int
+        Maximum continuous action dimensionality across all environments
+    action_masks : Dict[int, chex.Array]
+        Pre-computed action dimension masks keyed by `action_dim`
+    hidden_shapes : HiddenShapeCache
+        Cached hidden state shapes for zero-initialization
+    n_updates : int
+        Number of training rollouts per collection phase
+    seq_len : int
+        Timesteps per rollout
+    batch_size : int
+        Number of vectorized environments per trainer
+    encoding_dim : int
+        Encoder output dimensionality
+    prediction_dim : int
+        Prediction vector size (`y` and `z`)
+    env_worker_pool : EnvWorkerPool
+        Subprocess worker pool for parallel environment stepping
+    use_bfloat16 : bool (optional)
+        Cast rollout floats to `bfloat16` on accelerator transfer.
+        Default is `True`
+    """
+
+    def __init__(
+        self,
+        trainers: List["ContinuousAgentTrainer"],
+        max_action_dim: int,
+        action_masks: Dict[int, chex.Array],
+        hidden_shapes: HiddenShapeCache,
+        n_updates: int,
+        seq_len: int,
+        batch_size: int,
+        encoding_dim: int,
+        prediction_dim: int,
+        env_worker_pool: EnvWorkerPool,
+        *,
+        use_bfloat16: bool = True,
+    ) -> None:
+        super().__init__(
+            trainers,  # type: ignore
+            max_actions=max_action_dim,
+            action_masks=action_masks,
+            hidden_shapes=hidden_shapes,
+            n_updates=n_updates,
+            seq_len=seq_len,
+            batch_size=batch_size,
+            encoding_dim=encoding_dim,
+            prediction_dim=prediction_dim,
+            q_dim=1,  # placeholder, unused
+            env_worker_pool=env_worker_pool,
+            buffer_type=ContinuousPoolRolloutBuffer,
+            use_bfloat16=use_bfloat16,
+        )
+
+        # Track previous actions for action-conditional forward passes
+        self.prev_actions = np.zeros(
+            (self.num_trainers, batch_size, max_action_dim),
+            dtype=np.float32,
+        )
+
+    def collect(
+        self,
+        batched_forward_fn: Callable,
+        n_rollouts: int,
+        seq_len: int,
+        training: bool,
+    ) -> None:
+        """
+        Run one collection phase using batched accelerator forward passes.
+
+        Extends the discrete variant with previous action input to the
+        forward function and Gaussian reparameterized action sampling.
+
+        Parameters
+        ----------
+        batched_forward_fn : Callable
+            JIT + vmap compiled forward function
+        n_rollouts : int
+            Number of rollouts to collect
+        seq_len : int
+            Timesteps per rollout
+        training : bool
+            Whether this is training (uses `train_buffer`) or
+            validation (uses `valid_buffer`)
+        """
+        buffer = self.train_buffer if training else self.valid_buffer
+        P = self.num_trainers
+
+        for _ in range(n_rollouts):
+            for _ in range(seq_len):
+                obs_jax = jnp.asarray(self.obs)
+                action_jax = jnp.asarray(self.prev_actions)
+
+                (
+                    preds,
+                    target_preds,
+                    values,
+                    self.p_ocm_h,
+                    self.p_acm_h,
+                    self.t_ocm_h,
+                    self.t_acm_h,
+                    self.v_h,
+                ) = batched_forward_fn(
+                    obs_jax,
+                    action_jax,
+                    self.p_params,
+                    self.t_params,
+                    self.v_params,
+                    self.p_ocm_h,
+                    self.p_acm_h,
+                    self.t_ocm_h,
+                    self.t_acm_h,
+                    self.v_h,
+                    self.action_masks,
+                )
+
+                preds_cpu, target_preds_cpu, values_cpu = jax.device_get(
+                    (preds, target_preds, values)
+                )
+                values_np = np.asarray(values_cpu)
+
+                # Gaussian reparameterized action sampling
+                all_mu = np.asarray(preds_cpu.mu)
+                all_log_std = np.asarray(preds_cpu.log_std)
+
+                if all_mu.ndim == 4:
+                    all_mu = all_mu.squeeze(axis=2)
+                    all_log_std = all_log_std.squeeze(axis=2)
+
+                std = np.exp(all_log_std)
+                noise = np.random.randn(*all_mu.shape).astype(np.float32)
+                all_actions = (all_mu + std * noise).astype(np.float32)
+
+                # Parallel env stepping via subprocess workers
+                next_obs, rewards, terminated, truncated = self._env_workers.step_all(
+                    all_actions
+                )
+
+                np.copyto(self.obs, next_obs)
+                np.copyto(self.prev_actions, all_actions)
+
+                all_rewards = rewards[:, :, np.newaxis].astype(np.float32)
+                all_discounts = np.where(
+                    terminated | truncated,
+                    np.float32(0.0),
+                    np.float32(1.0),
+                )[:, :, np.newaxis]
+
+                if training:
+                    for i in range(P):
+                        self.episode_trackers[i].record(
+                            rewards[i],
+                            terminated[i],
+                            truncated[i],
+                        )
+
+                buffer.write_step_batched(
+                    all_actions,
+                    all_rewards,
+                    all_discounts,
+                    values_np,
+                    preds_cpu,
+                    target_preds_cpu,
+                )
+
+                # Reset hidden states on episode boundaries
+                mask = jnp.asarray(all_discounts).squeeze(-1)  # (P, B)
+                self.p_ocm_h = self.p_ocm_h * mask[..., None]
+                self.p_acm_h = self.p_acm_h * mask[..., None]
+                self.t_ocm_h = self.t_ocm_h * mask[..., None]
+                self.t_acm_h = self.t_acm_h * mask[..., None]
+                self.v_h = self.v_h * mask[..., None]
+
+                # Zero prev_actions on episode boundaries
+                mask_np = np.asarray(all_discounts).squeeze(-1)  # (P, B)
+                self.prev_actions *= mask_np[..., None]
+
+            buffer.next_rollout()
