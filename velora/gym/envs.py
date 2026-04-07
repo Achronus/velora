@@ -22,7 +22,12 @@ import numpy as np
 from gymnasium.vector import VectorEnv
 
 from velora.gym.error import MissingPackageError
-from velora.gym.make import make_atari_env
+from velora.gym.make import (
+    make_atari_env,
+    make_box2d_env,
+    make_dmc_env,
+    make_mujoco_env,
+)
 
 MakeFn = Callable[..., VectorEnv]
 
@@ -337,6 +342,138 @@ class AtariEnvs(EnvGroup):
         return f"{self.prefix}/{env}-{ver}"
 
 
+@dataclass
+class MuJoCoEnvs(EnvGroup):
+    """
+    [MuJoCo](https://mujoco.org/) continuous control environments.
+
+    13 standard continuous control benchmarks via Gymnasium v5.
+    """
+
+    prefix: str = ""
+    category: str = "MuJoCo"
+    version: str = "v5"
+    required_packages: List[str] = field(
+        default_factory=lambda: ["gymnasium", "mujoco"]
+    )
+    envs: List[str] = field(
+        default_factory=lambda: [
+            "Ant",
+            "HalfCheetah",
+            "Hopper",
+            "Humanoid",
+            "HumanoidStandup",
+            "InvertedDoublePendulum",
+            "InvertedPendulum",
+            "Pusher",
+            "Reacher",
+            "Striker",
+            "Swimmer",
+            "Thrower",
+            "Walker2d",
+        ]
+    )
+
+    @property
+    def make_fn(self) -> MakeFn:
+        """Factory function for creating MuJoCo environments."""
+        return make_mujoco_env
+
+    def get_name(self, env: str, version: str | None = None) -> str:
+        """Get full name: {env}-v5"""
+        ver = version if version is not None else self.version
+        return f"{env}-{ver}"
+
+
+@dataclass
+class DMCEnvs(EnvGroup):
+    """
+    [DeepMind Control Suite](https://github.com/google-deepmind/dm_control)
+    environments via [shimmy](https://shimmy.farama.org/).
+
+    21 continuous control environments with diverse dynamics and reward structures.
+    """
+
+    prefix: str = "dm_control"
+    category: str = "DMC"
+    version: str = "v0"
+    required_packages: List[str] = field(
+        default_factory=lambda: ["gymnasium", "shimmy", "dm_control"]
+    )
+    envs: List[str] = field(
+        default_factory=lambda: [
+            "acrobot-swingup",
+            "ball_in_cup-catch",
+            "cartpole-balance",
+            "cartpole-swingup",
+            "cheetah-run",
+            "finger-spin",
+            "finger-turn_easy",
+            "finger-turn_hard",
+            "fish-swim",
+            "fish-upright",
+            "hopper-hop",
+            "hopper-stand",
+            "humanoid-run",
+            "humanoid-stand",
+            "humanoid-walk",
+            "pendulum-swingup",
+            "point_mass-easy",
+            "reacher-easy",
+            "reacher-hard",
+            "walker-stand",
+            "walker-walk",
+        ]
+    )
+
+    @property
+    def make_fn(self) -> MakeFn:
+        """Factory function for creating DMC environments."""
+        return make_dmc_env
+
+    def get_name(self, env: str, version: str | None = None) -> str:
+        """Get full name: dm_control/{domain}-{task}-v0"""
+        ver = version if version is not None else self.version
+        return f"{self.prefix}/{env}-{ver}"
+
+
+@dataclass
+class Box2DEnvs(EnvGroup):
+    """
+    [Box2D](https://box2d.org/) and Gymnasium classic control environments
+    with continuous action spaces.
+
+    6 environments spanning procedural terrain, thrust control, and
+    classic control problems.
+    """
+
+    prefix: str = ""
+    category: str = "Box2D"
+    version: str = ""
+    required_packages: List[str] = field(
+        default_factory=lambda: ["gymnasium", "box2d-py"]
+    )
+    envs: List[str] = field(
+        default_factory=lambda: [
+            "BipedalWalker-v3",
+            "BipedalWalkerHardcore-v3",
+            "CarRacing-v3",
+            "LunarLanderContinuous-v3",
+            "MountainCarContinuous-v0",
+            "Pendulum-v1",
+        ]
+    )
+
+    @property
+    def make_fn(self) -> MakeFn:
+        """Factory function for creating Box2D environments."""
+        return make_box2d_env
+
+    def get_name(self, env: str, version: str | None = None) -> str:
+        """Get full name (version already included in env name)."""
+        return env
+
+
 class EnvSet:
     """
     A collection of environment groups for training across multiple suites.
@@ -596,3 +733,72 @@ ATARI_HARD = AtariEnvs(
     ],
 )
 ATARI_57 = AtariEnvs()
+
+MUJOCO_LOCOMOTION = MuJoCoEnvs(
+    envs=[
+        "Ant",
+        "HalfCheetah",
+        "Hopper",
+        "Humanoid",
+        "HumanoidStandup",
+        "Swimmer",
+        "Walker2d",
+    ],
+)
+MUJOCO_MANIPULATION = MuJoCoEnvs(
+    envs=[
+        "Pusher",
+        "Reacher",
+        "Striker",
+        "Thrower",
+    ],
+)
+MUJOCO_BALANCE = MuJoCoEnvs(
+    envs=[
+        "InvertedDoublePendulum",
+        "InvertedPendulum",
+    ],
+)
+MUJOCO_13 = MuJoCoEnvs()
+
+DMC_SIMPLE = DMCEnvs(
+    envs=[
+        "acrobot-swingup",
+        "cartpole-balance",
+        "cartpole-swingup",
+        "pendulum-swingup",
+        "point_mass-easy",
+    ],
+)
+DMC_MANIPULATION = DMCEnvs(
+    envs=[
+        "ball_in_cup-catch",
+        "finger-spin",
+        "finger-turn_easy",
+        "finger-turn_hard",
+        "reacher-easy",
+        "reacher-hard",
+    ],
+)
+DMC_LOCOMOTION = DMCEnvs(
+    envs=[
+        "cheetah-run",
+        "fish-swim",
+        "fish-upright",
+        "hopper-hop",
+        "hopper-stand",
+        "walker-stand",
+        "walker-walk",
+    ],
+)
+DMC_COMPLEX = DMCEnvs(
+    envs=[
+        "humanoid-run",
+        "humanoid-stand",
+        "humanoid-walk",
+    ],
+)
+DMC_21 = DMCEnvs()
+BOX2D_6 = Box2DEnvs()
+
+CONTINUOUS_40 = EnvSet(MUJOCO_13, DMC_21, BOX2D_6)

@@ -14,10 +14,8 @@
 # ==============================================================================
 
 import os
-import sys
 from functools import partial
 
-import ale_py
 import gymnasium as gym
 from gymnasium.vector import VectorEnv
 from gymnasium.wrappers import AtariPreprocessing, FrameStackObservation, TimeLimit
@@ -25,8 +23,6 @@ from gymnasium.wrappers.vector import RecordEpisodeStatistics
 
 from velora.gym.error import MissingPackageError
 from velora.gym.wrappers import FrameStackReshape
-
-gym.register_envs(ale_py)
 
 
 def _make_silent_env(
@@ -119,10 +115,14 @@ def make_atari_env(
     envs : JaxConversion
         A set of wrapped vectorized environments
     """
-    if "ale_py" not in sys.modules:
+    try:
+        import ale_py
+
+        gym.register_envs(ale_py)
+    except ImportError:
         raise MissingPackageError(
             "Atari environments require 'ale-py'. "
-            "Install with: pip install 'gymnasium[atari]'"
+            "Install with: pip install 'velora[discrete]'"
         )
 
     # Compute effective step limit - use smaller than max where possible
@@ -159,4 +159,159 @@ def make_atari_env(
     ]
 
     envs = gym.vector.SyncVectorEnv(env_fns)
+    return RecordEpisodeStatistics(envs)
+
+
+def make_mujoco_env(
+    name: str,
+    num_envs: int = 4,
+    max_episode_steps: int = 1000,
+    render_mode: str = "rgb_array",
+    **kwargs,
+) -> VectorEnv:
+    """
+    Creates a sync vectorized [MuJoCo](https://mujoco.org/) environment.
+
+    Applies wrappers -
+    - `gymnasium.wrappers.vector.RecordEpisodeStatistics`
+
+    Parameters
+    ----------
+    name : str
+        Name of the environment (e.g., `Ant-v5`)
+    num_envs : int (optional)
+        The number of vectorized environments to make. Default is `4`
+    max_episode_steps : int (optional)
+        Maximum number of episode steps. Default is `1000`
+    render_mode : str (optional)
+        The type of render mode for the environment.
+        Default is `rgb_array`
+    kwargs : Any (optional)
+        Additional arguments passed to `gym.make_vec()`
+
+    Returns
+    -------
+    envs : VectorEnv
+        A set of wrapped vectorized environments
+    """
+    try:
+        import mujoco  # noqa: F401, # type: ignore
+    except ImportError:
+        raise MissingPackageError(
+            "MuJoCo environments require 'mujoco'. "
+            "Install with: pip install 'velora[continuous]'"
+        )
+
+    envs = gym.make_vec(
+        name,
+        num_envs=num_envs,
+        vectorization_mode="sync",
+        render_mode=render_mode,
+        max_episode_steps=max_episode_steps,
+        **kwargs,
+    )
+    return RecordEpisodeStatistics(envs)
+
+
+def make_dmc_env(
+    name: str,
+    num_envs: int = 4,
+    max_episode_steps: int = 1000,
+    render_mode: str = "rgb_array",
+    **kwargs,
+) -> VectorEnv:
+    """
+    Creates a sync vectorized
+    [DeepMind Control Suite](https://github.com/google-deepmind/dm_control)
+    environment via [shimmy](https://shimmy.farama.org/).
+
+    Applies wrappers -
+    - `gymnasium.wrappers.vector.RecordEpisodeStatistics`
+
+    Parameters
+    ----------
+    name : str
+        Name of the environment (e.g., `dm_control/acrobot-swingup-v0`)
+    num_envs : int (optional)
+        The number of vectorized environments to make. Default is `4`
+    max_episode_steps : int (optional)
+        Maximum number of episode steps. Default is `1000`
+    render_mode : str (optional)
+        The type of render mode for the environment.
+        Default is `rgb_array`
+    kwargs : Any (optional)
+        Additional arguments passed to `gym.make_vec()`
+
+    Returns
+    -------
+    envs : VectorEnv
+        A set of wrapped vectorized environments
+    """
+    try:
+        import shimmy  # noqa: F401, # type: ignore
+    except ImportError:
+        raise MissingPackageError(
+            "DMC environments require 'shimmy[dm_control]'. "
+            "Install with: pip install 'velora[continuous]'"
+        )
+
+    envs = gym.make_vec(
+        name,
+        num_envs=num_envs,
+        vectorization_mode="sync",
+        render_mode=render_mode,
+        max_episode_steps=max_episode_steps,
+        **kwargs,
+    )
+    return RecordEpisodeStatistics(envs)
+
+
+def make_box2d_env(
+    name: str,
+    num_envs: int = 4,
+    max_episode_steps: int = 1000,
+    render_mode: str = "rgb_array",
+    **kwargs,
+) -> VectorEnv:
+    """
+    Creates a sync vectorized [Box2D](https://box2d.org/) environment.
+
+    Applies wrappers -
+    - `gymnasium.wrappers.vector.RecordEpisodeStatistics`
+
+    Parameters
+    ----------
+    name : str
+        Name of the environment (e.g., `BipedalWalker-v3`)
+    num_envs : int (optional)
+        The number of vectorized environments to make. Default is `4`
+    max_episode_steps : int (optional)
+        Maximum number of episode steps. Default is `1000`
+    render_mode : str (optional)
+        The type of render mode for the environment.
+        Default is `rgb_array`
+    kwargs : Any (optional)
+        Additional arguments passed to `gym.make_vec()`
+
+    Returns
+    -------
+    envs : VectorEnv
+        A set of wrapped vectorized environments
+    """
+    try:
+        import Box2D  # noqa: F401, # type: ignore
+    except ImportError:
+        raise MissingPackageError(
+            "Box2D environments require 'box2d-py'. "
+            "Install with: pip install 'velora[continuous]'"
+        )
+
+    envs = gym.make_vec(
+        name,
+        num_envs=num_envs,
+        vectorization_mode="sync",
+        render_mode=render_mode,
+        max_episode_steps=max_episode_steps,
+        **kwargs,
+    )
     return RecordEpisodeStatistics(envs)
