@@ -20,9 +20,8 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 dependencies = [
-    "ale-py>=0.11.2",
     "flax==0.12.6",
-    "gymnasium[other]>=1.2.3",
+    "gymnasium>=1.2.3",
     "jax==0.9.2",
     "orbax-checkpoint==0.11.26",
     "optax==0.2.8",
@@ -30,6 +29,12 @@ dependencies = [
     "tensorboardx>=2.6.4",
     "chex>=0.1.91",
 ]
+
+[project.optional-dependencies]
+discrete = ["ale-py>=0.11.2", "gymnasium[other]>=1.2.3"]
+continuous = ["mujoco>=3.0", "gymnasium[box2d]>=1.2.3"]
+dmc = ["shimmy[dm_control]>=2.0"]
+all = ["velora[discrete]", "velora[continuous]", "velora[dmc]"]
 
 [project.urls]
 repository = "https://github.com/Achronus/velora"
@@ -45,6 +50,7 @@ docs = [
     "mkdocstrings-python==2.0.3",
 ]
 notebook = ["notebook==7.5.5", "ipywidgets>=8.1.8"]
+all = ["velora[discrete]", "velora[continuous]", "velora[dmc]"]
 
 [tool.setuptools.packages.find]
 include = ["velora*"]

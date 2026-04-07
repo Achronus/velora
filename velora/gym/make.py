@@ -252,7 +252,7 @@ def make_dmc_env(
     except ImportError:
         raise MissingPackageError(
             "DMC environments require 'shimmy[dm_control]'. "
-            "Install with: pip install 'velora[continuous]'"
+            "Install with: pip install 'velora[dmc]'"
         )
 
     envs = gym.make_vec(
