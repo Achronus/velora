@@ -17,6 +17,8 @@ from dataclasses import dataclass, field
 from importlib.util import find_spec
 from typing import Callable, Dict, Iterator, List, Self, Tuple, Union
 
+import gymnasium as gym
+import numpy as np
 from gymnasium.vector import VectorEnv
 
 from velora.gym.error import MissingPackageError
@@ -428,6 +430,39 @@ class EnvSet:
             counts[g.category] = counts.get(g.category, 0) + g.n_envs
 
         return counts
+
+    def max_action_count(self, batch_size: int) -> int:
+        """
+        Probe each unique environment to determine the maximum action count.
+
+        For discrete spaces (`gym.spaces.Discrete`), returns the max number of
+        actions. For continuous spaces (`gym.spaces.Box`), returns the max
+        action dimensionality.
+
+        Parameters
+        ----------
+        batch_size : int
+            Number of vectorized environments to create per probe
+
+        Returns
+        -------
+        max_actions : int
+            Maximum action count or dimensionality across all environments
+        """
+        max_actions = 0
+
+        for env_name, make_fn in self.as_list():
+            env = make_fn(env_name, batch_size)
+            action_space = env.single_action_space
+
+            if isinstance(action_space, gym.spaces.Discrete):
+                max_actions = max(max_actions, action_space.n.item())
+            elif isinstance(action_space, gym.spaces.Box):
+                max_actions = max(max_actions, int(np.prod(action_space.shape)))
+
+            env.close()
+
+        return max_actions
 
     def __iter__(self) -> Iterator[Tuple[str, MakeFn]]:
         """Iterate over (env_name, make_fn) tuples from all groups."""

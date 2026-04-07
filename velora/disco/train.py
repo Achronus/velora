@@ -16,7 +16,7 @@
 import math
 import random
 from collections import defaultdict
-from typing import Callable, Dict, List, Self, Tuple
+from typing import Callable, Dict, List, Self, Tuple, override
 
 import chex
 import gymnasium as gym
@@ -25,6 +25,7 @@ import jax.numpy as jnp
 import numpy as np
 import optax
 import orbax.checkpoint as ocp
+from flax import nnx
 
 from velora.cli.disco.dashboard import DiscoConsoleDashboard
 from velora.cli.disco.settings import DiscoParamsSettings
@@ -32,9 +33,12 @@ from velora.cli.disco.simple import SimpleDashboard
 from velora.compute.loss import (
     compute_discrete_policy_gradient_loss,
     compute_entropy_loss,
+    compute_gaussian_entropy_loss,
+    compute_gaussian_policy_gradient_loss,
 )
 from velora.compute.mixflow import fwdrev_value_and_grad
 from velora.disco.agent import (
+    ContinuousDiscoAgent,
     ContinuousPolicyAgent,
     DiscoAgent,
     DiscoValueAgent,
@@ -49,7 +53,11 @@ from velora.disco.config.state import (
 )
 from velora.disco.ema import EMAState, MovingAverage
 from velora.disco.outputs import (
+    AgentLosses,
     ChunkLogData,
+    ContinuousDiscoAgentOutput,
+    ContinuousPolicyAgentOutput,
+    DiscoAgentOutput,
     HiddenShapeCache,
     LossStatistics,
     MetaGradOutput,
@@ -58,14 +66,19 @@ from velora.disco.outputs import (
     MetaStepStats,
     ValueOutputs,
 )
-from velora.disco.pool import TrainerPool
+from velora.disco.pool import ContinuousTrainerPool, TrainerPool
 from velora.disco.rollouts import ContinuousRollout, Rollout
 from velora.disco.utils.budget import sample_budget
 from velora.disco.utils.compute import (
     compute_continuous_value_outputs,
     compute_value_outputs,
 )
-from velora.disco.utils.loss import compute_meta_reg_loss, compute_policy_loss
+from velora.disco.utils.loss import (
+    compute_continuous_meta_reg_loss,
+    compute_continuous_policy_loss,
+    compute_meta_reg_loss,
+    compute_policy_loss,
+)
 from velora.gym.envs import EnvGroup, EnvSet, MakeFn
 from velora.gym.workers import EnvWorkerPool
 from velora.nn.optim import scale_by_adan_no_denom
@@ -538,7 +551,7 @@ class ContinuousAgentTrainer(AgentTrainerBase):
 class RuleTrainer:
     """
     Discovers a Reinforcement Learning (RL) update rule by meta-training across
-    a population of agents spanning diverse environments.
+    a population of agents spanning diverse environments. This trainer is suitable for discrete action spaces (`gym.spaces.Discrete`).
 
     `RuleTrainer` handles the outer loop of target rule learning (DiscoRL): managing
     a population of `AgentTrainer`s, computing meta-gradients from their learning
@@ -627,6 +640,7 @@ class RuleTrainer:
         envs.verify_packages()
 
         # Setup envs
+        self._env_set = envs
         _unique_env_specs = envs.as_list()
         self._env_specs = _unique_env_specs * agents_per_env
         self._env_specs.sort(key=lambda x: x[0])  # group same-game slots together
@@ -694,7 +708,7 @@ class RuleTrainer:
         self.cp_manager = CheckpointManager(self.config.run)
 
         # Batch functions
-        self.max_actions = self._compute_max_actions()
+        self.max_actions = envs.max_action_count(self.config.batch_size)
         self._batch_grad_fn: Callable[..., MetaGradOutput] = None  # type: ignore
         self._batched_collect_fn: Callable = None  # type: ignore
 
@@ -726,6 +740,40 @@ class RuleTrainer:
         else:
             self.console = SimpleDashboard(self.n_steps)
 
+    def _create_dummy_policy(
+        self,
+        obs_space: gym.spaces.Box,
+        act_space: gym.Space,
+        config: AgentTrainerSettings,
+        rng_key: chex.PRNGKey,
+    ) -> PolicyAgent:
+        """
+        Factory hook for creating a dummy policy agent to extract parameter counts.
+
+        Parameters
+        ----------
+        obs_space : gym.spaces.Box
+            Single observation space
+        act_space : gym.Space
+            Single action space
+        config : AgentTrainerSettings
+            Agent trainer configuration
+        rng_key : chex.PRNGKey
+            Random number generator key
+
+        Returns
+        -------
+        policy : PolicyAgent
+            Dummy policy agent for parameter counting
+        """
+        return PolicyAgent(
+            obs_space,
+            act_space,  # type: ignore
+            config=config.agent,
+            key=rng_key,
+            max_actions=self.max_actions,
+        )
+
     def _dummy_params(self, rng_key: chex.PRNGKey) -> DiscoParamsSettings:
         """
         Initializes a dummy set of agents to get their parameter counts.
@@ -744,12 +792,11 @@ class RuleTrainer:
         env_name, make_fn = self._env_specs[0]
         envs = make_fn(env_name, self.config.batch_size)
 
-        policy = PolicyAgent(
+        policy = self._create_dummy_policy(
             envs.single_observation_space,  # type: ignore
             envs.single_action_space,  # type: ignore
-            config=config.agent,
-            key=rng_key,
-            max_actions=self.max_actions,
+            config,
+            rng_key,
         )
 
         value = DiscoValueAgent(
@@ -767,47 +814,13 @@ class RuleTrainer:
             disco=self.meta_agent.param_count,
         )
 
-    def _compute_max_actions(self) -> int:
+    def _warm_collect_fn(self) -> None:
         """
-        Probe each unique environment to determine the maximum action count.
+        Warm the batched collection forward pass and XLA host transfer.
 
-        Returns
-        -------
-        max_actions : int
-            Maximum number of discrete actions across all environments
+        Runs the vmapped forward function once with the pool's current arrays
+        to trigger JIT compilation and pre-warm GPU->CPU transfers.
         """
-        max_actions = 0
-
-        for env_name, make_fn in self._unique_env_specs:
-            env = make_fn(env_name, self.config.batch_size)
-            action_space: gym.spaces.Discrete = env.single_action_space  # type: ignore
-            max_actions = max(max_actions, action_space.n.item())
-            env.close()
-
-        return max_actions
-
-    def _warm_compile(self) -> None:
-        """
-        Pre-compile all gradient functions before training begins.
-
-        Warms:
-            1. `_batched_collect_fn` — vmapped forward pass over all trainers
-            2. `_batch_grad_fn` — vmapped meta-gradient for each chunk size
-            3. `_meta_optim_update` — shared meta optimizer
-            4. Per-trainer meta-optim updates
-
-        Uses the trainer pool's existing accelerator arrays for shape inference.
-        """
-        meta_params = self.meta_agent.get_params()
-
-        # Compile meta optimizer update fn (if needed)
-        self._meta_optim_update = (
-            self.meta_optim.update
-            if not self.jit_compile
-            else jax.jit(self.meta_optim.update)
-        )
-
-        # Warm the collection forward pass
         dummy_obs = jnp.asarray(self.pool.obs)
         (
             warm_preds,
@@ -832,6 +845,30 @@ class RuleTrainer:
 
         del dummy_obs, warm_preds, warm_target_preds, warm_values
         jax.effects_barrier()
+
+    def _warm_compile(self) -> None:
+        """
+        Pre-compile all gradient functions before training begins.
+
+        Warms:
+            1. `_batched_collect_fn` — vmapped forward pass over all trainers
+            2. `_batch_grad_fn` — vmapped meta-gradient for each chunk size
+            3. `_meta_optim_update` — shared meta optimizer
+            4. Per-trainer meta-optim updates
+
+        Uses the trainer pool's existing accelerator arrays for shape inference.
+        """
+        meta_params = self.meta_agent.get_params()
+
+        # Compile meta optimizer update fn (if needed)
+        self._meta_optim_update = (
+            self.meta_optim.update
+            if not self.jit_compile
+            else jax.jit(self.meta_optim.update)
+        )
+
+        # Warm the collection forward pass
+        self._warm_collect_fn()
 
         # Pre-touch rollout buffer pages
         self.pool.train_buffer.prefault()
@@ -874,6 +911,81 @@ class RuleTrainer:
             )
         jax.effects_barrier()
 
+    def _create_trainer(
+        self,
+        env_name: str,
+        config: AgentTrainerSettings,
+        *,
+        key: chex.PRNGKey,
+        make_fn: MakeFn,
+    ) -> AgentTrainer:
+        """
+        Factory hook for creating a single agent trainer.
+
+        Parameters
+        ----------
+        env_name : str
+            The gymnasium environment name
+        config : AgentTrainerSettings
+            Configuration for individual agent training
+        key : chex.PRNGKey
+            Random number generator key
+        make_fn : MakeFn
+            Factory function to create the environment
+
+        Returns
+        -------
+        trainer : AgentTrainer
+            Initialized agent trainer
+        """
+        return AgentTrainer(
+            env_name,
+            config,
+            key=key,
+            make_fn=make_fn,
+            budget_rng=self._budget_rng,
+            max_actions=self.max_actions,
+            jit_compile=self.jit_compile,
+        )
+
+    def _build_action_masks(self) -> Dict[int, chex.Array]:
+        """
+        Build action masks keyed by action count.
+
+        Returns
+        -------
+        masks : Dict[int, chex.Array]
+            Boolean masks `(max_actions,)` keyed by each trainer's action count
+        """
+        return {
+            t.n_actions: jnp.arange(self.max_actions) < t.n_actions
+            for t in self.trainers
+        }
+
+    def _create_pool(self) -> TrainerPool:
+        """
+        Factory hook for creating the trainer pool.
+
+        Returns
+        -------
+        pool : TrainerPool
+            Initialized trainer pool with stacked params on accelerator
+        """
+        return TrainerPool(
+            self.trainers,
+            max_actions=self.max_actions,
+            action_masks=self._action_masks,
+            hidden_shapes=self._hidden_shapes,
+            n_updates=self.config.n_updates,
+            seq_len=self.config.seq_len,
+            batch_size=self.config.batch_size,
+            encoding_dim=self.trainers[0].policy_agent.encoding_dim,
+            prediction_dim=self.config.agent.prediction_size,
+            q_dim=self.config.agent.q_size,
+            env_worker_pool=self._env_worker_pool,
+            use_bfloat16=self.use_bfloat16,
+        )
+
     def _initial_setup(self, trainer_keys: List[chex.PRNGKey]) -> None:
         """
         Builds all agent trainers, initializes meta-optimizers, compiles inference on
@@ -890,14 +1002,11 @@ class RuleTrainer:
 
         # Build trainers
         for i, (env_name, make_fn) in enumerate(self._env_specs):
-            trainer = AgentTrainer(
+            trainer = self._create_trainer(
                 env_name,
                 self.config.agent_trainer_config(),
                 key=trainer_keys[i],
                 make_fn=make_fn,
-                budget_rng=self._budget_rng,
-                max_actions=self.max_actions,
-                jit_compile=self.jit_compile,
             )
             self.trainers.append(trainer)
             self.console.update_setup()
@@ -909,10 +1018,7 @@ class RuleTrainer:
             self.console.update_setup()
 
         # Pre-compute shared constants for the inner loop
-        self._action_masks = {
-            t.n_actions: jnp.arange(self.max_actions) < t.n_actions
-            for t in self.trainers
-        }
+        self._action_masks = self._build_action_masks()
 
         # Cache hidden state shapes for batched collection (None → zeros)
         h0 = self.trainers[0].state.hidden
@@ -944,20 +1050,7 @@ class RuleTrainer:
         )
 
         # Build trainer pool — stacks all params/states as permanent GPU arrays
-        self.pool = TrainerPool(
-            self.trainers,
-            max_actions=self.max_actions,
-            action_masks=self._action_masks,
-            hidden_shapes=self._hidden_shapes,
-            n_updates=self.config.n_updates,
-            seq_len=self.config.seq_len,
-            batch_size=self.config.batch_size,
-            encoding_dim=self.trainers[0].policy_agent.encoding_dim,
-            prediction_dim=self.config.agent.prediction_size,
-            q_dim=self.config.agent.q_size,
-            env_worker_pool=self._env_worker_pool,
-            use_bfloat16=self.use_bfloat16,
-        )
+        self.pool = self._create_pool()
         self.console.update_setup()
 
         # Pre-compile all chunk sizes so train() starts warm
@@ -1097,6 +1190,139 @@ class RuleTrainer:
 
         return jax.jit(jax.vmap(_pure_forward))
 
+    def _compute_inner_policy_loss(
+        self,
+        trainer: AgentTrainer,
+        p_params: nnx.State,
+        encoding: chex.Array,
+        actions: chex.Array,
+        targets: DiscoAgentOutput,
+        discounts: chex.Array,
+        mask: chex.Array,
+    ) -> Tuple[chex.Array, AgentLosses]:
+        """
+        Compute inner-loop policy loss for a single update step.
+
+        Runs a functional forward pass through the policy agent with explicit
+        parameters and computes the loss against disco targets.
+
+        Parameters
+        ----------
+        trainer : AgentTrainer
+            Read-only reference for functional forward
+        p_params : flax.nnx.State
+            Policy network parameters (differentiated by caller)
+        encoding : chex.Array
+            Encoder embeddings `(B, T, F)`
+        actions : chex.Array
+            Actions taken `(B, T, 1)`
+        targets : DiscoAgentOutput
+            Disco targets for this update step
+        discounts : chex.Array
+            Episode discount factors `(B, T)`
+        mask : chex.Array
+            Boolean mask `(max_actions,)` for valid actions
+
+        Returns
+        -------
+        loss : chex.Array
+            Scalar policy loss
+        aux : AgentLosses
+            Auxiliary loss data
+        """
+        new_preds = trainer.policy_agent.functional_forward(
+            encoding,
+            p_params,
+            action_mask=mask,
+        )
+        return compute_policy_loss(
+            targets,
+            new_preds.pi,
+            new_preds.y,
+            new_preds.z,
+            new_preds.aux_pi,
+            actions,
+            discounts,
+            self.config.loss_cost,
+            mask,
+        )
+
+    def _scan_step_aux(
+        self,
+        targets: DiscoAgentOutput,
+        rollout: Rollout,
+    ) -> Tuple[DiscoAgentOutput, chex.Array]:
+        """
+        Return auxiliary data to carry out of each inner-loop scan step.
+
+        The returned tuple is accumulated across scan steps and passed to
+        `_compute_outer_losses` for validation loss computation.
+
+        Parameters
+        ----------
+        targets : DiscoAgentOutput
+            Disco targets for this step
+        rollout : Rollout
+            Current rollout being processed
+
+        Returns
+        -------
+        aux : Tuple[DiscoAgentOutput, chex.Array]
+            `(targets, target_preds_pi)` — target logits for regularization
+        """
+        return (targets, rollout.target_preds.pi)
+
+    def _compute_outer_losses(
+        self,
+        valid_rollout: Rollout,
+        adv: chex.Array,
+        scan_aux: Tuple[DiscoAgentOutput, chex.Array],
+        mask: chex.Array,
+    ) -> Tuple[chex.Array, chex.Array, chex.Array]:
+        """
+        Compute validation policy gradient, entropy, and regularization losses.
+
+        Parameters
+        ----------
+        valid_rollout : Rollout
+            Validation rollout `(B, T, ...)`
+        adv : chex.Array
+            Stop-gradient normalized advantages from validation
+        scan_aux : Tuple[DiscoAgentOutput, chex.Array]
+            Accumulated `(targets, target_preds_pi)` from inner-loop
+            scan steps
+        mask : chex.Array
+            Boolean mask `(max_actions,)` for valid actions
+
+        Returns
+        -------
+        pg_loss : chex.Array
+            Policy gradient loss
+        entropy_loss : chex.Array
+            Entropy regularization loss
+        reg_loss : chex.Array
+            Target regularization loss
+        """
+        all_targets, all_targets_pi = scan_aux
+
+        pg_loss = compute_discrete_policy_gradient_loss(
+            valid_rollout.preds.pi,
+            valid_rollout.actions,
+            adv,
+        ).mean()
+        entropy_loss = compute_entropy_loss(
+            valid_rollout.preds.pi,
+            self.config.entropy_coef,
+        )
+        reg_loss = compute_meta_reg_loss(
+            jax.tree.map(lambda x: x[-1], all_targets),
+            jax.tree.map(lambda x: x[-1], all_targets_pi),
+            self.config.reg_scale,
+            self.config.kl_reg,
+            mask,
+        )
+        return pg_loss, entropy_loss, reg_loss
+
     def _compute_meta_gradient(
         self,
         trainer: AgentTrainer,
@@ -1169,28 +1395,21 @@ class RuleTrainer:
                 encoding = rollout.preds.encoding
                 actions, discounts = rollout.actions, rollout.discounts
 
-                def inner_policy_loss(p, enc, tgt, act, disc):
-                    new_preds = trainer.policy_agent.functional_forward(
-                        enc,
+                def inner_policy_loss(p, enc, act, tgt, disc):
+                    return self._compute_inner_policy_loss(
+                        trainer,
                         p,
-                        action_mask=action_mask,
-                    )
-                    return compute_policy_loss(
-                        tgt,
-                        new_preds.pi,
-                        new_preds.y,
-                        new_preds.z,
-                        new_preds.aux_pi,
+                        enc,
                         act,
+                        tgt,
                         disc,
-                        self.config.loss_cost,
                         action_mask,
                     )
 
                 (_, _), p_grads = fwdrev_value_and_grad(
                     inner_policy_loss,
                     has_aux=True,
-                )(carry.p_params, encoding, targets, actions, discounts)
+                )(carry.p_params, encoding, actions, targets, discounts)
 
                 p_updates, new_p_opt = trainer.policy_optim.update(
                     p_grads, carry.p_opt_state, carry.p_params
@@ -1233,7 +1452,7 @@ class RuleTrainer:
                     adv_ema=new_adv_ema,
                     td_ema=new_td_ema,
                 )
-                return new_carry, (targets, rollout.target_preds.pi)
+                return new_carry, self._scan_step_aux(targets, rollout)
 
             init_carry = MetaInnerStepCarry(
                 p_params=p_params,
@@ -1246,7 +1465,7 @@ class RuleTrainer:
                 td_ema=td_ema,
             )
 
-            final_out, (all_targets, all_targets_pi) = jax.lax.scan(
+            final_out, scan_aux = jax.lax.scan(
                 jax.checkpoint(  # type: ignore
                     _inner_step,
                     policy=jax.checkpoint_policies.dots_with_no_batch_dims_saveable,
@@ -1263,20 +1482,10 @@ class RuleTrainer:
             )
             adv = jax.lax.stop_gradient(value_outs.normalized_advantages)
 
-            pg_loss = compute_discrete_policy_gradient_loss(
-                valid_rollout.preds.pi,
-                valid_rollout.actions,
+            pg_loss, entropy_loss, reg_loss = self._compute_outer_losses(
+                valid_rollout,
                 adv,
-            ).mean()
-            entropy_loss = compute_entropy_loss(
-                valid_rollout.preds.pi,
-                self.config.entropy_coef,
-            )
-            reg_loss = compute_meta_reg_loss(
-                jax.tree.map(lambda x: x[-1], all_targets),
-                jax.tree.map(lambda x: x[-1], all_targets_pi),
-                self.config.reg_scale,
-                self.config.kl_reg,
+                scan_aux,
                 action_mask,
             )
             meta_loss = pg_loss + entropy_loss + reg_loss
@@ -1930,14 +2139,11 @@ class RuleTrainer:
         self.key, new_key = jax.random.split(self.key, 2)
 
         # Init new trainer
-        new_trainer = AgentTrainer(
+        new_trainer = self._create_trainer(
             env_name,
             self.config.agent_trainer_config(),
             key=new_key,
             make_fn=make_fn,
-            budget_rng=self._budget_rng,
-            max_actions=self.max_actions,
-            jit_compile=self.jit_compile,
         )
 
         # Init fresh per-trainer meta-gradient optimizer
@@ -1961,3 +2167,421 @@ class RuleTrainer:
         self.cp_manager.close()
         self.logger.close()
         self.runtime_logger.close()
+
+
+class ContinuousRuleTrainer(RuleTrainer):
+    """
+    Discovers a Reinforcement Learning (RL) update rule by meta-training across
+    a population of agents spanning diverse environments. This trainer is suitable
+    for continuous action spaces (`gym.spaces.Box`).
+
+    Extends `RuleTrainer` for continuous action spaces by swapping discrete
+    policy components for Gaussian equivalents: `ContinuousDiscoAgent`,
+    `ContinuousPolicyAgent`, `ContinuousTrainerPool`, and Gaussian loss
+    functions.
+
+    Parameters
+    ----------
+    envs : EnvSet | EnvGroup
+        Environment set or group to use for rule discovery
+    config : RuleTrainerSettings
+        Configuration for meta-training
+    agents_per_env : int (optional)
+        Number of independent agent trainers to instantiate per environment.
+        Default is `2`
+    max_group_size : int (optional)
+        Maximum number of trainers to `vmap` simultaneously. Default is `8`
+    num_env_workers : int (optional)
+        Number of threads for parallel environment stepping.
+        Default is `16`
+    seed : int (optional)
+        Random number generator seed. Default is `42`
+    jit_compile : bool (optional)
+        Flag to enable/disable JIT compilation. Default is `True`
+    cache_dir : str | None (optional)
+        Directory path for JAX's persistent XLA compilation cache.
+        Set to `None` to disable. Default is `".cache/jax"`
+    verbose : bool (optional)
+        Dashboard display settings. Default is `True`.
+            - If `True` - renders the full Rich dashboard
+            - If `False` - uses a lightweight `tqdm` progress bar instead
+    use_bfloat16 : bool (optional)
+        Flag to set all floating-point arrays in the returned `ContinuousRollout`
+        to `bfloat16` on accelerator transfer. Default is `True`
+    """
+
+    def __init__(
+        self,
+        envs: EnvSet | EnvGroup,
+        config: RuleTrainerSettings,
+        *,
+        agents_per_env: int = 2,
+        max_group_size: int = 8,
+        num_env_workers: int = 16,
+        seed: int = 42,
+        jit_compile: bool = True,
+        cache_dir: str | None = ".cache/jax",
+        verbose: bool = True,
+        use_bfloat16: bool = True,
+    ) -> None:
+        super().__init__(
+            envs,
+            config,
+            agents_per_env=agents_per_env,
+            max_group_size=max_group_size,
+            num_env_workers=num_env_workers,
+            seed=seed,
+            jit_compile=jit_compile,
+            cache_dir=cache_dir,
+            verbose=verbose,
+            use_bfloat16=use_bfloat16,
+        )
+
+        # Replace discrete meta-agent with continuous variant
+        meta_key = self.meta_agent.key
+        self.meta_agent = ContinuousDiscoAgent(
+            config=config.disco_agent,
+            key=meta_key,
+            jit_compile=self.jit_compile,
+        )
+
+        # Re-init disco diagnostics writers with continuous layer names
+        self.logger.add_writer_group("disco", self.meta_agent._disco_net.layer_names)
+
+        # Re-init optimizer and state with new meta-agent params
+        self.meta_optim = optax.adam(config.meta_lr)
+        self.state = RuleTrainerState.create(
+            self.meta_optim.init(self.meta_agent.get_params()),
+            self.num_trainers,
+            self.config.batch_size,
+            *self.meta_agent.hidden_sizes,
+        )
+
+        # Type-cast overrides for intellisense
+        self.trainers: List[ContinuousAgentTrainer] = []  # type: ignore
+        self.pool: ContinuousTrainerPool = None  # type: ignore
+
+        # Continuous-specific aliases
+        self.max_action_dim = self.max_actions
+        self._action_dim_masks: Dict[int, chex.Array] = {}
+
+    @override
+    def _create_dummy_policy(  # type: ignore
+        self,
+        obs_space: gym.spaces.Box,
+        act_space: gym.Space,
+        config: AgentTrainerSettings,
+        rng_key: chex.PRNGKey,
+    ) -> ContinuousPolicyAgent:
+        return ContinuousPolicyAgent(
+            obs_space,
+            act_space,  # type: ignore
+            config=config.agent,
+            key=rng_key,
+            max_action_dim=self.max_actions,
+        )
+
+    @override
+    def _create_trainer(  # type: ignore
+        self,
+        env_name: str,
+        config: AgentTrainerSettings,
+        *,
+        key: chex.PRNGKey,
+        make_fn: MakeFn,
+    ) -> ContinuousAgentTrainer:
+        return ContinuousAgentTrainer(
+            env_name,
+            config,
+            key=key,
+            make_fn=make_fn,
+            budget_rng=self._budget_rng,
+            max_action_dim=self.max_action_dim,
+            jit_compile=self.jit_compile,
+        )
+
+    @override
+    def _build_action_masks(self) -> Dict[int, chex.Array]:
+        self._action_dim_masks = {
+            t.action_dim: t.action_dim_mask for t in self.trainers
+        }
+        return self._action_dim_masks
+
+    @override
+    def _create_pool(self) -> ContinuousTrainerPool:
+        return ContinuousTrainerPool(
+            self.trainers,
+            max_action_dim=self.max_action_dim,
+            action_masks=self._action_masks,
+            hidden_shapes=self._hidden_shapes,
+            n_updates=self.config.n_updates,
+            seq_len=self.config.seq_len,
+            batch_size=self.config.batch_size,
+            encoding_dim=self.trainers[0].policy_agent.encoding_dim,
+            prediction_dim=self.config.agent.prediction_size,
+            env_worker_pool=self._env_worker_pool,
+            use_bfloat16=self.use_bfloat16,
+        )
+
+    @override
+    def _build_batched_collect_fn(self) -> Callable:
+        t = self.trainers[0]  # template
+
+        def _pure_forward(
+            obs,
+            prev_actions,
+            p_params,
+            t_params,
+            v_params,
+            p_ocm_h,
+            p_acm_h,
+            t_ocm_h,
+            t_acm_h,
+            v_h,
+            a_dim_mask,
+        ):
+            # Reconstruct all modules from explicit params
+            encoder, p_ocm, p_acm, p_dec = t.policy_agent.merge_params(p_params)
+            _, t_ocm, t_acm, t_dec = t.target_agent.merge_params(t_params)
+            v_net = t.value_agent.merge_params(v_params).net
+
+            # Shared encoding
+            encoding = encoder(obs)
+
+            # Policy forward
+            ocm_preds, new_p_ocm_h = p_ocm(encoding, h_state=p_ocm_h)
+            acm_preds, new_p_acm_h = p_acm(
+                ocm_preds.embedding,
+                prev_actions,
+                h_state=p_acm_h,
+            )
+            mu, log_std, aux_pi = p_dec(
+                ocm_preds.pi,
+                acm_preds.aux_pi,
+                action_dim_mask=a_dim_mask,
+            )
+            preds = ContinuousPolicyAgentOutput.create(
+                encoding,
+                mu,
+                log_std,
+                ocm_preds.y,
+                acm_preds.z,
+                aux_pi,
+                acm_preds.q,
+            )
+
+            # Target forward
+            t_ocm_preds, new_t_ocm_h = t_ocm(encoding, h_state=t_ocm_h)
+            t_acm_preds, new_t_acm_h = t_acm(
+                t_ocm_preds.embedding,
+                prev_actions,
+                h_state=t_acm_h,
+            )
+            t_mu, t_log_std, t_aux_pi = t_dec(
+                t_ocm_preds.pi,
+                t_acm_preds.aux_pi,
+                action_dim_mask=a_dim_mask,
+            )
+            target_preds = ContinuousPolicyAgentOutput.create(
+                encoding,
+                t_mu,
+                t_log_std,
+                t_ocm_preds.y,
+                t_acm_preds.z,
+                t_aux_pi,
+                t_acm_preds.q,
+            )
+
+            # Value forward
+            v, new_v_h = v_net(encoding, h_state=v_h)
+            values = squeeze_time(v)
+
+            return (
+                preds,
+                target_preds,
+                values,
+                new_p_ocm_h,
+                new_p_acm_h,
+                new_t_ocm_h,
+                new_t_acm_h,
+                new_v_h,
+            )
+
+        return jax.jit(jax.vmap(_pure_forward))
+
+    @override
+    def _compute_inner_policy_loss(  # type: ignore
+        self,
+        trainer: ContinuousAgentTrainer,
+        p_params: nnx.State,
+        encoding: chex.Array,
+        actions: chex.Array,
+        targets: ContinuousDiscoAgentOutput,
+        discounts: chex.Array,
+        mask: chex.Array,
+    ) -> Tuple[chex.Array, chex.Array]:
+        """
+        Compute inner-loop policy loss for a single continuous update step.
+
+        Runs a functional forward pass through the continuous policy agent
+        with explicit parameters and computes the Gaussian policy loss against
+        disco targets.
+
+        Parameters
+        ----------
+        trainer : ContinuousAgentTrainer
+            Read-only reference for functional forward
+        p_params : flax.nnx.State
+            Policy network parameters (differentiated by caller)
+        encoding : chex.Array
+            Encoder embeddings `(B, T, F)`
+        actions : chex.Array
+            Continuous actions taken `(B, T, A)`
+        targets : ContinuousDiscoAgentOutput
+            Disco targets for this update step
+        discounts : chex.Array
+            Episode discount factors `(B, T)`
+        mask : chex.Array
+            Boolean mask `(max_action_dim,)` for valid action dimensions
+
+        Returns
+        -------
+        total_loss : chex.Array
+            Total weighted policy loss
+        pi_loss : chex.Array
+            Policy KL divergence component
+        """
+        new_preds = trainer.policy_agent.functional_forward(
+            encoding,
+            actions,
+            p_params,
+            action_dim_mask=mask,
+        )
+        return compute_continuous_policy_loss(
+            targets,
+            new_preds.mu,
+            new_preds.log_std,
+            new_preds.y,
+            new_preds.z,
+            new_preds.aux_pi,
+            discounts,
+            self.config.loss_cost,
+            mask,
+        )
+
+    @override
+    def _scan_step_aux(  # type: ignore
+        self,
+        targets: ContinuousDiscoAgentOutput,
+        rollout: ContinuousRollout,
+    ) -> Tuple[ContinuousDiscoAgentOutput, chex.Array, chex.Array]:
+        """
+        Return auxiliary data to carry out of each inner-loop scan step.
+
+        The returned tuple is accumulated across scan steps and passed to
+        `_compute_outer_losses` for validation loss computation.
+
+        Parameters
+        ----------
+        targets : ContinuousDiscoAgentOutput
+            Disco targets for this step
+        rollout : ContinuousRollout
+            Current rollout being processed
+
+        Returns
+        -------
+        aux : Tuple[ContinuousDiscoAgentOutput, chex.Array, chex.Array]
+            `(targets, target_mu, target_log_std)` — Gaussian target
+            parameters for regularization
+        """
+        return (
+            targets,
+            rollout.target_preds.mu,
+            rollout.target_preds.log_std,
+        )
+
+    @override
+    def _compute_outer_losses(  # type: ignore
+        self,
+        valid_rollout: ContinuousRollout,
+        adv: chex.Array,
+        scan_aux: Tuple[ContinuousDiscoAgentOutput, chex.Array, chex.Array],
+        mask: chex.Array,
+    ) -> Tuple[chex.Array, chex.Array, chex.Array]:
+        """
+        Compute validation policy gradient, entropy, and regularization losses
+        for continuous action spaces.
+
+        Parameters
+        ----------
+        valid_rollout : ContinuousRollout
+            Validation rollout `(B, T, ...)`
+        adv : chex.Array
+            Stop-gradient normalized advantages from validation
+        scan_aux : Tuple[ContinuousDiscoAgentOutput, chex.Array, chex.Array]
+            Accumulated `(targets, target_mu, target_log_std)` from
+            inner-loop scan steps
+        mask : chex.Array
+            Boolean mask `(max_action_dim,)` for valid action dimensions
+
+        Returns
+        -------
+        pg_loss : chex.Array
+            Gaussian policy gradient loss
+        entropy_loss : chex.Array
+            Gaussian entropy regularization loss
+        reg_loss : chex.Array
+            Target regularization loss
+        """
+        all_targets, all_target_mu, all_target_log_std = scan_aux
+
+        pg_loss = compute_gaussian_policy_gradient_loss(
+            valid_rollout.preds.mu,
+            valid_rollout.preds.log_std,
+            valid_rollout.actions,
+            adv,
+            action_dim_mask=mask,
+        ).mean()
+        entropy_loss = compute_gaussian_entropy_loss(
+            valid_rollout.preds.log_std,
+            self.config.entropy_coef,
+            action_dim_mask=mask,
+        )
+        reg_loss = compute_continuous_meta_reg_loss(
+            jax.tree.map(lambda x: x[-1], all_targets),
+            jax.tree.map(lambda x: x[-1], all_target_mu),
+            jax.tree.map(lambda x: x[-1], all_target_log_std),
+            self.config.reg_scale,
+            self.config.kl_reg,
+            action_dim_mask=mask,
+        )
+        return pg_loss, entropy_loss, reg_loss
+
+    @override
+    def _warm_collect_fn(self) -> None:
+        dummy_obs = jnp.asarray(self.pool.obs)
+        dummy_actions = jnp.asarray(self.pool.prev_actions)
+        (
+            warm_preds,
+            warm_target_preds,
+            warm_values,
+            *_,
+        ) = self._batched_collect_fn(
+            dummy_obs,
+            dummy_actions,
+            self.pool.p_params,
+            self.pool.t_params,
+            self.pool.v_params,
+            self.pool.p_ocm_h,
+            self.pool.p_acm_h,
+            self.pool.t_ocm_h,
+            self.pool.t_acm_h,
+            self.pool.v_h,
+            self.pool.action_masks,
+        )
+
+        # Warm XLA's GPU->CPU host transfer
+        _ = jax.device_get((warm_preds, warm_target_preds, warm_values))
+
+        del dummy_obs, dummy_actions, warm_preds, warm_target_preds, warm_values
+        jax.effects_barrier()
