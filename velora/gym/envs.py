@@ -367,9 +367,7 @@ class MuJoCoEnvs(EnvGroup):
             "InvertedPendulum",
             "Pusher",
             "Reacher",
-            "Striker",
             "Swimmer",
-            "Thrower",
             "Walker2d",
         ]
     )
@@ -389,7 +387,7 @@ class MuJoCoEnvs(EnvGroup):
 class DMCEnvs(EnvGroup):
     """
     [DeepMind Control Suite](https://github.com/google-deepmind/dm_control)
-    environments via [shimmy](https://shimmy.farama.org/).
+    environments.
 
     21 continuous control environments with diverse dynamics and reward structures.
     """
@@ -398,7 +396,7 @@ class DMCEnvs(EnvGroup):
     category: str = "DMC"
     version: str = "v0"
     required_packages: List[str] = field(
-        default_factory=lambda: ["gymnasium", "shimmy", "dm_control"]
+        default_factory=lambda: ["gymnasium", "dm_control"]
     )
     envs: List[str] = field(
         default_factory=lambda: [
@@ -419,8 +417,12 @@ class DMCEnvs(EnvGroup):
             "humanoid-walk",
             "pendulum-swingup",
             "point_mass-easy",
+            "point_mass-hard",
             "reacher-easy",
             "reacher-hard",
+            "swimmer-swimmer6",
+            "swimmer-swimmer15",
+            "walker-run",
             "walker-stand",
             "walker-walk",
         ]
@@ -450,14 +452,11 @@ class Box2DEnvs(EnvGroup):
     prefix: str = ""
     category: str = "Box2D"
     version: str = ""
-    required_packages: List[str] = field(
-        default_factory=lambda: ["gymnasium", "box2d-py"]
-    )
+    required_packages: List[str] = field(default_factory=lambda: ["gymnasium", "Box2D"])
     envs: List[str] = field(
         default_factory=lambda: [
             "BipedalWalker-v3",
             "BipedalWalkerHardcore-v3",
-            "CarRacing-v3",
             "LunarLanderContinuous-v3",
             "MountainCarContinuous-v0",
             "Pendulum-v1",
@@ -600,6 +599,39 @@ class EnvSet:
             env.close()
 
         return max_actions
+
+    def max_obs_dim(self, batch_size: int) -> int:
+        """
+        Probe each unique environment to determine the maximum observation
+        dimensionality.
+
+        For vector observations (`gym.spaces.Box` with 1D shape), returns
+        the max observation dimension. For image observations (3D shape),
+        returns `0` (images are assumed homogeneous via preprocessing).
+
+        Parameters
+        ----------
+        batch_size : int
+            Number of vectorized environments to create per probe
+
+        Returns
+        -------
+        max_obs : int
+            Maximum observation dimensionality across all environments,
+            or `0` if all observations are images
+        """
+        max_obs = 0
+
+        for env_name, make_fn in self.as_list():
+            env = make_fn(env_name, batch_size)
+            obs_space = env.single_observation_space
+
+            if isinstance(obs_space, gym.spaces.Box) and len(obs_space.shape) == 1:
+                max_obs = max(max_obs, obs_space.shape[0])
+
+            env.close()
+
+        return max_obs
 
     def __iter__(self) -> Iterator[Tuple[str, MakeFn]]:
         """Iterate over (env_name, make_fn) tuples from all groups."""
@@ -749,8 +781,6 @@ MUJOCO_MANIPULATION = MuJoCoEnvs(
     envs=[
         "Pusher",
         "Reacher",
-        "Striker",
-        "Thrower",
     ],
 )
 MUJOCO_BALANCE = MuJoCoEnvs(
@@ -759,7 +789,7 @@ MUJOCO_BALANCE = MuJoCoEnvs(
         "InvertedPendulum",
     ],
 )
-MUJOCO_13 = MuJoCoEnvs()
+MUJOCO_11 = MuJoCoEnvs()
 
 DMC_SIMPLE = DMCEnvs(
     envs=[
@@ -768,6 +798,7 @@ DMC_SIMPLE = DMCEnvs(
         "cartpole-swingup",
         "pendulum-swingup",
         "point_mass-easy",
+        "point_mass-hard",
     ],
 )
 DMC_MANIPULATION = DMCEnvs(
@@ -787,6 +818,9 @@ DMC_LOCOMOTION = DMCEnvs(
         "fish-upright",
         "hopper-hop",
         "hopper-stand",
+        "swimmer-swimmer6",
+        "swimmer-swimmer15",
+        "walker-run",
         "walker-stand",
         "walker-walk",
     ],
@@ -798,7 +832,7 @@ DMC_COMPLEX = DMCEnvs(
         "humanoid-walk",
     ],
 )
-DMC_21 = DMCEnvs()
-BOX2D_6 = Box2DEnvs()
+DMC_25 = DMCEnvs()
+BOX2D_5 = Box2DEnvs()
 
-CONTINUOUS_40 = EnvSet(MUJOCO_13, DMC_21, BOX2D_6)
+CONTINUOUS_41 = EnvSet(MUJOCO_11, DMC_25, BOX2D_5)

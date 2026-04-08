@@ -223,15 +223,22 @@ def make_dmc_env(
     """
     Creates a sync vectorized
     [DeepMind Control Suite](https://github.com/google-deepmind/dm_control)
-    environment via [shimmy](https://shimmy.farama.org/).
+    environment.
+
+    Wraps each `dm_control.suite` environment in
+    `velora.gym.dm_control.DmControlSuiteEnv` for Gymnasium compatibility,
+    then vectorizes with `SyncVectorEnv`.
 
     Applies wrappers -
+    - `velora.gym.dm_control.DmControlSuiteEnv`
+    - `gymnasium.wrappers.TimeLimit`
     - `gymnasium.wrappers.vector.RecordEpisodeStatistics`
 
     Parameters
     ----------
     name : str
-        Name of the environment (e.g., `dm_control/acrobot-swingup-v0`)
+        Environment name in `dm_control/{domain}-{task}-v0` format
+        (e.g., `dm_control/acrobot-swingup-v0`)
     num_envs : int (optional)
         The number of vectorized environments to make. Default is `4`
     max_episode_steps : int (optional)
@@ -240,7 +247,7 @@ def make_dmc_env(
         The type of render mode for the environment.
         Default is `rgb_array`
     kwargs : Any (optional)
-        Additional arguments passed to `gym.make_vec()`
+        Additional arguments
 
     Returns
     -------
@@ -248,21 +255,36 @@ def make_dmc_env(
         A set of wrapped vectorized environments
     """
     try:
-        import shimmy  # noqa: F401, # type: ignore
+        import dm_control.suite  # type: ignore
     except ImportError:
         raise MissingPackageError(
-            "DMC environments require 'shimmy[dm_control]'. "
+            "DMC environments require 'dm_control'. "
             "Install with: pip install 'velora[dmc]'"
         )
 
-    envs = gym.make_vec(
-        name,
-        num_envs=num_envs,
-        vectorization_mode="sync",
-        render_mode=render_mode,
-        max_episode_steps=max_episode_steps,
-        **kwargs,
-    )
+    from velora.gym.dm_control.compat import DmControlSuiteEnv
+
+    # Parse "dm_control/{domain}-{task}-v0" → domain, task
+    env_id = name
+    if env_id.startswith("dm_control/"):
+        env_id = env_id[len("dm_control/"):]
+    if env_id.endswith("-v0"):
+        env_id = env_id[:-len("-v0")]
+
+    # Split on first hyphen: "ball_in_cup-catch" → ("ball_in_cup", "catch")
+    parts = env_id.split("-", 1)
+    if len(parts) != 2:
+        raise ValueError(f"Invalid DMC environment name: {name}")
+
+    domain, task = parts
+
+    def _make_single_env():
+        env = dm_control.suite.load(domain_name=domain, task_name=task)
+        wrapped = DmControlSuiteEnv(env, render_mode=render_mode, **kwargs)
+        return TimeLimit(wrapped, max_episode_steps=max_episode_steps)
+
+    env_fns = [_make_single_env for _ in range(num_envs)]
+    envs = gym.vector.SyncVectorEnv(env_fns)
     return RecordEpisodeStatistics(envs)
 
 
@@ -305,6 +327,12 @@ def make_box2d_env(
             "Box2D environments require 'box2d-py'. "
             "Install with: pip install 'velora[continuous]'"
         )
+
+    import warnings
+
+    # Suppress pkg_resources deprecation warning triggered by pygame
+    # (transitive Box2D → CarRacing → pygame → pkg_resources import)
+    warnings.filterwarnings("ignore", message=".*pkg_resources.*", category=UserWarning)
 
     envs = gym.make_vec(
         name,

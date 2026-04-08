@@ -98,7 +98,17 @@ class EnvWorkerPool:
         Number of worker processes to spawn. Each worker owns
         `ceil(num_trainers / num_workers)` trainers
     max_episode_steps : int (optional)
-        Maximum episode steps for Atari environments. Default is `2000`
+        Maximum episode steps for environments. Default is `2000`
+    action_type : str (optional)
+        Action space type: `"discrete"` or `"continuous"`.
+        Default is `"discrete"`
+    max_action_dim : int (optional)
+        Maximum action dimensionality across all environments.
+        Only used when `action_type="continuous"`. Default is `1`
+    max_obs_dim : int (optional)
+        Maximum observation dimensionality across all environments.
+        When non-zero, workers zero-pad vector observations to this
+        size. Default is `0` (no padding)
     """
 
     @staticmethod
@@ -138,9 +148,14 @@ class EnvWorkerPool:
         env_specs: List[Tuple[str, MakeFn, int]],
         num_workers: int,
         max_episode_steps: int = 2000,
+        action_type: str = "discrete",
+        max_action_dim: int = 1,
+        max_obs_dim: int = 0,
     ) -> None:
         self.num_trainers = len(env_specs)
         self.num_workers = min(num_workers, self.num_trainers)
+        self._action_type = action_type
+        self._max_action_dim = max_action_dim
 
         # Assign trainers to workers in contiguous slices
         self._worker_slices: List[Tuple[int, int]] = []  # (start, end)
@@ -177,6 +192,9 @@ class EnvWorkerPool:
                 {
                     "env_specs": worker_env_specs,
                     "max_episode_steps": max_episode_steps,
+                    "action_type": action_type,
+                    "max_action_dim": max_action_dim,
+                    "max_obs_dim": max_obs_dim,
                 }
             )
 
@@ -210,7 +228,14 @@ class EnvWorkerPool:
 
         # Pre-compute fixed sizes for hot loop
         self._obs_nbytes = int(np.prod(self._obs_shape)) * self._obs_dtype.itemsize
-        self._action_nbytes = self._batch_size * np.dtype(np.int32).itemsize
+
+        if action_type == "continuous":
+            self._action_nbytes = (
+                self._batch_size * max_action_dim * np.dtype(np.float32).itemsize
+            )
+        else:
+            self._action_nbytes = self._batch_size * np.dtype(np.int32).itemsize
+
         self._reward_nbytes = self._batch_size * np.dtype(np.float32).itemsize
         self._flag_nbytes = self._batch_size  # uint8
 
@@ -278,7 +303,9 @@ class EnvWorkerPool:
         Parameters
         ----------
         all_actions : np.ndarray
-            Actions for all trainers. Shape: `(P, B, 1)` int32
+            Actions for all trainers.
+            Discrete: shape `(P, B, 1)` int32.
+            Continuous: shape `(P, B, max_action_dim)` float32.
 
         Returns
         -------
@@ -292,13 +319,20 @@ class EnvWorkerPool:
             Truncation flags. Shape: `(P, B)`
         """
         # Fan out — send CMD_STEP + actions to each worker
+        is_continuous = self._action_type == "continuous"
         for w in range(self.num_workers):
             s, e = self._worker_slices[w]
 
-            action_parts = [
-                all_actions[i].squeeze(-1).astype(np.int32).tobytes()
-                for i in range(s, e)
-            ]
+            if is_continuous:
+                action_parts = [
+                    all_actions[i].astype(np.float32).tobytes() for i in range(s, e)
+                ]
+            else:
+                action_parts = [
+                    all_actions[i].squeeze(-1).astype(np.int32).tobytes()
+                    for i in range(s, e)
+                ]
+
             msg = bytes([CMD_STEP]) + b"".join(action_parts)
             _write_all(self._cmd_fds[w], msg)
 

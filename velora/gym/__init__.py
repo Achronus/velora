@@ -4,14 +4,14 @@ from velora.gym.envs import (
     ATARI_EASY,
     ATARI_HARD,
     ATARI_MEDIUM,
-    BOX2D_6,
-    CONTINUOUS_40,
-    DMC_21,
+    BOX2D_5,
+    CONTINUOUS_41,
+    DMC_25,
     DMC_COMPLEX,
     DMC_LOCOMOTION,
     DMC_MANIPULATION,
     DMC_SIMPLE,
-    MUJOCO_13,
+    MUJOCO_11,
     MUJOCO_BALANCE,
     MUJOCO_LOCOMOTION,
     MUJOCO_MANIPULATION,
@@ -24,7 +24,12 @@ from velora.gym.envs import (
     MuJoCoEnvs,
 )
 from velora.gym.error import MissingPackageError
-from velora.gym.make import make_atari_env, make_box2d_env, make_dmc_env, make_mujoco_env
+from velora.gym.make import (
+    make_atari_env,
+    make_box2d_env,
+    make_dmc_env,
+    make_mujoco_env,
+)
 from velora.gym.wrappers import FrameStackReshape
 
 __all__ = [
@@ -33,14 +38,14 @@ __all__ = [
     "ATARI_MEDIUM",
     "ATARI_HARD",
     "ATARI_57",
-    "BOX2D_6",
-    "CONTINUOUS_40",
-    "DMC_21",
+    "BOX2D_5",
+    "CONTINUOUS_41",
+    "DMC_25",
     "DMC_COMPLEX",
     "DMC_LOCOMOTION",
     "DMC_MANIPULATION",
     "DMC_SIMPLE",
-    "MUJOCO_13",
+    "MUJOCO_11",
     "MUJOCO_BALANCE",
     "MUJOCO_LOCOMOTION",
     "MUJOCO_MANIPULATION",
