@@ -1083,8 +1083,8 @@ class DiscoValueAgent(BaseAgent[ValueModules]):
 
         key_encoder, key_value = jax.random.split(self.key, 2)
 
-        self._encoder = ImageEncoder(
-            obs_spec.shape[-1],
+        self._encoder = build_obs_encoder(
+            obs_spec.shape,
             n_hidden,
             key=key_encoder,
         )
@@ -1245,6 +1245,7 @@ class ContinuousDiscoAgent(BaseDiscoAgent[ContinuousDiscoModules]):
         disco_h_state: chex.Array | None = None,
         meta_h_state: chex.Array | None = None,
         params: nnx.State | None = None,
+        action_mask: chex.Array | None = None,
     ) -> Tuple[ContinuousDiscoAgentOutput, chex.Array, chex.Array]:
         """
         Generate targets for agent training.
@@ -1262,6 +1263,10 @@ class ContinuousDiscoAgent(BaseDiscoAgent[ContinuousDiscoModules]):
         params : nnx.State (optional)
             Meta-agent parameters from `get_params()`. Only required if
             using a functional approach for `jax.grad`. Default is `None`
+        action_mask : chex.Array (optional)
+            Unused. Accepted for API compatibility with the discrete
+            variant's call signature in `_compute_meta_gradient`.
+            Default is `None`
 
         Returns
         -------
