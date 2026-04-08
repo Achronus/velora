@@ -1797,11 +1797,11 @@ class RuleTrainer:
         except (KeyboardInterrupt, SystemExit):
             exit()
         finally:
-            self.close()
+            # Save last step if not already saved
+            if self.cp_manager.latest_step != self.state.meta_step:
+                self.save_checkpoint(force=True)
 
-        # Save last step if not already saved
-        if self.cp_manager.latest_step != self.state.meta_step:
-            self.save_checkpoint(force=True)
+            self.close()
 
         self.console.finish_training()
 
