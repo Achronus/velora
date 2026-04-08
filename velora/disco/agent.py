@@ -1063,6 +1063,11 @@ class DiscoValueAgent(BaseAgent[ValueModules]):
 
             - Where `0.1` neurons are very dense
             - Where `0.9` neurons are very sparse
+    max_obs_dim : int (optional)
+        Maximum observation dimensionality across all environments.
+        When provided, the encoder's input layer is sized to
+        `max_obs_dim` so that all encoders share the same weight shape
+        (required for `jax.vmap`). Default is `None`
     jit_compile : bool (optional)
         Flag to enable/disable JIT compilation. Default is `False`
     """
@@ -1075,6 +1080,7 @@ class DiscoValueAgent(BaseAgent[ValueModules]):
         config: DiscoValueSettings,
         key: chex.PRNGKey,
         sparsity: float = 0.5,
+        max_obs_dim: int | None = None,
         jit_compile: bool = False,
     ) -> None:
         self.obs_spec = obs_spec
@@ -1087,6 +1093,7 @@ class DiscoValueAgent(BaseAgent[ValueModules]):
             obs_spec.shape,
             n_hidden,
             key=key_encoder,
+            max_obs_dim=max_obs_dim,
         )
 
         self._net = LNN(
@@ -1211,12 +1218,30 @@ class ContinuousDiscoAgent(BaseDiscoAgent[ContinuousDiscoModules]):
         Configuration for the update rule agent
     key : jax.random.PRNGKey
         Random number generator key
+    max_action_dim : int
+        Maximum continuous action dimensionality across all environments
     freeze : bool (optional)
         Freezes parameters so they cannot be trained.
         Useful for reusing trained target rules. Default is `False`
     jit_compile : bool (optional)
         Flag to enable/disable JIT compilation. Default is `False`
     """
+
+    def __init__(
+        self,
+        *,
+        config: DiscoAgentSettings,
+        key: chex.PRNGKey,
+        max_action_dim: int,
+        freeze: bool = False,
+        jit_compile: bool = False,
+    ) -> None:
+        super().__init__(
+            config=config.with_max_action_dim(max_action_dim),
+            key=key,
+            freeze=freeze,
+            jit_compile=jit_compile,
+        )
 
     def _build_modules(
         self,
@@ -1363,6 +1388,11 @@ class ContinuousPolicyAgent(BasePolicyAgent[ContinuousPolicyModules]):
     max_action_dim : int
         Maximum continuous action dimensionality across all environments
         in the training set. Actions are zero-padded to this size
+    max_obs_dim : int (optional)
+        Maximum observation dimensionality across all environments.
+        When provided, the encoder's input layer is sized to
+        `max_obs_dim` so that all encoders share the same weight shape
+        (required for `jax.vmap`). Default is `None`
     jit_compile : bool (optional)
         Flag to enable/disable JIT compilation. Default is `False`
     """
@@ -1375,6 +1405,7 @@ class ContinuousPolicyAgent(BasePolicyAgent[ContinuousPolicyModules]):
         config: PolicyAgentSettings,
         key: chex.PRNGKey,
         max_action_dim: int,
+        max_obs_dim: int | None = None,
         jit_compile: bool = False,
     ) -> None:
         self.obs_spec = obs_spec
@@ -1396,6 +1427,7 @@ class ContinuousPolicyAgent(BasePolicyAgent[ContinuousPolicyModules]):
             obs_spec.shape,
             config.n_hidden,
             key=key_encoder,
+            max_obs_dim=max_obs_dim,
         )
 
         self._ocm = OCM(

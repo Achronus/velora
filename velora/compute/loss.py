@@ -209,7 +209,7 @@ def compute_gaussian_aux_policy_loss(
     loss : chex.Array
         Per-timestep auxiliary policy loss. Shape: `(B, T-1)`
     """
-    max_action_dim = jnp.shape(next_mu)[-1]
+    max_action_dim = jnp.shape(aux_pi_pred)[-1] // 2  # Static: 2D layout is (μ', log σ')
 
     # Split predicted (μ', log σ') from aux_pi output
     pred_mu = aux_pi_pred[:, :-1, :max_action_dim]  # (B, T-1, D), # type: ignore

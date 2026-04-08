@@ -25,7 +25,13 @@ from velora.disco.outputs import (
     ValueOutputs,
 )
 from velora.disco.rollouts import Rollout
-from velora.disco.train import AgentTrainer, RuleTrainer
+from velora.disco.train import (
+    AgentTrainer,
+    AgentTrainerBase,
+    ContinuousAgentTrainer,
+    ContinuousRuleTrainer,
+    RuleTrainer,
+)
 
 __all__ = [
     "PolicyAgent",
@@ -53,6 +59,9 @@ __all__ = [
     "PolicyAgentSettings",
     "RuleTrainerSettings",
     "Rollout",
+    "AgentTrainerBase",
     "AgentTrainer",
+    "ContinuousAgentTrainer",
     "RuleTrainer",
+    "ContinuousRuleTrainer",
 ]

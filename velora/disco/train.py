@@ -401,6 +401,11 @@ class ContinuousAgentTrainer(AgentTrainerBase):
         Python RNG used to sample the initial step budget
     max_action_dim : int
         Maximum continuous action dimensionality across all environments
+    max_obs_dim : int (optional)
+        Maximum observation dimensionality across all environments.
+        When provided, observations are zero-padded to this size and
+        encoders use `max_obs_dim` as input width for `jax.vmap`
+        compatibility. Default is `None`
     jit_compile : bool (optional)
         Flag to enable/disable JIT compilation. Default is `False`
     """
@@ -414,6 +419,7 @@ class ContinuousAgentTrainer(AgentTrainerBase):
         make_fn: MakeFn,
         budget_rng: random.Random,
         max_action_dim: int,
+        max_obs_dim: int | None = None,
         jit_compile: bool = False,
     ) -> None:
         super().__init__(
@@ -426,6 +432,7 @@ class ContinuousAgentTrainer(AgentTrainerBase):
         )
 
         self.max_action_dim = max_action_dim
+        self.max_obs_dim = max_obs_dim
 
         self.action_space: gym.spaces.Box = self.envs.single_action_space  # type: ignore
         self.obs_space: gym.spaces.Box = self.envs.single_observation_space  # type: ignore
@@ -439,6 +446,7 @@ class ContinuousAgentTrainer(AgentTrainerBase):
             config=self.config.agent,
             key=agent_key,
             max_action_dim=self.max_action_dim,
+            max_obs_dim=self.max_obs_dim,
             jit_compile=self.jit_compile,
         )
 
@@ -448,6 +456,7 @@ class ContinuousAgentTrainer(AgentTrainerBase):
             config=self.config.agent,
             key=target_key,
             max_action_dim=self.max_action_dim,
+            max_obs_dim=self.max_obs_dim,
             jit_compile=self.jit_compile,
         )
 
@@ -457,6 +466,7 @@ class ContinuousAgentTrainer(AgentTrainerBase):
             config=self.config.value,
             key=value_key,
             sparsity=self.config.agent.sparsity,
+            max_obs_dim=self.max_obs_dim,
             jit_compile=self.jit_compile,
         )
 
@@ -484,12 +494,13 @@ class ContinuousAgentTrainer(AgentTrainerBase):
             1. Materializing parameters before optimizer init
             2. JIT compile caching
         """
+        obs_dim = self.max_obs_dim or self.obs_space.shape[0]
         dummy_obs = jnp.zeros(
-            (self.config.batch_size, *self.obs_space.shape),
-            dtype=self.obs_space.dtype,
+            (self.config.batch_size, obs_dim),
+            dtype=jnp.float32,
         )
         dummy_action = jnp.zeros(
-            (self.config.batch_size, self.max_action_dim),
+            (self.config.batch_size, 1, self.max_action_dim),
             dtype=jnp.float32,
         )
 
@@ -709,6 +720,7 @@ class RuleTrainer:
 
         # Batch functions
         self.max_actions = envs.max_action_count(self.config.batch_size)
+        self.max_obs_dim = envs.max_obs_dim(self.config.batch_size) or None
         self._batch_grad_fn: Callable[..., MetaGradOutput] = None  # type: ignore
         self._batched_collect_fn: Callable = None  # type: ignore
 
@@ -773,6 +785,21 @@ class RuleTrainer:
             key=rng_key,
             max_actions=self.max_actions,
         )
+
+    @property
+    def _worker_action_type(self) -> str:
+        """Action type identifier passed to `EnvWorkerPool` workers."""
+        return "discrete"
+
+    @property
+    def _worker_max_action_dim(self) -> int:
+        """Max action dimensionality passed to `EnvWorkerPool` workers."""
+        return 1
+
+    @property
+    def _worker_max_obs_dim(self) -> int:
+        """Max observation dimensionality passed to `EnvWorkerPool` workers."""
+        return 0
 
     def _dummy_params(self, rng_key: chex.PRNGKey) -> DiscoParamsSettings:
         """
@@ -1047,6 +1074,9 @@ class RuleTrainer:
         self._env_worker_pool = EnvWorkerPool(
             env_worker_specs,
             self.num_env_workers,
+            action_type=self._worker_action_type,
+            max_action_dim=self._worker_max_action_dim,
+            max_obs_dim=self._worker_max_obs_dim,
         )
 
         # Build trainer pool — stacks all params/states as permanent GPU arrays
@@ -2242,6 +2272,7 @@ class ContinuousRuleTrainer(RuleTrainer):
         self.meta_agent = ContinuousDiscoAgent(
             config=config.disco_agent,
             key=meta_key,
+            max_action_dim=self.max_actions,
             jit_compile=self.jit_compile,
         )
 
@@ -2265,6 +2296,18 @@ class ContinuousRuleTrainer(RuleTrainer):
         self.max_action_dim = self.max_actions
         self._action_dim_masks: Dict[int, chex.Array] = {}
 
+    @property
+    def _worker_action_type(self) -> str:
+        return "continuous"
+
+    @property
+    def _worker_max_action_dim(self) -> int:
+        return self.max_action_dim
+
+    @property
+    def _worker_max_obs_dim(self) -> int:
+        return self.max_obs_dim or 0
+
     @override
     def _create_dummy_policy(  # type: ignore
         self,
@@ -2279,6 +2322,7 @@ class ContinuousRuleTrainer(RuleTrainer):
             config=config.agent,
             key=rng_key,
             max_action_dim=self.max_actions,
+            max_obs_dim=self.max_obs_dim,
         )
 
     @override
@@ -2297,6 +2341,7 @@ class ContinuousRuleTrainer(RuleTrainer):
             make_fn=make_fn,
             budget_rng=self._budget_rng,
             max_action_dim=self.max_action_dim,
+            max_obs_dim=self.max_obs_dim,
             jit_compile=self.jit_compile,
         )
 
@@ -2347,6 +2392,10 @@ class ContinuousRuleTrainer(RuleTrainer):
 
             # Shared encoding
             encoding = encoder(obs)
+
+            # Add time dimension to match encoding shape from encoder
+            if prev_actions.ndim == encoding.ndim - 1:
+                prev_actions = jnp.expand_dims(prev_actions, axis=1)
 
             # Policy forward
             ocm_preds, new_p_ocm_h = p_ocm(encoding, h_state=p_ocm_h)

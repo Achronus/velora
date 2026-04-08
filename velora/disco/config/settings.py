@@ -269,6 +269,22 @@ class DiscoAgentSettings:
 
     max_action_dim: int = 0
 
+    def with_max_action_dim(self, max_action_dim: int) -> Self:
+        """
+        Return a copy with `max_action_dim` set.
+
+        Parameters
+        ----------
+        max_action_dim : int
+            Maximum continuous action dimensionality
+
+        Returns
+        -------
+        config : DiscoAgentSettings
+            Updated configuration
+        """
+        return self.__replace__(max_action_dim=max_action_dim)
+
     def encoder_config(self) -> DiscoEncoderSettings:
         """
         Extracts encoder configuration from agent settings.

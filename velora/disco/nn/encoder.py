@@ -756,10 +756,20 @@ class VectorEncoder(nnx.Module):
         Number of hidden units
     key : chex.PRNGKey
         Random number generator key
+    max_obs_dim : int (optional)
+        When provided, the projection layer input width is set to
+        `max_obs_dim` instead of `obs_dim`. Default is `None`
     """
 
-    def __init__(self, obs_dim: int, n_hidden: int, key: chex.PRNGKey) -> None:
+    def __init__(
+        self,
+        obs_dim: int,
+        n_hidden: int,
+        key: chex.PRNGKey,
+        max_obs_dim: int | None = None,
+    ) -> None:
         self.obs_dim = obs_dim
+        self.max_obs_dim = max_obs_dim or obs_dim
         self.n_hidden = n_hidden
         self.key = key
 
@@ -770,7 +780,7 @@ class VectorEncoder(nnx.Module):
 
         rngs = nnx.Rngs(params=self.key)
 
-        self.proj = nnx.Linear(self.obs_dim, self.output_dim, rngs=rngs)
+        self.proj = nnx.Linear(self.max_obs_dim, self.output_dim, rngs=rngs)
 
         self._total_params = total_parameters(self)
         self._active_params = active_parameters(self)
@@ -828,6 +838,7 @@ def build_obs_encoder(
     obs_shape: Tuple[int, ...],
     n_hidden: int,
     key: chex.PRNGKey,
+    max_obs_dim: int | None = None,
 ) -> PolicyEncoder:
     """
     Dynamically build an observation encoder based on an observation space's shape.
@@ -840,6 +851,12 @@ def build_obs_encoder(
         Number of hidden units for scaling
     key : chex.PRNGKey
         Random number generator key
+    max_obs_dim : int (optional)
+        Maximum observation dimensionality for vector obs. When provided,
+        the encoder's input layer is sized to `max_obs_dim` so that all
+        encoders share the same weight shape (required for `jax.vmap`).
+        Smaller observations are zero-padded to this size.
+        Only used for 1D vector observations. Default is `None`
 
     Returns
     -------
@@ -851,7 +868,12 @@ def build_obs_encoder(
         return ImageEncoder(obs_shape[-1], n_hidden, key=key)
     elif len(obs_shape) == 1:
         # Vector observations: (D,)
-        return VectorEncoder(obs_shape[0], n_hidden, key=key)
+        return VectorEncoder(
+            obs_shape[0],
+            n_hidden,
+            key=key,
+            max_obs_dim=max_obs_dim,
+        )
     else:
         raise ValueError(
             f"Unsupported observation shape: {obs_shape}. "
