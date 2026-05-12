@@ -17,11 +17,9 @@ import json
 from dataclasses import fields
 from typing import Dict, Self
 
-import jax.numpy as jnp
 from flax import struct
 
 from velora.cli.disco.settings import DiscoDashboardSettings, DiscoParamsSettings
-from velora.disco.distributions import CategoricalBins
 from velora.tracking.settings import RunSettings
 
 
@@ -38,23 +36,13 @@ class PolicyAgentSettings:
     prediction_size : int (optional)
         Size of the observation/action-conditioned prediction vectors (y, z).
         Must match `DiscoAgent` size. Default is `128`
-    q_size : int (optional)
-        Discrete action spaces only. Size of action-value prediction head.
-        Controls the number of discrete bins for distributional Q-values
-        (`n_atoms`). Must match `DiscoAgent` size. Default is `101`
-    bin_resolution : float (optional)
-        Discrete action spaces only. Target bin resolution (width) for
-        distributional Q-values. Dynamically sets the range of Q-values that can
-        be represented for `[min, max]` based on `q_size`. Smaller resolutions
-        provide finer granularity for value predictions but reduce the
-        representable range. Default is `0.4`
     min_log_std : float (optional)
-        Continuous action spaces only. Minimum log standard deviation for
+        Minimum log standard deviation for
         the Gaussian policy. Prevents the policy from becoming too deterministic,
         which would cause gradient explosion in the Gaussian KL divergence.
         Default is `-5.0`
     max_log_std : float (optional)
-        Continuous action spaces only. Maximum log standard deviation for the
+        Maximum log standard deviation for the
         Gaussian policy. Prevents excessively noisy policies early in training.
         Default is `2.0`
     lr : float (optional)
@@ -74,32 +62,12 @@ class PolicyAgentSettings:
     n_hidden: int = 64
     prediction_size: int = 128
 
-    q_size: int = 101
-    bin_resolution: float = 0.4
-
     min_log_std: float = -5.0
     max_log_std: float = 2.0
 
     lr: float = 3e-4
     max_grad_norm: float = 1.0
     sparsity: float = 0.5
-
-    def categorical_bins(self) -> CategoricalBins:
-        """
-        Computes the categorical bin values for distributional Q-values.
-
-        Returns
-        -------
-        bins : CategoricalBins
-            An object containing the categorical bin values
-        """
-        max_bin_value = (self.bin_resolution * (self.q_size - 1)) / 2.0
-        support = jnp.linspace(-max_bin_value, max_bin_value, num=self.q_size)
-        return CategoricalBins(
-            support=support,
-            min_value=-max_bin_value,
-            max_value=max_bin_value,
-        )
 
 
 @struct.dataclass(frozen=True)
@@ -116,29 +84,26 @@ class DiscoEncoderSettings:
     Parameters
     ----------
     prediction_size : int
-        Size of the observation/action-conditioned prediction vectors (y, z).
-    q_size : int
-        Size of action-value prediction head.
+        Size of the observation/action-conditioned prediction vectors `(y, z)`.
     obs_embed_dim : int (optional)
-        Embedding output dimension for observation-conditioned predictions (y).
+        Embedding output dimension for observation-conditioned predictions `(y)`.
         Default is `32`
     action_embed_dim : int (optional)
-        Embedding output dimension for action-conditional inputs (z, q, pi).
+        Embedding output dimension for action-conditional inputs `(z, q, pi)`.
         Default is `32`
     scalar_embed_dim : int (optional)
-        Embedding output dimension for scalar inputs (rewards, discounts).
+        Embedding output dimension for scalar inputs `(rewards, discounts)`.
         Default is `8`
     """
 
     prediction_size: int
-    q_size: int
 
     obs_embed_dim: int = 32
     action_embed_dim: int = 32
     scalar_embed_dim: int = 16
 
     @classmethod
-    def create(cls, prediction_size: int, q_size: int) -> Self:
+    def create(cls, prediction_size: int) -> Self:
         """
         Creates a new settings object using dynamic computation of embedding dimensions based on `prediction_size`.
 
@@ -151,8 +116,6 @@ class DiscoEncoderSettings:
         ----------
         prediction_size : int
             Size of the observation/action-conditioned prediction vectors (y, z).
-        q_size : int
-            Size of action-value prediction head.
 
         Returns
         -------
@@ -161,7 +124,6 @@ class DiscoEncoderSettings:
         """
         return cls(
             prediction_size=prediction_size,
-            q_size=q_size,
             obs_embed_dim=prediction_size // 2,
             action_embed_dim=prediction_size // 2,
             scalar_embed_dim=max(prediction_size // 8, 4),  # Min of 4
@@ -181,22 +143,6 @@ class DiscoEncoderSettings:
             self.obs_embed_dim * 2 + self.action_embed_dim * 2 + self.scalar_embed_dim
         )
 
-    @property
-    def action_input_dim(self) -> int:
-        """
-        Input dimension for action-conditional encoder.
-
-        Combines `(z, q, pi, one_hot_actions)` for normal and target predictions.
-
-        Result: `2 * (prediction_size + q_size + 1) + 1`
-
-        Returns
-        -------
-        dim : int
-            Action encoder input dimension
-        """
-        return 2 * (self.prediction_size + self.q_size + 1) + 1
-
 
 @struct.dataclass(frozen=True)
 class DiscoAgentSettings:
@@ -214,9 +160,6 @@ class DiscoAgentSettings:
     prediction_size : int (optional)
         Size of the observation/action-conditioned prediction vectors (y, z).
         Must match `PolicyAgent` size. Default is `128`
-    q_size : int (optional)
-        Size of action-value prediction head.
-        Must match `PolicyAgent` size. Default is `101`
     lr : float (optional)
         Learning rate for the agent's optimizer. Default is `0.0003`
     max_grad_norm : float (optional)
@@ -246,8 +189,8 @@ class DiscoAgentSettings:
         the training set. Determined at runtime by probing environment action
         spaces — not a tunable hyperparameter.
 
-        Used by `ContinuousDiscoNetwork` to size the policy target projections
-        `(μ̂, log σ̂)` and by `ContinuousDiscoInputEncoder` to size the policy
+        Used by `DiscoNetwork` to size the policy target projections
+        `(μ̂, log σ̂)` and by `DiscoInputEncoder` to size the policy
         and action-conditional encoder inputs. Serialized with the config so
         that `load()` can reconstruct the correct network shapes.
 
@@ -256,7 +199,6 @@ class DiscoAgentSettings:
 
     n_hidden: int = 128
     prediction_size: int = 128
-    q_size: int = 101
 
     lr: float = 3e-4
     max_grad_norm: float = 1.0
@@ -298,14 +240,10 @@ class DiscoAgentSettings:
             Encoder configuration
         """
         if self.dynamic_embed_dims:
-            return DiscoEncoderSettings.create(
-                self.prediction_size,
-                self.q_size,
-            )
+            return DiscoEncoderSettings.create(self.prediction_size)
 
         return DiscoEncoderSettings(
             prediction_size=self.prediction_size,
-            q_size=self.q_size,
             obs_embed_dim=self.obs_embed_dim,
             action_embed_dim=self.action_embed_dim,
             scalar_embed_dim=self.scalar_embed_dim,
@@ -581,28 +519,6 @@ class RuleTrainerSettings:
             Total environment steps that will be consumed
         """
         return n_steps * num_trainers * self.steps_per_meta
-
-    def verify_params(self) -> None:
-        """
-        Verifies policy agent and disco agent parameters are identical where needed.
-
-        Raises
-        ------
-        param_mismatch : ValueError
-            When `PolicyAgentSettings` and `DiscoAgentSettings` have mismatches of: `prediction_size` or `q_size`.
-        """
-        pred_valid = self.agent.prediction_size == self.disco_agent.prediction_size
-        q_valid = self.agent.q_size == self.disco_agent.q_size
-
-        if not pred_valid:
-            raise ValueError(
-                f"'agent.prediction_size' and 'disco_agent.prediction_size' must match. Got: (agent={self.agent.prediction_size}, disco={self.disco_agent.prediction_size})"
-            )
-
-        if not q_valid:
-            raise ValueError(
-                f"'agent.q_size' and 'disco_agent.q_size' must match. Got: (agent={self.agent.q_size}, disco={self.disco_agent.q_size})"
-            )
 
     def agent_trainer_config(self) -> AgentTrainerSettings:
         """

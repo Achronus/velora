@@ -1,6 +1,5 @@
 from velora import base, cli, compute, disco, gym, lnn, nn, tracking, utils
 from velora.disco import (
-    ContinuousRuleTrainer,
     DiscoAgent,
     DiscoAgentSettings,
     DiscoValueSettings,
@@ -34,7 +33,6 @@ from velora.tracking import RunSettings
 
 __all__ = [
     "RuleTrainer",
-    "ContinuousRuleTrainer",
     "RuleTrainerSettings",
     "DiscoAgent",
     "PolicyAgentSettings",

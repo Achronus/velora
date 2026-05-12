@@ -72,8 +72,8 @@ class OCMPredictions:
 
         Returns
         -------
-        ocm_preds : Tuple[chex.Array, ...]
-            OCM prediction values in order `(embedding, pi, y)`
+        preds : Tuple[chex.Array, ...]
+            Prediction values in order `(embedding, pi, y)`
         """
         skip = {"embedding"} if ignore_embed else set()
         return tuple(getattr(self, f.name) for f in fields(self) if f.name not in skip)
@@ -129,11 +129,122 @@ class ACMPredictions:
 
         Returns
         -------
-        ocm_preds : Tuple[chex.Array, ...]
-            OCM prediction values in order `(embedding, z, aux_pi, q)`
+        preds : Tuple[chex.Array, ...]
+            Prediction values in order `(embedding, z, aux_pi, q)`
         """
         skip = {"embedding"} if ignore_embed else set()
         return tuple(getattr(self, f.name) for f in fields(self) if f.name not in skip)
+
+
+@struct.dataclass
+class PolicyAgentOutput:
+    """
+    Dataclass for the `PolicyAgent` output.
+
+    If `T` dimension on values is `T=1` use `PolicyAgentOutput.create()`.
+
+    Parameters
+    ----------
+    encoding : chex.Array
+        Encoder embedding output `(B, T, F)`
+    mu : chex.Array
+        Policy mean with shape `(B, T, D)` or `(B, D)`.
+        Padded to `max_action_dim`.
+    log_std : chex.Array
+        Policy log standard deviation with shape `(B, T, D)` or `(B, D)`.
+        Padded to `max_action_dim`.
+    y : chex.Array
+        Observation-conditioned prediction vector `(B, T, Y)` or `(B, Y)`.
+    z : chex.Array
+        Action-conditioned prediction vector `(B, T, Z)` or `(B, Z)`.
+        Conditioned on the action taken — no action dimension.
+    aux_pi : chex.Array
+        Auxiliary policy prediction — predicted next-step Gaussian parameters
+        `(μ', log σ')` with shape `(B, T, 2D)` or `(B, 2D)`.
+        Conditioned on the action taken — no action indexing needed.
+    q : chex.Array
+        Scalar action-value estimate `(B, T, 1)` or `(B, 1)`.
+        Conditioned on the action taken — no distributional bins.
+    """
+
+    encoding: chex.Array
+    mu: chex.Array
+    log_std: chex.Array
+    y: chex.Array
+    z: chex.Array
+    aux_pi: chex.Array
+    q: chex.Array
+
+    @classmethod
+    def create(
+        cls,
+        encoding: chex.Array,
+        mu: chex.Array,
+        log_std: chex.Array,
+        y: chex.Array,
+        z: chex.Array,
+        aux_pi: chex.Array,
+        q: chex.Array,
+    ) -> Self:
+        """Create a new instance with time dimension squeezed if `T=1`."""
+        return cls(
+            *jax.tree.map(squeeze_time, (encoding, mu, log_std, y, z, aux_pi, q))
+        )
+
+    def to_numpy(self) -> Self:
+        """Convert all fields to numpy arrays."""
+        return jax.tree.map(np.asarray, self)
+
+    @classmethod
+    def from_numpy(
+        cls,
+        encoding: np.ndarray,
+        mu: np.ndarray,
+        log_std: np.ndarray,
+        y: np.ndarray,
+        z: np.ndarray,
+        aux_pi: np.ndarray,
+        q: np.ndarray,
+    ) -> Self:
+        """Create a new instance from numpy arrays."""
+        return cls(*jax.tree.map(jnp.asarray, (encoding, mu, log_std, y, z, aux_pi, q)))
+
+
+@struct.dataclass
+class DiscoAgentOutput:
+    """
+    Dataclass for the `DiscoAgent` output (meta-network targets).
+
+    Does not include `aux_pi` — auxiliary policy prediction has pre-defined
+    semantics and is not part of the discovered target set.
+
+    Parameters
+    ----------
+    mu : chex.Array
+        Policy mean targets (`μ̂`) with shape `(B, T, D)`
+    log_std : chex.Array
+        Policy log-std targets (`log σ̂`) with shape `(B, T, D)`
+    y : chex.Array
+        Observation-conditioned targets (`ŷ`) with shape `(B, T, Y)`
+    z : chex.Array
+        Action-conditioned targets (`ẑ`) with shape `(B, T, Z)`
+    """
+
+    mu: chex.Array
+    log_std: chex.Array
+    y: chex.Array
+    z: chex.Array
+
+    def output_values(self) -> Tuple[chex.Array, ...]:
+        """
+        Convert object into a tuple of values.
+
+        Returns
+        -------
+        preds : Tuple[chex.Array, ...]
+            Prediction values in order `(mu, log_std, y, z)`
+        """
+        return tuple(getattr(self, f.name) for f in fields(self))
 
 
 @struct.dataclass
@@ -145,32 +256,19 @@ class DiscoPredictions:
     ----------
     embedding : chex.Array
         Command layer output with shape `(B, T, F)`
-
-        - batch_size (`B`) - the number of samples per timestep.
-        - seq_length (`T`) - the number of timesteps in the trajectory (can be more than one episode)
-        - n_features (`F`) - the number of features.
-    pi : jax.Array
-        Policy targets (`π̂,`) with shape `(B, T, A)`:
-
-        - batch_size (`B`) - the number of samples per timestep.
-        - seq_length (`T`) - the number of timesteps in the trajectory (can be more than one episode)
-        - n_actions (`A`) - the number of discrete actions in the action space.
-    y : jax.Array
-        Observation-conditioned targets (`ŷ`) with shape `(B, T, Y)`:
-
-        - batch_size (`B`) - the number of samples per timestep.
-        - seq_length (`T`) - the number of timesteps in the trajectory (can be more than one episode)
-        - y_dim (`Y`) - the size of the observation-conditioned vector.
-    z : jax.Array
-        Action-conditioned targets (`ẑ`) with shape `(B, T, Z)`:
-
-        - batch_size (`B`) - the number of samples per timestep.
-        - seq_length (`T`) - the number of timesteps in the trajectory (can be more than one episode)
-        - z_dim (`Z`) - the size of the action-conditioned vector.
+    mu : chex.Array
+        Policy mean targets (`μ̂`) with shape `(B, T, D)`
+    log_std : chex.Array
+        Policy log-std targets (`log σ̂`) with shape `(B, T, D)`
+    y : chex.Array
+        Observation-conditioned targets (`ŷ`) with shape `(B, T, Y)`
+    z : chex.Array
+        Action-conditioned targets (`ẑ`) with shape `(B, T, Z)`
     """
 
     embedding: chex.Array
-    pi: chex.Array
+    mu: chex.Array
+    log_std: chex.Array
     y: chex.Array
     z: chex.Array
 
@@ -186,190 +284,11 @@ class DiscoPredictions:
 
         Returns
         -------
-        target_preds : Tuple[chex.Array, ...]
-            Target prediction values in order `(embedding, pi, y, z)`
+        preds : Tuple[chex.Array, ...]
+            Prediction values in order `(embedding, mu, log_std, y, z)`
         """
         skip = {"embedding"} if ignore_embed else set()
         return tuple(getattr(self, f.name) for f in fields(self) if f.name not in skip)
-
-
-@struct.dataclass
-class PolicyAgentOutput:
-    """
-    Dataclass for the `PolicyAgent` output.
-
-    If `T` dimension on values is `T=1` use `AgentOutput.create()`.
-
-    Parameters
-    ----------
-    encoding : chex.Array
-        Encoder embedding output `(B, T, F)`
-
-        - `batch_size (B)` the number of samples per timestep
-        - `seq_length (T)` the number of sequences (e.g., trajectories)
-        - `features (F)` number of features in the embedding
-
-    pi : jax.Array
-        Policy logits with shape `(B, T, A)` or `(B, A)`:
-
-        - batch_size (`B`) - the number of samples per timestep.
-        - seq_length (`T`) - the number of timesteps in the trajectory (can be more than one episode)
-        - n_actions (`A`) - the number of discrete actions in the action space.
-
-    y : jax.Array
-        Observation-conditioned prediction vector with shape `(B, T, Y)` or `(B, Y)`:
-
-        - batch_size (`B`) - the number of samples per timestep.
-        - seq_length (`T`) - the number of timesteps in the trajectory (can be more than one episode)
-        - y_dim (`Y`) - the size of the observation-conditioned prediction vector.
-
-    z : jax.Array
-        Action-conditioned prediction vector with shape `(B, T, A, Z)` or `(B, A, Z)`:
-
-        - batch_size (`B`) - the number of samples per timestep.
-        - seq_length (`T`) - the number of timesteps in the trajectory (can be more than one episode)
-        - n_actions (`A`) - the number of discrete actions in the action space.
-        - z_dim (`Z`) - the size of the action-conditioned prediction vector.
-
-    aux_pi : jax.Array
-        Auxiliary policy logits with shape `(B, T, A, A)` or `(B, A, A)`:
-
-        - batch_size (`B`) - the number of samples per timestep.
-        - seq_length (`T`) - the number of timesteps in the trajectory (can be more than one episode)
-        - n_actions (`A`) - the number of discrete actions in the action space.
-
-    q : jax.Array
-        Action-value predictions with shape `(B, T, A, Q)` or `(B, A, Q)`:
-
-        - batch_size (`B`) - the number of samples per timestep.
-        - seq_length (`T`) - the number of timesteps in the trajectory (can be more than one episode)
-        - n_actions (`A`) - the number of discrete actions in the action space.
-        - q_dim (`Q`) - the size of the action-value prediction head.
-    """
-
-    encoding: chex.Array
-    pi: chex.Array
-    y: chex.Array
-    z: chex.Array
-    aux_pi: chex.Array
-    q: chex.Array
-
-    @classmethod
-    def create(
-        cls,
-        encoding: chex.Array,
-        pi: chex.Array,
-        y: chex.Array,
-        z: chex.Array,
-        aux_pi: chex.Array,
-        q: chex.Array,
-    ) -> Self:
-        """Create a new instance with time dimension squeezed if `T=1`."""
-        return cls(*jax.tree.map(squeeze_time, (encoding, pi, y, z, aux_pi, q)))
-
-    def to_numpy(self) -> Self:
-        """Convert all fields to numpy arrays."""
-        return jax.tree.map(np.asarray, self)
-
-    @classmethod
-    def from_numpy(
-        cls,
-        encoding: np.ndarray,
-        pi: np.ndarray,
-        y: np.ndarray,
-        z: np.ndarray,
-        aux_pi: np.ndarray,
-        q: np.ndarray,
-    ) -> Self:
-        """Create a new instance from numpy arrays."""
-        return cls(*jax.tree.map(jnp.asarray, (encoding, pi, y, z, aux_pi, q)))
-
-
-@struct.dataclass
-class DiscoAgentOutput:
-    """
-    Dataclass for the `DiscoAgent` output.
-
-    Parameters
-    ----------
-    pi : jax.Array
-        Policy logits with shape `(B, T, A)`:
-
-        - batch_size (`B`) - the number of samples per timestep.
-        - seq_length (`T`) - the number of timesteps in the trajectory (can be more than one episode)
-        - n_actions (`A`) - the number of discrete actions in the action space.
-
-    y : jax.Array
-        Observation-conditioned prediction vector with shape `(B, T, Y)`:
-
-        - batch_size (`B`) - the number of samples per timestep.
-        - seq_length (`T`) - the number of timesteps in the trajectory (can be more than one episode)
-        - y_dim (`Y`) - the size of the observation-conditioned prediction vector.
-
-    z : jax.Array
-        Action-conditioned prediction vector with shape `(B, T, Z)`:
-
-        - batch_size (`B`) - the number of samples per timestep.
-        - seq_length (`T`) - the number of timesteps in the trajectory (can be more than one episode)
-        - z_dim (`Z`) - the size of the action-conditioned prediction vector.
-    """
-
-    pi: chex.Array
-    y: chex.Array
-    z: chex.Array
-
-    def mask_pi(self, mask: chex.Array, value: float = -1e9) -> Self:
-        """
-        Mask invalid action slots in the policy target logits.
-
-        Sets padded action dimensions to a large negative value so that
-        softmax assigns them zero probability, preventing spurious
-        KL gradients between meta-network targets and agent predictions.
-
-        Parameters
-        ----------
-        mask : chex.Array
-            Boolean mask `(max_actions,)` where `True` indicates a
-            valid action
-        value : float (optional)
-            Fill value for masked slots. Default is `-1e9`
-
-        Returns
-        -------
-        masked : Self
-            New instance with masked `pi` field
-        """
-        return self.__replace__(pi=jnp.where(mask, self.pi, value))
-
-
-@struct.dataclass
-class ActionDecoderOutput:
-    """
-    Dataclass for `ActionDecoder` per-action outputs.
-
-    All fields have a leading action dimension `A` which is either the
-    environment's real `n_actions` (during collection) or `max_actions`
-    (during the vmapped meta-gradient computation).
-
-    Parameters
-    ----------
-    pi : chex.Array
-        Policy logits with shape `(B, T, A, 1)` or `(B, A, 1)`
-    z : chex.Array
-        Action-conditioned prediction with shape
-        `(B, T, A, Z)` or `(B, A, Z)`
-    aux_pi : chex.Array
-        Auxiliary policy prediction with shape
-        `(B, T, A, max_A)` or `(B, A, max_A)`
-    q : chex.Array
-        Action-value prediction with shape
-        `(B, T, A, Q)` or `(B, A, Q)`
-    """
-
-    pi: chex.Array
-    z: chex.Array
-    aux_pi: chex.Array
-    q: chex.Array
 
 
 @struct.dataclass
@@ -974,136 +893,3 @@ class MetaStepStats:
         """
         mean_losses: LossStatistics = jax.tree.map(jnp.mean, self._losses)
         return mean_losses.to_dict()
-
-
-@struct.dataclass
-class ContinuousPolicyAgentOutput:
-    """
-    Dataclass for the `ContinuousPolicyAgent` output.
-
-    If `T` dimension on values is `T=1` use `ContinuousPolicyAgentOutput.create()`.
-
-    Parameters
-    ----------
-    encoding : chex.Array
-        Encoder embedding output `(B, T, F)`
-    mu : chex.Array
-        Policy mean with shape `(B, T, D)` or `(B, D)`.
-        Padded to `max_action_dim`.
-    log_std : chex.Array
-        Policy log standard deviation with shape `(B, T, D)` or `(B, D)`.
-        Padded to `max_action_dim`.
-    y : chex.Array
-        Observation-conditioned prediction vector `(B, T, Y)` or `(B, Y)`.
-    z : chex.Array
-        Action-conditioned prediction vector `(B, T, Z)` or `(B, Z)`.
-        Conditioned on the action taken — no action dimension.
-    aux_pi : chex.Array
-        Auxiliary policy prediction — predicted next-step Gaussian parameters
-        `(μ', log σ')` with shape `(B, T, 2D)` or `(B, 2D)`.
-        Conditioned on the action taken — no action indexing needed.
-    q : chex.Array
-        Scalar action-value estimate `(B, T, 1)` or `(B, 1)`.
-        Conditioned on the action taken — no distributional bins.
-    """
-
-    encoding: chex.Array
-    mu: chex.Array
-    log_std: chex.Array
-    y: chex.Array
-    z: chex.Array
-    aux_pi: chex.Array
-    q: chex.Array
-
-    @classmethod
-    def create(
-        cls,
-        encoding: chex.Array,
-        mu: chex.Array,
-        log_std: chex.Array,
-        y: chex.Array,
-        z: chex.Array,
-        aux_pi: chex.Array,
-        q: chex.Array,
-    ) -> Self:
-        """Create a new instance with time dimension squeezed if `T=1`."""
-        return cls(
-            *jax.tree.map(squeeze_time, (encoding, mu, log_std, y, z, aux_pi, q))
-        )
-
-    def to_numpy(self) -> Self:
-        """Convert all fields to numpy arrays."""
-        return jax.tree.map(np.asarray, self)
-
-    @classmethod
-    def from_numpy(
-        cls,
-        encoding: np.ndarray,
-        mu: np.ndarray,
-        log_std: np.ndarray,
-        y: np.ndarray,
-        z: np.ndarray,
-        aux_pi: np.ndarray,
-        q: np.ndarray,
-    ) -> Self:
-        """Create a new instance from numpy arrays."""
-        return cls(*jax.tree.map(jnp.asarray, (encoding, mu, log_std, y, z, aux_pi, q)))
-
-
-@struct.dataclass
-class ContinuousDiscoAgentOutput:
-    """
-    Dataclass for the `ContinuousDiscoAgent` output (meta-network targets).
-
-    Does not include `aux_pi` — auxiliary policy prediction has pre-defined
-    semantics and is not part of the discovered target set.
-
-    Parameters
-    ----------
-    mu : chex.Array
-        Policy mean targets (`μ̂`) with shape `(B, T, D)`
-    log_std : chex.Array
-        Policy log-std targets (`log σ̂`) with shape `(B, T, D)`
-    y : chex.Array
-        Observation-conditioned targets (`ŷ`) with shape `(B, T, Y)`
-    z : chex.Array
-        Action-conditioned targets (`ẑ`) with shape `(B, T, Z)`
-    """
-
-    mu: chex.Array
-    log_std: chex.Array
-    y: chex.Array
-    z: chex.Array
-
-    def output_values(self) -> Tuple[chex.Array, ...]:
-        return tuple(getattr(self, f.name) for f in fields(self))
-
-
-@struct.dataclass
-class ContinuousDiscoPredictions:
-    """
-    Dataclass for `ContinuousDiscoNetwork` predictions.
-
-    Parameters
-    ----------
-    embedding : chex.Array
-        Command layer output with shape `(B, T, F)`
-    mu : chex.Array
-        Policy mean targets (`μ̂`) with shape `(B, T, D)`
-    log_std : chex.Array
-        Policy log-std targets (`log σ̂`) with shape `(B, T, D)`
-    y : chex.Array
-        Observation-conditioned targets (`ŷ`) with shape `(B, T, Y)`
-    z : chex.Array
-        Action-conditioned targets (`ẑ`) with shape `(B, T, Z)`
-    """
-
-    embedding: chex.Array
-    mu: chex.Array
-    log_std: chex.Array
-    y: chex.Array
-    z: chex.Array
-
-    def output_values(self, ignore_embed: bool = True) -> Tuple[chex.Array, ...]:
-        skip = {"embedding"} if ignore_embed else set()
-        return tuple(getattr(self, f.name) for f in fields(self) if f.name not in skip)

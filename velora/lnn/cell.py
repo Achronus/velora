@@ -311,7 +311,7 @@ class NCPLiquidCell(nnx.Module):
         fh_g = self.f_head_to_g(x_cat)
         fh_h = self.f_head_to_h(x_cat)
 
-        # The uniform gate — what V1's alpha replaces
+        # The uniform gate
         gate = self.sigmoid(fh_g + fh_h)  # ts=1.0
 
         return {

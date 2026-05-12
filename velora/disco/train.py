@@ -16,7 +16,7 @@
 import math
 import random
 from collections import defaultdict
-from typing import Callable, Dict, List, Self, Tuple, override
+from typing import Callable, Dict, List, Self, Tuple
 
 import chex
 import gymnasium as gym
@@ -31,15 +31,11 @@ from velora.cli.disco.dashboard import DiscoConsoleDashboard
 from velora.cli.disco.settings import DiscoParamsSettings
 from velora.cli.disco.simple import SimpleDashboard
 from velora.compute.loss import (
-    compute_discrete_policy_gradient_loss,
-    compute_entropy_loss,
     compute_gaussian_entropy_loss,
     compute_gaussian_policy_gradient_loss,
 )
 from velora.compute.mixflow import fwdrev_value_and_grad
 from velora.disco.agent import (
-    ContinuousDiscoAgent,
-    ContinuousPolicyAgent,
     DiscoAgent,
     DiscoValueAgent,
     PolicyAgent,
@@ -53,10 +49,7 @@ from velora.disco.config.state import (
 )
 from velora.disco.ema import EMAState, MovingAverage
 from velora.disco.outputs import (
-    AgentLosses,
     ChunkLogData,
-    ContinuousDiscoAgentOutput,
-    ContinuousPolicyAgentOutput,
     DiscoAgentOutput,
     HiddenShapeCache,
     LossStatistics,
@@ -64,18 +57,14 @@ from velora.disco.outputs import (
     MetaInnerStepCarry,
     MetaLossAux,
     MetaStepStats,
+    PolicyAgentOutput,
     ValueOutputs,
 )
-from velora.disco.pool import ContinuousTrainerPool, TrainerPool
-from velora.disco.rollouts import ContinuousRollout, Rollout
+from velora.disco.pool import TrainerPool
+from velora.disco.rollouts import Rollout
 from velora.disco.utils.budget import sample_budget
-from velora.disco.utils.compute import (
-    compute_continuous_value_outputs,
-    compute_value_outputs,
-)
+from velora.disco.utils.compute import compute_value_outputs
 from velora.disco.utils.loss import (
-    compute_continuous_meta_reg_loss,
-    compute_continuous_policy_loss,
     compute_meta_reg_loss,
     compute_policy_loss,
 )
@@ -92,283 +81,11 @@ from velora.utils.seed import get_rng_key_data
 from velora.utils.transforms import squeeze_time, unstack_pytree
 
 
-class AgentTrainerBase:
-    """
-    Base class for agent trainers.
-
-    Parameters
-    ----------
-    env_name : str
-        The gymnasium environment name to train on
-    config : AgentTrainerSettings
-        Configuration for individual agent training
-    key : chex.PRNGKey
-        Random number generator key
-    make_fn : MakeFn
-        Factory function to create the environment
-    budget_rng : random.Random
-        Python RNG used to sample the initial step budget
-    jit_compile : bool (optional)
-        Flag to enable/disable JIT compilation. Default is `False`
-    """
-
-    def __init__(
-        self,
-        env_name: str,
-        config: AgentTrainerSettings,
-        *,
-        key: chex.PRNGKey,
-        make_fn: MakeFn,
-        budget_rng: random.Random,
-        jit_compile: bool = False,
-    ) -> None:
-        self.config = config
-        self.env_name = env_name
-
-        self.envs = make_fn(self.env_name, self.config.batch_size)
-
-        self.jit_compile = jit_compile
-        self.key = key
-
-        # Init state
-        self.policy_optim = self._create_optim()
-        self.value_optim = self._create_optim()
-
-        self.ema_utils = MovingAverage(self.config.ema)
-
-        self.meta_optim: optax.GradientTransformation = None  # type: ignore
-        self.meta_opt_state: optax.OptState = None  # type: ignore
-        self.meta_optim_update: Callable = None  # type: ignore
-
-        # Lifetime tracking
-        self._env_steps: int = 0
-        self._step_budget: int = sample_budget(budget_rng)
-
-        # Episode tracking
-        self.episode_tracker = EpisodeTracker(self.config.batch_size)
-        self._collection_step = 0
-
-    def _create_optim(self) -> optax.GradientTransformation:
-        """
-        Create optimizer chain for agent and value network training.
-
-        Uses Adan optimizer (without denominator) with gradient clipping
-        and scaled learning rate.
-
-        Returns
-        -------
-        optim : optax.GradientTransformation
-            Configured optimizer chain
-        """
-        return optax.chain(
-            scale_by_adan_no_denom(),
-            optax.clip(self.config.agent.max_grad_norm),
-            optax.scale(-self.config.agent.lr),
-        )
-
-    def _init_meta_optim(self, meta_params: optax.Params) -> None:
-        """
-        Initializes a per-trainer meta-gradient optimizer to stabilize gradient norms.
-
-        Uses Adan optimizer (without denominator) with gradient clipping.
-
-        Returns
-        -------
-        optim : optax.GradientTransformation
-            Configured optimizer chain
-        """
-        self.meta_optim = optax.chain(
-            scale_by_adan_no_denom(),
-            optax.clip(self.config.agent.max_grad_norm),
-        )
-        self.meta_opt_state = self.meta_optim.init(meta_params)
-
-        # JIT compile update fn (if needed)
-        self.meta_optim_update = (
-            jax.jit(self.meta_optim.update)
-            if self.jit_compile
-            else self.meta_optim.update
-        )
-
-    def close(self) -> None:
-        """Clean up resources."""
-        self.envs.close()
-
-
-class AgentTrainer(AgentTrainerBase):
-    """
-    Factory for a single agent training slot in the `TrainerPool`.
-
-    Creates `PolicyAgent`, `DiscoValueAgent`, environments, and
-    optimizer states. After construction, `TrainerPool` extracts
-    the agents, params, and state — this class serves as an initializer
-    and is recreated on trainer resets.
-
-    Environments are created temporarily during construction for
-    metadata extraction (action space, observation space) and then
-    closed — stepping is handled by `EnvWorkerPool` subprocesses.
-
-    Lifetime
-    ---------
-    Each trainer is assigned a step budget on construction, sampled from the
-    DiscoRL distribution `{20M, 50M, 100M, 200M}` environment steps with
-    weights inversely proportional to budget size. When the budget is
-    exhausted, `TrainerPool` detects the overspend and `RuleTrainer`
-    replaces this trainer with a freshly initialized one before the next
-    collection step. This ensures the meta-learner continually observes
-    agents learning from scratch rather than converged policies.
-
-    Parameters
-    ----------
-    env_name : str
-        The gymnasium environment name to train on
-    config : AgentTrainerSettings
-        Configuration for individual agent training
-    key : chex.PRNGKey
-        Random number generator key
-    make_fn : MakeFn
-        Factory function to create the environment
-    budget_rng : random.Random
-        Python RNG used to sample the initial step budget
-    max_actions : int
-        Maximum number of discrete actions across all environments in the
-        training set
-    jit_compile : bool (optional)
-        Flag to enable/disable JIT compilation. Default is `False`
-    """
-
-    def __init__(
-        self,
-        env_name: str,
-        config: AgentTrainerSettings,
-        *,
-        key: chex.PRNGKey,
-        make_fn: MakeFn,
-        budget_rng: random.Random,
-        max_actions: int,
-        jit_compile: bool = False,
-    ) -> None:
-        super().__init__(
-            env_name,
-            config,
-            key=key,
-            make_fn=make_fn,
-            budget_rng=budget_rng,
-            jit_compile=jit_compile,
-        )
-
-        self.max_actions = max_actions
-
-        self.action_space: gym.spaces.Discrete = self.envs.single_action_space  # type: ignore
-        self.obs_space: gym.spaces.Box = self.envs.single_observation_space  # type: ignore
-
-        self.n_actions = self.action_space.n.item()
-        self.key, agent_key, target_key, value_key = jax.random.split(key, 4)
-
-        self.policy_agent = PolicyAgent(
-            self.obs_space,
-            self.action_space,
-            config=self.config.agent,
-            key=agent_key,
-            max_actions=self.max_actions,
-            jit_compile=self.jit_compile,
-        )
-
-        self.target_agent = PolicyAgent(
-            self.obs_space,
-            self.action_space,
-            config=self.config.agent,
-            key=target_key,
-            max_actions=self.max_actions,
-            jit_compile=self.jit_compile,
-        )
-
-        self.value_agent = DiscoValueAgent(
-            self.obs_space,
-            self.config.agent.n_hidden,
-            config=self.config.value,
-            key=value_key,
-            sparsity=self.config.agent.sparsity,
-            jit_compile=self.jit_compile,
-        )
-
-        # Init state
-        current_obs, _ = self.envs.reset()
-
-        self.state = AgentTrainerState.create(
-            self.policy_optim.init(self.policy_agent.get_params()),
-            self.value_optim.init(self.value_agent.get_params()),
-            current_obs=current_obs,
-        )  # (B, H)
-
-    def warm(self) -> None:
-        """
-        Performs an initial forward pass through the agent networks.
-
-        Includes -
-            1. Materializing parameters before optimizer init
-            2. JIT compile caching
-        """
-        dummy_obs = jnp.zeros(
-            (self.config.batch_size, *self.obs_space.shape),
-            dtype=self.obs_space.dtype,
-        )
-        _, h_policy = self.policy_agent(dummy_obs)
-        _, h_target = self.target_agent(dummy_obs)
-        _, h_value = self.value_agent(dummy_obs)
-
-        self.state = self.state.update_hidden(
-            AgentTrainerHiddenStates(
-                policy_ocm=h_policy.ocm,
-                policy_acm=h_policy.acm,
-                target_ocm=h_target.ocm,
-                target_acm=h_target.acm,
-                value=h_value,
-            )
-        )
-
-    def compute_value_outs(
-        self,
-        rollout: Rollout,
-        adv_ema: EMAState,
-        td_ema: EMAState,
-    ) -> Tuple[ValueOutputs, EMAState, EMAState]:
-        """
-        Compute value outputs and updated EMA states from a rollout.
-
-        Parameters
-        ----------
-        rollout : Rollout
-            Trajectory to compute value targets on
-        adv_ema : EMAState
-            Current advantage EMA state
-        td_ema : EMAState
-            Current TD-error EMA state
-
-        Returns
-        -------
-        value_outs : ValueOutputs
-            Value function outputs (targets, advantages, normalized advantages)
-        adv_ema : EMAState
-            Updated advantage EMA state
-        td_ema : EMAState
-            Updated TD-error EMA state
-        """
-        return compute_value_outputs(
-            rollout,
-            self.ema_utils,
-            adv_ema,
-            td_ema,
-            self.config.value.gamma,
-            self.config.value.td_lambda,
-        )
-
-
-class ContinuousAgentTrainer(AgentTrainerBase):
+class AgentTrainer:
     """
     Factory for a single continuous-action agent training slot in the `TrainerPool`.
 
-    Creates `ContinuousPolicyAgent`, `ContinuousPolicyAgent`, environments, and
+    Creates `PolicyAgent`, `PolicyAgent`, environments, and
     optimizer states. After construction, `TrainerPool` extracts
     the agents, params, and state — this class serves as an initializer
     and is recreated on trainer resets.
@@ -422,14 +139,31 @@ class ContinuousAgentTrainer(AgentTrainerBase):
         max_obs_dim: int | None = None,
         jit_compile: bool = False,
     ) -> None:
-        super().__init__(
-            env_name,
-            config,
-            key=key,
-            make_fn=make_fn,
-            budget_rng=budget_rng,
-            jit_compile=jit_compile,
-        )
+        self.config = config
+        self.env_name = env_name
+
+        self.envs = make_fn(self.env_name, self.config.batch_size)
+
+        self.jit_compile = jit_compile
+        self.key = key
+
+        # Init state
+        self.policy_optim = self._create_optim()
+        self.value_optim = self._create_optim()
+
+        self.ema_utils = MovingAverage(self.config.ema)
+
+        self.meta_optim: optax.GradientTransformation = None  # type: ignore
+        self.meta_opt_state: optax.OptState = None  # type: ignore
+        self.meta_optim_update: Callable = None  # type: ignore
+
+        # Lifetime tracking
+        self._env_steps: int = 0
+        self._step_budget: int = sample_budget(budget_rng)
+
+        # Episode tracking
+        self.episode_tracker = EpisodeTracker(self.config.batch_size)
+        self._collection_step = 0
 
         self.max_action_dim = max_action_dim
         self.max_obs_dim = max_obs_dim
@@ -440,7 +174,7 @@ class ContinuousAgentTrainer(AgentTrainerBase):
         self.action_dim = int(np.prod(self.action_space.shape))
         self.key, agent_key, target_key, value_key = jax.random.split(key, 4)
 
-        self.policy_agent = ContinuousPolicyAgent(
+        self.policy_agent = PolicyAgent(
             self.obs_space,
             self.action_space,
             config=self.config.agent,
@@ -450,7 +184,7 @@ class ContinuousAgentTrainer(AgentTrainerBase):
             jit_compile=self.jit_compile,
         )
 
-        self.target_agent = ContinuousPolicyAgent(
+        self.target_agent = PolicyAgent(
             self.obs_space,
             self.action_space,
             config=self.config.agent,
@@ -520,7 +254,7 @@ class ContinuousAgentTrainer(AgentTrainerBase):
 
     def compute_value_outs(
         self,
-        rollout: ContinuousRollout,
+        rollout: Rollout,
         adv_ema: EMAState,
         td_ema: EMAState,
         action_dim_mask: chex.Array | None = None,
@@ -530,7 +264,7 @@ class ContinuousAgentTrainer(AgentTrainerBase):
 
         Parameters
         ----------
-        rollout : ContinuousRollout
+        rollout : Rollout
             Trajectory to compute value targets on
         adv_ema : EMAState
             Current advantage EMA state
@@ -548,7 +282,7 @@ class ContinuousAgentTrainer(AgentTrainerBase):
         td_ema : EMAState
             Updated TD-error EMA state
         """
-        return compute_continuous_value_outputs(
+        return compute_value_outputs(
             rollout,
             self.ema_utils,
             adv_ema,
@@ -558,11 +292,57 @@ class ContinuousAgentTrainer(AgentTrainerBase):
             action_dim_mask=action_dim_mask,
         )
 
+    def _create_optim(self) -> optax.GradientTransformation:
+        """
+        Create optimizer chain for agent and value network training.
+
+        Uses Adan optimizer (without denominator) with gradient clipping
+        and scaled learning rate.
+
+        Returns
+        -------
+        optim : optax.GradientTransformation
+            Configured optimizer chain
+        """
+        return optax.chain(
+            scale_by_adan_no_denom(),
+            optax.clip(self.config.agent.max_grad_norm),
+            optax.scale(-self.config.agent.lr),
+        )
+
+    def _init_meta_optim(self, meta_params: optax.Params) -> None:
+        """
+        Initializes a per-trainer meta-gradient optimizer to stabilize gradient norms.
+
+        Uses Adan optimizer (without denominator) with gradient clipping.
+
+        Returns
+        -------
+        optim : optax.GradientTransformation
+            Configured optimizer chain
+        """
+        self.meta_optim = optax.chain(
+            scale_by_adan_no_denom(),
+            optax.clip(self.config.agent.max_grad_norm),
+        )
+        self.meta_opt_state = self.meta_optim.init(meta_params)
+
+        # JIT compile update fn (if needed)
+        self.meta_optim_update = (
+            jax.jit(self.meta_optim.update)
+            if self.jit_compile
+            else self.meta_optim.update
+        )
+
+    def close(self) -> None:
+        """Clean up resources."""
+        self.envs.close()
+
 
 class RuleTrainer:
     """
     Discovers a Reinforcement Learning (RL) update rule by meta-training across
-    a population of agents spanning diverse environments. This trainer is suitable for discrete action spaces (`gym.spaces.Discrete`).
+    a population of agents spanning diverse environments.
 
     `RuleTrainer` handles the outer loop of target rule learning (DiscoRL): managing
     a population of `AgentTrainer`s, computing meta-gradients from their learning
@@ -647,7 +427,6 @@ class RuleTrainer:
         if isinstance(envs, EnvGroup):
             envs = EnvSet(envs)
 
-        config.verify_params()
         envs.verify_packages()
 
         # Setup envs
@@ -695,10 +474,28 @@ class RuleTrainer:
             key, self.num_trainers + 2
         )
 
+        # Batch functions
+        self.max_actions = envs.max_action_count(self.config.batch_size)
+        self.max_action_dim = self.max_actions
+        self.max_obs_dim = envs.max_obs_dim(self.config.batch_size) or None
+        self._batch_grad_fn: Callable[..., MetaGradOutput] = None  # type: ignore
+        self._batched_collect_fn: Callable = None  # type: ignore
+
+        self._meta_optim_update: Callable = None  # type: ignore
+
+        # Pre-computed constants
+        self._action_masks: Dict[int, chex.Array] = {}
+        self._hidden_shapes: HiddenShapeCache = None  # type: ignore
+
+        # Training pools
+        self.pool: TrainerPool = None  # type: ignore
+        self._env_worker_pool: EnvWorkerPool = None  # type: ignore
+
         # Init meta-agent and optimizer
         self.meta_agent = DiscoAgent(
             config=config.disco_agent,
             key=meta_key,
+            max_action_dim=self.max_action_dim,
             jit_compile=self.jit_compile,
         )
         self.meta_optim = optax.adam(config.meta_lr)
@@ -718,22 +515,6 @@ class RuleTrainer:
         # Checkpointing
         self.cp_manager = CheckpointManager(self.config.run)
 
-        # Batch functions
-        self.max_actions = envs.max_action_count(self.config.batch_size)
-        self.max_obs_dim = envs.max_obs_dim(self.config.batch_size) or None
-        self._batch_grad_fn: Callable[..., MetaGradOutput] = None  # type: ignore
-        self._batched_collect_fn: Callable = None  # type: ignore
-
-        self._meta_optim_update: Callable = None  # type: ignore
-
-        # Pre-computed constants
-        self._action_masks: Dict[int, chex.Array] = {}
-        self._hidden_shapes: HiddenShapeCache = None  # type: ignore
-
-        # Training pools
-        self.pool: TrainerPool = None  # type: ignore
-        self._env_worker_pool: EnvWorkerPool = None  # type: ignore
-
         # init console dashboard
         _n_chunks = math.ceil(self.num_trainers / self.max_group_size)
 
@@ -751,55 +532,6 @@ class RuleTrainer:
             )
         else:
             self.console = SimpleDashboard(self.n_steps)
-
-    def _create_dummy_policy(
-        self,
-        obs_space: gym.spaces.Box,
-        act_space: gym.Space,
-        config: AgentTrainerSettings,
-        rng_key: chex.PRNGKey,
-    ) -> PolicyAgent:
-        """
-        Factory hook for creating a dummy policy agent to extract parameter counts.
-
-        Parameters
-        ----------
-        obs_space : gym.spaces.Box
-            Single observation space
-        act_space : gym.Space
-            Single action space
-        config : AgentTrainerSettings
-            Agent trainer configuration
-        rng_key : chex.PRNGKey
-            Random number generator key
-
-        Returns
-        -------
-        policy : PolicyAgent
-            Dummy policy agent for parameter counting
-        """
-        return PolicyAgent(
-            obs_space,
-            act_space,  # type: ignore
-            config=config.agent,
-            key=rng_key,
-            max_actions=self.max_actions,
-        )
-
-    @property
-    def _worker_action_type(self) -> str:
-        """Action type identifier passed to `EnvWorkerPool` workers."""
-        return "discrete"
-
-    @property
-    def _worker_max_action_dim(self) -> int:
-        """Max action dimensionality passed to `EnvWorkerPool` workers."""
-        return 1
-
-    @property
-    def _worker_max_obs_dim(self) -> int:
-        """Max observation dimensionality passed to `EnvWorkerPool` workers."""
-        return 0
 
     def _dummy_params(self, rng_key: chex.PRNGKey) -> DiscoParamsSettings:
         """
@@ -819,11 +551,13 @@ class RuleTrainer:
         env_name, make_fn = self._env_specs[0]
         envs = make_fn(env_name, self.config.batch_size)
 
-        policy = self._create_dummy_policy(
+        policy = PolicyAgent(
             envs.single_observation_space,  # type: ignore
             envs.single_action_space,  # type: ignore
-            config,
-            rng_key,
+            config=config.agent,
+            key=rng_key,
+            max_action_dim=self.max_actions,
+            max_obs_dim=self.max_obs_dim,
         )
 
         value = DiscoValueAgent(
@@ -849,6 +583,7 @@ class RuleTrainer:
         to trigger JIT compilation and pre-warm GPU->CPU transfers.
         """
         dummy_obs = jnp.asarray(self.pool.obs)
+        dummy_actions = jnp.asarray(self.pool.prev_actions)
         (
             warm_preds,
             warm_target_preds,
@@ -856,6 +591,7 @@ class RuleTrainer:
             *_,
         ) = self._batched_collect_fn(
             dummy_obs,
+            dummy_actions,
             self.pool.p_params,
             self.pool.t_params,
             self.pool.v_params,
@@ -870,7 +606,7 @@ class RuleTrainer:
         # Warm XLA's GPU->CPU host transfer
         _ = jax.device_get((warm_preds, warm_target_preds, warm_values))
 
-        del dummy_obs, warm_preds, warm_target_preds, warm_values
+        del dummy_obs, dummy_actions, warm_preds, warm_target_preds, warm_values
         jax.effects_barrier()
 
     def _warm_compile(self) -> None:
@@ -947,7 +683,7 @@ class RuleTrainer:
         make_fn: MakeFn,
     ) -> AgentTrainer:
         """
-        Factory hook for creating a single agent trainer.
+        Creates a single agent trainer.
 
         Parameters
         ----------
@@ -971,46 +707,9 @@ class RuleTrainer:
             key=key,
             make_fn=make_fn,
             budget_rng=self._budget_rng,
-            max_actions=self.max_actions,
+            max_action_dim=self.max_action_dim,
+            max_obs_dim=self.max_obs_dim,
             jit_compile=self.jit_compile,
-        )
-
-    def _build_action_masks(self) -> Dict[int, chex.Array]:
-        """
-        Build action masks keyed by action count.
-
-        Returns
-        -------
-        masks : Dict[int, chex.Array]
-            Boolean masks `(max_actions,)` keyed by each trainer's action count
-        """
-        return {
-            t.n_actions: jnp.arange(self.max_actions) < t.n_actions
-            for t in self.trainers
-        }
-
-    def _create_pool(self) -> TrainerPool:
-        """
-        Factory hook for creating the trainer pool.
-
-        Returns
-        -------
-        pool : TrainerPool
-            Initialized trainer pool with stacked params on accelerator
-        """
-        return TrainerPool(
-            self.trainers,
-            max_actions=self.max_actions,
-            action_masks=self._action_masks,
-            hidden_shapes=self._hidden_shapes,
-            n_updates=self.config.n_updates,
-            seq_len=self.config.seq_len,
-            batch_size=self.config.batch_size,
-            encoding_dim=self.trainers[0].policy_agent.encoding_dim,
-            prediction_dim=self.config.agent.prediction_size,
-            q_dim=self.config.agent.q_size,
-            env_worker_pool=self._env_worker_pool,
-            use_bfloat16=self.use_bfloat16,
         )
 
     def _initial_setup(self, trainer_keys: List[chex.PRNGKey]) -> None:
@@ -1045,7 +744,7 @@ class RuleTrainer:
             self.console.update_setup()
 
         # Pre-compute shared constants for the inner loop
-        self._action_masks = self._build_action_masks()
+        self._action_masks = {t.action_dim: t.action_dim_mask for t in self.trainers}
 
         # Cache hidden state shapes for batched collection (None → zeros)
         h0 = self.trainers[0].state.hidden
@@ -1074,13 +773,25 @@ class RuleTrainer:
         self._env_worker_pool = EnvWorkerPool(
             env_worker_specs,
             self.num_env_workers,
-            action_type=self._worker_action_type,
-            max_action_dim=self._worker_max_action_dim,
-            max_obs_dim=self._worker_max_obs_dim,
+            action_type="continuous",
+            max_action_dim=self.max_action_dim,
+            max_obs_dim=self.max_obs_dim or 0,
         )
 
         # Build trainer pool — stacks all params/states as permanent GPU arrays
-        self.pool = self._create_pool()
+        self.pool = TrainerPool(
+            self.trainers,
+            max_action_dim=self.max_action_dim,
+            action_masks=self._action_masks,
+            hidden_shapes=self._hidden_shapes,
+            n_updates=self.config.n_updates,
+            seq_len=self.config.seq_len,
+            batch_size=self.config.batch_size,
+            encoding_dim=self.trainers[0].policy_agent.encoding_dim,
+            prediction_dim=self.config.agent.prediction_size,
+            env_worker_pool=self._env_worker_pool,
+            use_bfloat16=self.use_bfloat16,
+        )
         self.console.update_setup()
 
         # Pre-compile all chunk sizes so train() starts warm
@@ -1160,6 +871,7 @@ class RuleTrainer:
 
         def _pure_forward(
             obs,
+            prev_actions,
             p_params,
             t_params,
             v_params,
@@ -1168,7 +880,7 @@ class RuleTrainer:
             t_ocm_h,
             t_acm_h,
             v_h,
-            a_mask,
+            a_dim_mask,
         ):
             # Reconstruct all modules from explicit params
             encoder, p_ocm, p_acm, p_dec = t.policy_agent.merge_params(p_params)
@@ -1178,29 +890,52 @@ class RuleTrainer:
             # Shared encoding
             encoding = encoder(obs)
 
+            # Add time dimension to match encoding shape from encoder
+            if prev_actions.ndim == encoding.ndim - 1:
+                prev_actions = jnp.expand_dims(prev_actions, axis=1)
+
             # Policy forward
             ocm_preds, new_p_ocm_h = p_ocm(encoding, h_state=p_ocm_h)
-            acm_preds, new_p_acm_h = p_acm(ocm_preds.embedding, h_state=p_acm_h)
-            preds = t.policy_agent._decode_to_actions(
+            acm_preds, new_p_acm_h = p_acm(
+                ocm_preds.embedding,
+                prev_actions,
+                h_state=p_acm_h,
+            )
+            mu, log_std, aux_pi = p_dec(
+                ocm_preds.pi,
+                acm_preds.aux_pi,
+                action_dim_mask=a_dim_mask,
+            )
+            preds = PolicyAgentOutput.create(
                 encoding,
-                ocm_preds,
-                acm_preds,
-                action_mask=a_mask,
-                decoder=p_dec,
+                mu,
+                log_std,
+                ocm_preds.y,
+                acm_preds.z,
+                aux_pi,
+                acm_preds.q,
             )
 
             # Target forward
             t_ocm_preds, new_t_ocm_h = t_ocm(encoding, h_state=t_ocm_h)
             t_acm_preds, new_t_acm_h = t_acm(
                 t_ocm_preds.embedding,
+                prev_actions,
                 h_state=t_acm_h,
             )
-            target_preds = t.target_agent._decode_to_actions(
+            t_mu, t_log_std, t_aux_pi = t_dec(
+                t_ocm_preds.pi,
+                t_acm_preds.aux_pi,
+                action_dim_mask=a_dim_mask,
+            )
+            target_preds = PolicyAgentOutput.create(
                 encoding,
-                t_ocm_preds,
-                t_acm_preds,
-                action_mask=a_mask,
-                decoder=t_dec,
+                t_mu,
+                t_log_std,
+                t_ocm_preds.y,
+                t_acm_preds.z,
+                t_aux_pi,
+                t_acm_preds.q,
             )
 
             # Value forward
@@ -1229,12 +964,13 @@ class RuleTrainer:
         targets: DiscoAgentOutput,
         discounts: chex.Array,
         mask: chex.Array,
-    ) -> Tuple[chex.Array, AgentLosses]:
+    ) -> Tuple[chex.Array, chex.Array]:
         """
-        Compute inner-loop policy loss for a single update step.
+        Compute inner-loop policy loss for a single continuous update step.
 
-        Runs a functional forward pass through the policy agent with explicit
-        parameters and computes the loss against disco targets.
+        Runs a functional forward pass through the continuous policy agent
+        with explicit parameters and computes the Gaussian policy loss against
+        disco targets.
 
         Parameters
         ----------
@@ -1245,72 +981,49 @@ class RuleTrainer:
         encoding : chex.Array
             Encoder embeddings `(B, T, F)`
         actions : chex.Array
-            Actions taken `(B, T, 1)`
+            Continuous actions taken `(B, T, A)`
         targets : DiscoAgentOutput
             Disco targets for this update step
         discounts : chex.Array
             Episode discount factors `(B, T)`
         mask : chex.Array
-            Boolean mask `(max_actions,)` for valid actions
+            Boolean mask `(max_action_dim,)` for valid action dimensions
 
         Returns
         -------
-        loss : chex.Array
-            Scalar policy loss
-        aux : AgentLosses
-            Auxiliary loss data
+        total_loss : chex.Array
+            Total weighted policy loss
+        pi_loss : chex.Array
+            Policy KL divergence component
         """
         new_preds = trainer.policy_agent.functional_forward(
             encoding,
+            actions,
             p_params,
-            action_mask=mask,
+            action_dim_mask=mask,
         )
         return compute_policy_loss(
             targets,
-            new_preds.pi,
+            new_preds.mu,
+            new_preds.log_std,
             new_preds.y,
             new_preds.z,
             new_preds.aux_pi,
-            actions,
             discounts,
             self.config.loss_cost,
             mask,
         )
 
-    def _scan_step_aux(
-        self,
-        targets: DiscoAgentOutput,
-        rollout: Rollout,
-    ) -> Tuple[DiscoAgentOutput, chex.Array]:
-        """
-        Return auxiliary data to carry out of each inner-loop scan step.
-
-        The returned tuple is accumulated across scan steps and passed to
-        `_compute_outer_losses` for validation loss computation.
-
-        Parameters
-        ----------
-        targets : DiscoAgentOutput
-            Disco targets for this step
-        rollout : Rollout
-            Current rollout being processed
-
-        Returns
-        -------
-        aux : Tuple[DiscoAgentOutput, chex.Array]
-            `(targets, target_preds_pi)` — target logits for regularization
-        """
-        return (targets, rollout.target_preds.pi)
-
     def _compute_outer_losses(
         self,
         valid_rollout: Rollout,
         adv: chex.Array,
-        scan_aux: Tuple[DiscoAgentOutput, chex.Array],
+        scan_aux: Tuple[DiscoAgentOutput, chex.Array, chex.Array],
         mask: chex.Array,
     ) -> Tuple[chex.Array, chex.Array, chex.Array]:
         """
-        Compute validation policy gradient, entropy, and regularization losses.
+        Compute validation policy gradient, entropy, and regularization losses
+        for continuous action spaces.
 
         Parameters
         ----------
@@ -1318,38 +1031,42 @@ class RuleTrainer:
             Validation rollout `(B, T, ...)`
         adv : chex.Array
             Stop-gradient normalized advantages from validation
-        scan_aux : Tuple[DiscoAgentOutput, chex.Array]
-            Accumulated `(targets, target_preds_pi)` from inner-loop
-            scan steps
+        scan_aux : Tuple[DiscoAgentOutput, chex.Array, chex.Array]
+            Accumulated `(targets, target_mu, target_log_std)` from
+            inner-loop scan steps
         mask : chex.Array
-            Boolean mask `(max_actions,)` for valid actions
+            Boolean mask `(max_action_dim,)` for valid action dimensions
 
         Returns
         -------
         pg_loss : chex.Array
-            Policy gradient loss
+            Gaussian policy gradient loss
         entropy_loss : chex.Array
-            Entropy regularization loss
+            Gaussian entropy regularization loss
         reg_loss : chex.Array
             Target regularization loss
         """
-        all_targets, all_targets_pi = scan_aux
+        all_targets, all_target_mu, all_target_log_std = scan_aux
 
-        pg_loss = compute_discrete_policy_gradient_loss(
-            valid_rollout.preds.pi,
+        pg_loss = compute_gaussian_policy_gradient_loss(
+            valid_rollout.preds.mu,
+            valid_rollout.preds.log_std,
             valid_rollout.actions,
             adv,
+            action_dim_mask=mask,
         ).mean()
-        entropy_loss = compute_entropy_loss(
-            valid_rollout.preds.pi,
+        entropy_loss = compute_gaussian_entropy_loss(
+            valid_rollout.preds.log_std,
             self.config.entropy_coef,
+            action_dim_mask=mask,
         )
         reg_loss = compute_meta_reg_loss(
             jax.tree.map(lambda x: x[-1], all_targets),
-            jax.tree.map(lambda x: x[-1], all_targets_pi),
+            jax.tree.map(lambda x: x[-1], all_target_mu),
+            jax.tree.map(lambda x: x[-1], all_target_log_std),
             self.config.reg_scale,
             self.config.kl_reg,
-            mask,
+            action_dim_mask=mask,
         )
         return pg_loss, entropy_loss, reg_loss
 
@@ -1419,7 +1136,6 @@ class RuleTrainer:
                     disco_h_state=carry.disco_h,
                     meta_h_state=carry.meta_h,
                     params=meta_params,
-                    action_mask=action_mask,
                 )
 
                 encoding = rollout.preds.encoding
@@ -1482,7 +1198,11 @@ class RuleTrainer:
                     adv_ema=new_adv_ema,
                     td_ema=new_td_ema,
                 )
-                return new_carry, self._scan_step_aux(targets, rollout)
+                return new_carry, (
+                    targets,
+                    rollout.target_preds.mu,
+                    rollout.target_preds.log_std,
+                )
 
             init_carry = MetaInnerStepCarry(
                 p_params=p_params,
@@ -2197,440 +1917,3 @@ class RuleTrainer:
         self.cp_manager.close()
         self.logger.close()
         self.runtime_logger.close()
-
-
-class ContinuousRuleTrainer(RuleTrainer):
-    """
-    Discovers a Reinforcement Learning (RL) update rule by meta-training across
-    a population of agents spanning diverse environments. This trainer is suitable
-    for continuous action spaces (`gym.spaces.Box`).
-
-    Extends `RuleTrainer` for continuous action spaces by swapping discrete
-    policy components for Gaussian equivalents: `ContinuousDiscoAgent`,
-    `ContinuousPolicyAgent`, `ContinuousTrainerPool`, and Gaussian loss
-    functions.
-
-    Parameters
-    ----------
-    envs : EnvSet | EnvGroup
-        Environment set or group to use for rule discovery
-    config : RuleTrainerSettings
-        Configuration for meta-training
-    agents_per_env : int (optional)
-        Number of independent agent trainers to instantiate per environment.
-        Default is `2`
-    max_group_size : int (optional)
-        Maximum number of trainers to `vmap` simultaneously. Default is `8`
-    num_env_workers : int (optional)
-        Number of threads for parallel environment stepping.
-        Default is `16`
-    seed : int (optional)
-        Random number generator seed. Default is `42`
-    jit_compile : bool (optional)
-        Flag to enable/disable JIT compilation. Default is `True`
-    cache_dir : str | None (optional)
-        Directory path for JAX's persistent XLA compilation cache.
-        Set to `None` to disable. Default is `".cache/jax"`
-    verbose : bool (optional)
-        Dashboard display settings. Default is `True`.
-            - If `True` - renders the full Rich dashboard
-            - If `False` - uses a lightweight `tqdm` progress bar instead
-    use_bfloat16 : bool (optional)
-        Flag to set all floating-point arrays in the returned `ContinuousRollout`
-        to `bfloat16` on accelerator transfer. Default is `True`
-    """
-
-    def __init__(
-        self,
-        envs: EnvSet | EnvGroup,
-        config: RuleTrainerSettings,
-        *,
-        agents_per_env: int = 2,
-        max_group_size: int = 8,
-        num_env_workers: int = 16,
-        seed: int = 42,
-        jit_compile: bool = True,
-        cache_dir: str | None = ".cache/jax",
-        verbose: bool = True,
-        use_bfloat16: bool = True,
-    ) -> None:
-        super().__init__(
-            envs,
-            config,
-            agents_per_env=agents_per_env,
-            max_group_size=max_group_size,
-            num_env_workers=num_env_workers,
-            seed=seed,
-            jit_compile=jit_compile,
-            cache_dir=cache_dir,
-            verbose=verbose,
-            use_bfloat16=use_bfloat16,
-        )
-
-        # Replace discrete meta-agent with continuous variant
-        meta_key = self.meta_agent.key
-        self.meta_agent = ContinuousDiscoAgent(
-            config=config.disco_agent,
-            key=meta_key,
-            max_action_dim=self.max_actions,
-            jit_compile=self.jit_compile,
-        )
-
-        # Re-init disco diagnostics writers with continuous layer names
-        self.logger.add_writer_group("disco", self.meta_agent._disco_net.layer_names)
-
-        # Re-init optimizer and state with new meta-agent params
-        self.meta_optim = optax.adam(config.meta_lr)
-        self.state = RuleTrainerState.create(
-            self.meta_optim.init(self.meta_agent.get_params()),
-            self.num_trainers,
-            self.config.batch_size,
-            *self.meta_agent.hidden_sizes,
-        )
-
-        # Type-cast overrides for intellisense
-        self.trainers: List[ContinuousAgentTrainer] = []  # type: ignore
-        self.pool: ContinuousTrainerPool = None  # type: ignore
-
-        # Continuous-specific aliases
-        self.max_action_dim = self.max_actions
-        self._action_dim_masks: Dict[int, chex.Array] = {}
-
-    @property
-    def _worker_action_type(self) -> str:
-        return "continuous"
-
-    @property
-    def _worker_max_action_dim(self) -> int:
-        return self.max_action_dim
-
-    @property
-    def _worker_max_obs_dim(self) -> int:
-        return self.max_obs_dim or 0
-
-    @override
-    def _create_dummy_policy(  # type: ignore
-        self,
-        obs_space: gym.spaces.Box,
-        act_space: gym.Space,
-        config: AgentTrainerSettings,
-        rng_key: chex.PRNGKey,
-    ) -> ContinuousPolicyAgent:
-        return ContinuousPolicyAgent(
-            obs_space,
-            act_space,  # type: ignore
-            config=config.agent,
-            key=rng_key,
-            max_action_dim=self.max_actions,
-            max_obs_dim=self.max_obs_dim,
-        )
-
-    @override
-    def _create_trainer(  # type: ignore
-        self,
-        env_name: str,
-        config: AgentTrainerSettings,
-        *,
-        key: chex.PRNGKey,
-        make_fn: MakeFn,
-    ) -> ContinuousAgentTrainer:
-        return ContinuousAgentTrainer(
-            env_name,
-            config,
-            key=key,
-            make_fn=make_fn,
-            budget_rng=self._budget_rng,
-            max_action_dim=self.max_action_dim,
-            max_obs_dim=self.max_obs_dim,
-            jit_compile=self.jit_compile,
-        )
-
-    @override
-    def _build_action_masks(self) -> Dict[int, chex.Array]:
-        self._action_dim_masks = {
-            t.action_dim: t.action_dim_mask for t in self.trainers
-        }
-        return self._action_dim_masks
-
-    @override
-    def _create_pool(self) -> ContinuousTrainerPool:
-        return ContinuousTrainerPool(
-            self.trainers,
-            max_action_dim=self.max_action_dim,
-            action_masks=self._action_masks,
-            hidden_shapes=self._hidden_shapes,
-            n_updates=self.config.n_updates,
-            seq_len=self.config.seq_len,
-            batch_size=self.config.batch_size,
-            encoding_dim=self.trainers[0].policy_agent.encoding_dim,
-            prediction_dim=self.config.agent.prediction_size,
-            env_worker_pool=self._env_worker_pool,
-            use_bfloat16=self.use_bfloat16,
-        )
-
-    @override
-    def _build_batched_collect_fn(self) -> Callable:
-        t = self.trainers[0]  # template
-
-        def _pure_forward(
-            obs,
-            prev_actions,
-            p_params,
-            t_params,
-            v_params,
-            p_ocm_h,
-            p_acm_h,
-            t_ocm_h,
-            t_acm_h,
-            v_h,
-            a_dim_mask,
-        ):
-            # Reconstruct all modules from explicit params
-            encoder, p_ocm, p_acm, p_dec = t.policy_agent.merge_params(p_params)
-            _, t_ocm, t_acm, t_dec = t.target_agent.merge_params(t_params)
-            v_net = t.value_agent.merge_params(v_params).net
-
-            # Shared encoding
-            encoding = encoder(obs)
-
-            # Add time dimension to match encoding shape from encoder
-            if prev_actions.ndim == encoding.ndim - 1:
-                prev_actions = jnp.expand_dims(prev_actions, axis=1)
-
-            # Policy forward
-            ocm_preds, new_p_ocm_h = p_ocm(encoding, h_state=p_ocm_h)
-            acm_preds, new_p_acm_h = p_acm(
-                ocm_preds.embedding,
-                prev_actions,
-                h_state=p_acm_h,
-            )
-            mu, log_std, aux_pi = p_dec(
-                ocm_preds.pi,
-                acm_preds.aux_pi,
-                action_dim_mask=a_dim_mask,
-            )
-            preds = ContinuousPolicyAgentOutput.create(
-                encoding,
-                mu,
-                log_std,
-                ocm_preds.y,
-                acm_preds.z,
-                aux_pi,
-                acm_preds.q,
-            )
-
-            # Target forward
-            t_ocm_preds, new_t_ocm_h = t_ocm(encoding, h_state=t_ocm_h)
-            t_acm_preds, new_t_acm_h = t_acm(
-                t_ocm_preds.embedding,
-                prev_actions,
-                h_state=t_acm_h,
-            )
-            t_mu, t_log_std, t_aux_pi = t_dec(
-                t_ocm_preds.pi,
-                t_acm_preds.aux_pi,
-                action_dim_mask=a_dim_mask,
-            )
-            target_preds = ContinuousPolicyAgentOutput.create(
-                encoding,
-                t_mu,
-                t_log_std,
-                t_ocm_preds.y,
-                t_acm_preds.z,
-                t_aux_pi,
-                t_acm_preds.q,
-            )
-
-            # Value forward
-            v, new_v_h = v_net(encoding, h_state=v_h)
-            values = squeeze_time(v)
-
-            return (
-                preds,
-                target_preds,
-                values,
-                new_p_ocm_h,
-                new_p_acm_h,
-                new_t_ocm_h,
-                new_t_acm_h,
-                new_v_h,
-            )
-
-        return jax.jit(jax.vmap(_pure_forward))
-
-    @override
-    def _compute_inner_policy_loss(  # type: ignore
-        self,
-        trainer: ContinuousAgentTrainer,
-        p_params: nnx.State,
-        encoding: chex.Array,
-        actions: chex.Array,
-        targets: ContinuousDiscoAgentOutput,
-        discounts: chex.Array,
-        mask: chex.Array,
-    ) -> Tuple[chex.Array, chex.Array]:
-        """
-        Compute inner-loop policy loss for a single continuous update step.
-
-        Runs a functional forward pass through the continuous policy agent
-        with explicit parameters and computes the Gaussian policy loss against
-        disco targets.
-
-        Parameters
-        ----------
-        trainer : ContinuousAgentTrainer
-            Read-only reference for functional forward
-        p_params : flax.nnx.State
-            Policy network parameters (differentiated by caller)
-        encoding : chex.Array
-            Encoder embeddings `(B, T, F)`
-        actions : chex.Array
-            Continuous actions taken `(B, T, A)`
-        targets : ContinuousDiscoAgentOutput
-            Disco targets for this update step
-        discounts : chex.Array
-            Episode discount factors `(B, T)`
-        mask : chex.Array
-            Boolean mask `(max_action_dim,)` for valid action dimensions
-
-        Returns
-        -------
-        total_loss : chex.Array
-            Total weighted policy loss
-        pi_loss : chex.Array
-            Policy KL divergence component
-        """
-        new_preds = trainer.policy_agent.functional_forward(
-            encoding,
-            actions,
-            p_params,
-            action_dim_mask=mask,
-        )
-        return compute_continuous_policy_loss(
-            targets,
-            new_preds.mu,
-            new_preds.log_std,
-            new_preds.y,
-            new_preds.z,
-            new_preds.aux_pi,
-            discounts,
-            self.config.loss_cost,
-            mask,
-        )
-
-    @override
-    def _scan_step_aux(  # type: ignore
-        self,
-        targets: ContinuousDiscoAgentOutput,
-        rollout: ContinuousRollout,
-    ) -> Tuple[ContinuousDiscoAgentOutput, chex.Array, chex.Array]:
-        """
-        Return auxiliary data to carry out of each inner-loop scan step.
-
-        The returned tuple is accumulated across scan steps and passed to
-        `_compute_outer_losses` for validation loss computation.
-
-        Parameters
-        ----------
-        targets : ContinuousDiscoAgentOutput
-            Disco targets for this step
-        rollout : ContinuousRollout
-            Current rollout being processed
-
-        Returns
-        -------
-        aux : Tuple[ContinuousDiscoAgentOutput, chex.Array, chex.Array]
-            `(targets, target_mu, target_log_std)` — Gaussian target
-            parameters for regularization
-        """
-        return (
-            targets,
-            rollout.target_preds.mu,
-            rollout.target_preds.log_std,
-        )
-
-    @override
-    def _compute_outer_losses(  # type: ignore
-        self,
-        valid_rollout: ContinuousRollout,
-        adv: chex.Array,
-        scan_aux: Tuple[ContinuousDiscoAgentOutput, chex.Array, chex.Array],
-        mask: chex.Array,
-    ) -> Tuple[chex.Array, chex.Array, chex.Array]:
-        """
-        Compute validation policy gradient, entropy, and regularization losses
-        for continuous action spaces.
-
-        Parameters
-        ----------
-        valid_rollout : ContinuousRollout
-            Validation rollout `(B, T, ...)`
-        adv : chex.Array
-            Stop-gradient normalized advantages from validation
-        scan_aux : Tuple[ContinuousDiscoAgentOutput, chex.Array, chex.Array]
-            Accumulated `(targets, target_mu, target_log_std)` from
-            inner-loop scan steps
-        mask : chex.Array
-            Boolean mask `(max_action_dim,)` for valid action dimensions
-
-        Returns
-        -------
-        pg_loss : chex.Array
-            Gaussian policy gradient loss
-        entropy_loss : chex.Array
-            Gaussian entropy regularization loss
-        reg_loss : chex.Array
-            Target regularization loss
-        """
-        all_targets, all_target_mu, all_target_log_std = scan_aux
-
-        pg_loss = compute_gaussian_policy_gradient_loss(
-            valid_rollout.preds.mu,
-            valid_rollout.preds.log_std,
-            valid_rollout.actions,
-            adv,
-            action_dim_mask=mask,
-        ).mean()
-        entropy_loss = compute_gaussian_entropy_loss(
-            valid_rollout.preds.log_std,
-            self.config.entropy_coef,
-            action_dim_mask=mask,
-        )
-        reg_loss = compute_continuous_meta_reg_loss(
-            jax.tree.map(lambda x: x[-1], all_targets),
-            jax.tree.map(lambda x: x[-1], all_target_mu),
-            jax.tree.map(lambda x: x[-1], all_target_log_std),
-            self.config.reg_scale,
-            self.config.kl_reg,
-            action_dim_mask=mask,
-        )
-        return pg_loss, entropy_loss, reg_loss
-
-    @override
-    def _warm_collect_fn(self) -> None:
-        dummy_obs = jnp.asarray(self.pool.obs)
-        dummy_actions = jnp.asarray(self.pool.prev_actions)
-        (
-            warm_preds,
-            warm_target_preds,
-            warm_values,
-            *_,
-        ) = self._batched_collect_fn(
-            dummy_obs,
-            dummy_actions,
-            self.pool.p_params,
-            self.pool.t_params,
-            self.pool.v_params,
-            self.pool.p_ocm_h,
-            self.pool.p_acm_h,
-            self.pool.t_ocm_h,
-            self.pool.t_acm_h,
-            self.pool.v_h,
-            self.pool.action_masks,
-        )
-
-        # Warm XLA's GPU->CPU host transfer
-        _ = jax.device_get((warm_preds, warm_target_preds, warm_values))
-
-        del dummy_obs, dummy_actions, warm_preds, warm_target_preds, warm_values
-        jax.effects_barrier()

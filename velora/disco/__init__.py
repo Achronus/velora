@@ -10,7 +10,6 @@ from velora.disco.config.settings import (
     PolicyAgentSettings,
     RuleTrainerSettings,
 )
-from velora.disco.distributions import CategoricalBins
 from velora.disco.ema import EMAState, MovingAverage
 from velora.disco.outputs import (
     ACMPredictions,
@@ -25,19 +24,12 @@ from velora.disco.outputs import (
     ValueOutputs,
 )
 from velora.disco.rollouts import Rollout
-from velora.disco.train import (
-    AgentTrainer,
-    AgentTrainerBase,
-    ContinuousAgentTrainer,
-    ContinuousRuleTrainer,
-    RuleTrainer,
-)
+from velora.disco.train import AgentTrainer, RuleTrainer
 
 __all__ = [
     "PolicyAgent",
     "DiscoAgent",
     "DiscoValueAgent",
-    "CategoricalBins",
     "EMAState",
     "MovingAverage",
     "ACMPredictions",
@@ -59,9 +51,6 @@ __all__ = [
     "PolicyAgentSettings",
     "RuleTrainerSettings",
     "Rollout",
-    "AgentTrainerBase",
     "AgentTrainer",
-    "ContinuousAgentTrainer",
     "RuleTrainer",
-    "ContinuousRuleTrainer",
 ]

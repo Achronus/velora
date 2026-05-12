@@ -25,124 +25,6 @@ from velora.lnn.spec import NCPWiringSpec
 from velora.lnn.wiring import NCPWiringBuilder
 
 
-class ACM(BaseCfC):
-    """
-    An Action-Conditional Model (ACM) used to enable action-aware learning.
-
-    Uses a Liquid Neural Network (LNN) architecture with 3 output heads:
-
-        1. Action-conditioned prediction: `z(s, a)` - Action-conditioned
-            prediction for control-relevant targets
-        2. Auxiliary policy prediction: `p(s, a)` - Auxiliary policy prediction
-           for representation learning
-        3. Action-value: `q(s, a)` - Action-value for value-based bootstrapping
-
-    Parameters
-    ----------
-    obs_dim : int
-        Number of observations (sensory nodes)
-    n_neurons : int
-        Number of decision nodes (inter + command nodes)
-    prediction_size : int
-        Size of the action-conditioned prediction vector
-    q_dim : int
-        Dimension of action-value prediction head. Uses distributional Q-values
-    key : chex.PRNGKey
-        Random number generator key
-    sparsity : float (optional)
-        Controls the connection sparsity between neurons.
-        Default is `0.5`.
-
-        Must be a value between `[0.1, 0.9]`:
-
-            - Where `0.1` neurons are very dense
-            - Where `0.9` neurons are very sparse
-    """
-
-    motor: ACMHeadSpec  # type: ignore
-
-    def __init__(
-        self,
-        obs_dim: int,
-        n_neurons: int,
-        prediction_size: int,
-        q_dim: int,
-        *,
-        key: chex.PRNGKey,
-        sparsity: float = 0.5,
-    ) -> None:
-        self.z_dim = prediction_size
-        self.aux_pi_dim = prediction_size
-        self.q_dim = q_dim
-
-        super().__init__(
-            obs_dim,
-            n_neurons,
-            key=key,
-            sparsity=sparsity,
-        )
-
-    def _build_wiring(self) -> NCPWiringSpec:
-        return (
-            NCPWiringBuilder(
-                self.in_features,
-                self.n_neurons,
-                seed=self.seed,
-                sparsity=self.sparsity,
-            )
-            .add_output_heads(
-                ACMHeadSpec,
-                z=self.z_dim,
-                aux_pi=self.aux_pi_dim,
-                q=self.q_dim,
-            )
-            .build()
-        )
-
-    def __call__(
-        self,
-        state_embedding: chex.Array,
-        *,
-        h_state: Optional[chex.Array] = None,
-        timespans: Optional[chex.Array] = None,
-    ) -> Tuple[ACMPredictions, chex.Array]:
-        """
-        Performs a forward pass through the network.
-
-        Parameters
-        ----------
-        state_embedding : chex.Array
-            Embedded state from Encoder with shape `(B, T, F)` or `(B, F)`
-
-            - `batch_size (B)`: the number of samples per timestep
-            - `seq_length (T)`: the number of sequences (e.g., trajectories)
-            - `features (F)`: the features at each timestep
-        h_state : chex.Array (optional)
-            Initial hidden state with shape `(B, H)`
-
-            - `batch_size (B)`: the number of samples per timestep
-            - `n_hidden (H)`: the total number of hidden neurons
-        timespans : chex.Array (optional)
-            Time elapsed since previous timestep. For fixed intervals set to `None`.
-            For varying timesteps shape must be `(T,)`
-
-            - `seq_length (T)`: the number of sequences (e.g., trajectories)
-
-        Returns
-        -------
-        acm_preds : ACMPredictions
-            Network predictions for the command layer (`embedding`)
-            and each head `(z, aux_pi, q)`
-        h_state : chex.Array
-            Final hidden state with shape `(B, H)`
-        """
-        x, h_state, timespans = self._preprocess(state_embedding, h_state, timespans)
-        h_state, preds = self._scan(x, h_state, timespans)
-
-        # 4 outputs -> (embedding, z, aux_pi, q)
-        embedding, z, aux_pi, q = self._postprocess(preds)
-        return ACMPredictions(embedding=embedding, z=z, aux_pi=aux_pi, q=q), h_state
-
 
 class OCM(BaseCfC):
     """
@@ -259,7 +141,7 @@ class OCM(BaseCfC):
         return OCMPredictions(embedding=embedding, pi=pi, y=y), h_state
 
 
-class ContinuousACM(BaseCfC):
+class ACM(BaseCfC):
     """
     Action-Conditional Model (ACM) for continuous action spaces.
 
