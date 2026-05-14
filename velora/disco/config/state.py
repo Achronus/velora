@@ -15,14 +15,14 @@
 
 from typing import Self, Tuple
 
-import chex
+import jax
 import jax.numpy as jnp
 import optax
 from flax import struct
 
 from velora.disco.ema import EMAState
 
-HiddenState = chex.Array | None
+HiddenState = jax.Array | None
 
 
 @struct.dataclass
@@ -45,8 +45,8 @@ class PolicyAgentHiddenStates:
         - `n_units (H)` the total number of ACM hidden neurons
     """
 
-    ocm: chex.Array
-    acm: chex.Array
+    ocm: jax.Array
+    acm: jax.Array
 
 
 @struct.dataclass
@@ -56,15 +56,15 @@ class AgentTrainerHiddenStates:
 
     Parameters
     ----------
-    policy_ocm : chex.Array (optional)
+    policy_ocm : jax.Array (optional)
         Policy network OCM hidden state. Shape: `(B, H)`. Default is `None`
-    policy_acm : chex.Array (optional)
+    policy_acm : jax.Array (optional)
         Policy network ACM hidden state. Shape: `(B, H)`. Default is `None`
-    target_ocm : chex.Array (optional)
+    target_ocm : jax.Array (optional)
         Target network OCM hidden state. Shape: `(B, H)`. Default is `None`
-    target_acm : chex.Array (optional)
+    target_acm : jax.Array (optional)
         Target network ACM hidden state. Shape: `(B, H)`. Default is `None`
-    value : chex.Array (optional)
+    value : jax.Array (optional)
         Value network hidden state. Shape: `(B, H)`. Default is `None`
     """
 
@@ -74,7 +74,7 @@ class AgentTrainerHiddenStates:
     target_acm: HiddenState = None
     value: HiddenState = None
 
-    def reset_on_done(self, discounts: chex.Array) -> Self:
+    def reset_on_done(self, discounts: jax.Array) -> Self:
         """
         Reset hidden states where episodes terminated (`discount=0`).
 
@@ -85,7 +85,7 @@ class AgentTrainerHiddenStates:
 
         Parameters
         ----------
-        discounts : chex.Array
+        discounts : jax.Array
             Episode dones from the environment `(B, 1)`
 
         Returns
@@ -96,8 +96,8 @@ class AgentTrainerHiddenStates:
         # Squeeze to (B,) for broadcasting against hidden states (B, H)
         mask = jnp.squeeze(discounts, axis=-1)  # (B,)
 
-        def _apply_mask(h: chex.Array | None, m: chex.Array) -> chex.Array | None:
-            return h * m[:, None] if h is not None else None  # type: ignore
+        def _apply_mask(h: jax.Array | None, m: jax.Array) -> jax.Array | None:
+            return h * m[:, None] if h is not None else None
 
         return self.__class__(
             policy_ocm=_apply_mask(self.policy_ocm, mask),
@@ -111,7 +111,7 @@ class AgentTrainerHiddenStates:
         self,
         h_state: PolicyAgentHiddenStates,
         target_h_state: PolicyAgentHiddenStates,
-        value_h_state: chex.Array,
+        value_h_state: jax.Array,
     ) -> Self:
         """
         Update hidden states from forward pass outputs.
@@ -122,7 +122,7 @@ class AgentTrainerHiddenStates:
             Policy network hidden states
         target_h_state : AgentHiddenStates
             Target network hidden states
-        value_h_state : chex.Array
+        value_h_state : jax.Array
             Value network hidden state
 
         Returns
@@ -151,21 +151,21 @@ class RuleTrainerHiddenStates:
 
     Parameters
     ----------
-    disco : Tuple[chex.Array, ...]
+    disco : Tuple[jax.Array, ...]
         `DiscoNetwork` hidden states for each environment
-    meta : Tuple[chex.Array, ...]
+    meta : Tuple[jax.Array, ...]
         `MetaLNN` hidden states for each environment
-    disco_zero : chex.Array
+    disco_zero : jax.Array
         Empty template array for resetting
-    meta_zero : chex.Array
+    meta_zero : jax.Array
         Empty template array for resetting
     """
 
-    disco: Tuple[chex.Array, ...]
-    meta: Tuple[chex.Array, ...]
+    disco: Tuple[jax.Array, ...]
+    meta: Tuple[jax.Array, ...]
 
-    disco_zero: chex.Array
-    meta_zero: chex.Array
+    disco_zero: jax.Array
+    meta_zero: jax.Array
 
     @classmethod
     def create(
@@ -212,9 +212,9 @@ class RuleTrainerHiddenStates:
         ----------
         env_idx : int
             Index of the environment to update
-        disco_h : chex.Array | None
+        disco_h : jax.Array | None
             New disco network hidden state. When `None` replaced with array of `0s`
-        meta_h : chex.Array | None
+        meta_h : jax.Array | None
             New meta-LNN hidden state. When `None` replaced with array of `0s`
 
         Returns
@@ -249,7 +249,7 @@ class RuleTrainerHiddenStates:
         """
         return self.update(env_idx, None, None)
 
-    def get(self, env_idx: int) -> Tuple[chex.Array, chex.Array]:
+    def get(self, env_idx: int) -> Tuple[jax.Array, jax.Array]:
         """
         Get hidden states for a specific environment.
 
@@ -260,9 +260,9 @@ class RuleTrainerHiddenStates:
 
         Returns
         -------
-        disco_h : chex.Array
+        disco_h : jax.Array
             An environments Disco network hidden state
-        meta_h : chex.Array
+        meta_h : jax.Array
             An environments Meta-LNN hidden state
         """
         return self.disco[env_idx], self.meta[env_idx]

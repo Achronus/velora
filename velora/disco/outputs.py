@@ -36,7 +36,7 @@ class OCMPredictions:
 
     Parameters
     ----------
-    embedding : chex.Array
+    embedding : jax.Array
         Command layer output with shape `(B, T, F)`
 
         - batch_size (`B`) - the number of samples per timestep.
@@ -56,11 +56,11 @@ class OCMPredictions:
         - y_dim (`Y`) - the size of the observation-conditioned prediction vector.
     """
 
-    embedding: chex.Array
-    pi: chex.Array
-    y: chex.Array
+    embedding: jax.Array
+    pi: jax.Array
+    y: jax.Array
 
-    def output_values(self, ignore_embed: bool = True) -> Tuple[chex.Array, ...]:
+    def output_values(self, ignore_embed: bool = True) -> Tuple[jax.Array, ...]:
         """
         Convert object into a tuple of values.
 
@@ -72,7 +72,7 @@ class OCMPredictions:
 
         Returns
         -------
-        preds : Tuple[chex.Array, ...]
+        preds : Tuple[jax.Array, ...]
             Prediction values in order `(embedding, pi, y)`
         """
         skip = {"embedding"} if ignore_embed else set()
@@ -86,7 +86,7 @@ class ACMPredictions:
 
     Parameters
     ----------
-    embedding : chex.Array
+    embedding : jax.Array
         Command layer output with shape `(B, T, F)`
 
         - batch_size (`B`) - the number of samples per timestep.
@@ -112,12 +112,12 @@ class ACMPredictions:
         - q_dim (`Q`) - the size of the action-value prediction head.
     """
 
-    embedding: chex.Array
-    z: chex.Array
-    aux_pi: chex.Array
-    q: chex.Array
+    embedding: jax.Array
+    z: jax.Array
+    aux_pi: jax.Array
+    q: jax.Array
 
-    def output_values(self, ignore_embed: bool = True) -> Tuple[chex.Array, ...]:
+    def output_values(self, ignore_embed: bool = True) -> Tuple[jax.Array, ...]:
         """
         Convert object into a tuple of values.
 
@@ -129,7 +129,7 @@ class ACMPredictions:
 
         Returns
         -------
-        preds : Tuple[chex.Array, ...]
+        preds : Tuple[jax.Array, ...]
             Prediction values in order `(embedding, z, aux_pi, q)`
         """
         skip = {"embedding"} if ignore_embed else set()
@@ -145,46 +145,46 @@ class PolicyAgentOutput:
 
     Parameters
     ----------
-    encoding : chex.Array
+    encoding : jax.Array
         Encoder embedding output `(B, T, F)`
-    mu : chex.Array
+    mu : jax.Array
         Policy mean with shape `(B, T, D)` or `(B, D)`.
         Padded to `max_action_dim`.
-    log_std : chex.Array
+    log_std : jax.Array
         Policy log standard deviation with shape `(B, T, D)` or `(B, D)`.
         Padded to `max_action_dim`.
-    y : chex.Array
+    y : jax.Array
         Observation-conditioned prediction vector `(B, T, Y)` or `(B, Y)`.
-    z : chex.Array
+    z : jax.Array
         Action-conditioned prediction vector `(B, T, Z)` or `(B, Z)`.
         Conditioned on the action taken — no action dimension.
-    aux_pi : chex.Array
+    aux_pi : jax.Array
         Auxiliary policy prediction — predicted next-step Gaussian parameters
         `(μ', log σ')` with shape `(B, T, 2D)` or `(B, 2D)`.
         Conditioned on the action taken — no action indexing needed.
-    q : chex.Array
+    q : jax.Array
         Scalar action-value estimate `(B, T, 1)` or `(B, 1)`.
         Conditioned on the action taken — no distributional bins.
     """
 
-    encoding: chex.Array
-    mu: chex.Array
-    log_std: chex.Array
-    y: chex.Array
-    z: chex.Array
-    aux_pi: chex.Array
-    q: chex.Array
+    encoding: jax.Array
+    mu: jax.Array
+    log_std: jax.Array
+    y: jax.Array
+    z: jax.Array
+    aux_pi: jax.Array
+    q: jax.Array
 
     @classmethod
     def create(
         cls,
-        encoding: chex.Array,
-        mu: chex.Array,
-        log_std: chex.Array,
-        y: chex.Array,
-        z: chex.Array,
-        aux_pi: chex.Array,
-        q: chex.Array,
+        encoding: jax.Array,
+        mu: jax.Array,
+        log_std: jax.Array,
+        y: jax.Array,
+        z: jax.Array,
+        aux_pi: jax.Array,
+        q: jax.Array,
     ) -> Self:
         """Create a new instance with time dimension squeezed if `T=1`."""
         return cls(
@@ -220,28 +220,28 @@ class DiscoAgentOutput:
 
     Parameters
     ----------
-    mu : chex.Array
+    mu : jax.Array
         Policy mean targets (`μ̂`) with shape `(B, T, D)`
-    log_std : chex.Array
+    log_std : jax.Array
         Policy log-std targets (`log σ̂`) with shape `(B, T, D)`
-    y : chex.Array
+    y : jax.Array
         Observation-conditioned targets (`ŷ`) with shape `(B, T, Y)`
-    z : chex.Array
+    z : jax.Array
         Action-conditioned targets (`ẑ`) with shape `(B, T, Z)`
     """
 
-    mu: chex.Array
-    log_std: chex.Array
-    y: chex.Array
-    z: chex.Array
+    mu: jax.Array
+    log_std: jax.Array
+    y: jax.Array
+    z: jax.Array
 
-    def output_values(self) -> Tuple[chex.Array, ...]:
+    def output_values(self) -> Tuple[jax.Array, ...]:
         """
         Convert object into a tuple of values.
 
         Returns
         -------
-        preds : Tuple[chex.Array, ...]
+        preds : Tuple[jax.Array, ...]
             Prediction values in order `(mu, log_std, y, z)`
         """
         return tuple(getattr(self, f.name) for f in fields(self))
@@ -254,25 +254,25 @@ class DiscoPredictions:
 
     Parameters
     ----------
-    embedding : chex.Array
+    embedding : jax.Array
         Command layer output with shape `(B, T, F)`
-    mu : chex.Array
+    mu : jax.Array
         Policy mean targets (`μ̂`) with shape `(B, T, D)`
-    log_std : chex.Array
+    log_std : jax.Array
         Policy log-std targets (`log σ̂`) with shape `(B, T, D)`
-    y : chex.Array
+    y : jax.Array
         Observation-conditioned targets (`ŷ`) with shape `(B, T, Y)`
-    z : chex.Array
+    z : jax.Array
         Action-conditioned targets (`ẑ`) with shape `(B, T, Z)`
     """
 
-    embedding: chex.Array
-    mu: chex.Array
-    log_std: chex.Array
-    y: chex.Array
-    z: chex.Array
+    embedding: jax.Array
+    mu: jax.Array
+    log_std: jax.Array
+    y: jax.Array
+    z: jax.Array
 
-    def output_values(self, ignore_embed: bool = True) -> Tuple[chex.Array, ...]:
+    def output_values(self, ignore_embed: bool = True) -> Tuple[jax.Array, ...]:
         """
         Convert object into a tuple of values.
 
@@ -284,7 +284,7 @@ class DiscoPredictions:
 
         Returns
         -------
-        preds : Tuple[chex.Array, ...]
+        preds : Tuple[jax.Array, ...]
             Prediction values in order `(embedding, mu, log_std, y, z)`
         """
         skip = {"embedding"} if ignore_embed else set()
@@ -302,22 +302,22 @@ class AgentTrainerOutput:
         Policy agent predictions at `max_actions` dimension
     target_preds : PolicyAgentOutput
         Target agent predictions at `max_actions` dimension
-    values : chex.Array
+    values : jax.Array
         State-value estimates `(B, 1)`
     h_policy : PolicyAgentHiddenStates
         Updated policy agent hidden states (OCM + ACM)
     h_target : PolicyAgentHiddenStates
         Updated target agent hidden states (OCM + ACM)
-    h_value : chex.Array
+    h_value : jax.Array
         Updated value agent hidden state `(B, H)`
     """
 
     preds: PolicyAgentOutput
     target_preds: PolicyAgentOutput
-    values: chex.Array
+    values: jax.Array
     h_policy: PolicyAgentHiddenStates
     h_target: PolicyAgentHiddenStates
-    h_value: chex.Array
+    h_value: jax.Array
 
 
 @struct.dataclass
@@ -327,29 +327,29 @@ class ValueOutputs:
 
     Parameters
     ----------
-    value : chex.Array
+    value : jax.Array
         State-value estimates `V(s)`. Shape: `(T, B)`
-    value_targets : chex.Array
+    value_targets : jax.Array
         V-trace value targets. Shape: `(T-1, B)`
-    advantages : chex.Array
+    advantages : jax.Array
         Advantage estimates `A(s, a)`. Shape: `(T-1, B)`
-    normalized_advantages : chex.Array
+    normalized_advantages : jax.Array
         EMA-normalized advantages. Shape: `(T-1, B)`
-    td : chex.Array
+    td : jax.Array
         Temporal difference errors. Shape: `(T-1, B)`
-    normalized_td : chex.Array
+    normalized_td : jax.Array
         EMA-normalized TD errors. Shape: `(T-1, B)`
-    rho : chex.Array
+    rho : jax.Array
         Importance sampling weights. Shape: `(T-1, B)`
     """
 
-    value: chex.Array
-    value_targets: chex.Array
-    advantages: chex.Array
-    normalized_advantages: chex.Array
-    td: chex.Array
-    normalized_td: chex.Array
-    rho: chex.Array
+    value: jax.Array
+    value_targets: jax.Array
+    advantages: jax.Array
+    normalized_advantages: jax.Array
+    td: jax.Array
+    normalized_td: jax.Array
+    rho: jax.Array
 
     def to_metrics(self) -> Dict[str, float]:
         """
@@ -411,27 +411,27 @@ class AgentLosses:
 
     Parameters
     ----------
-    pi : chex.Array
+    pi : jax.Array
         Policy loss. KL divergence between agent's policy logits and
         meta-network's target policy `π̂.`
-    y : chex.Array
+    y : jax.Array
         Observation-conditioned prediction loss. KL divergence between
         agent's `y` predictions and meta-network's target `ŷ`.
-    z : chex.Array
+    z : jax.Array
         Action-conditioned prediction loss. KL divergence between
         agent's `z` predictions and meta-network's target `ẑ`.
-    aux_pi : chex.Array
+    aux_pi : jax.Array
         Auxiliary policy loss. Prediction error for the auxiliary policy head (predicts policy from action-conditioned representations).
-    total : chex.Array (optional)
+    total : jax.Array (optional)
         Weighted sum of all loss components. Should be computed using the
         `compute_total()` method. Default is `jnp.array(0)` as placeholder
     """
 
-    pi: chex.Array
-    y: chex.Array
-    z: chex.Array
-    aux_pi: chex.Array
-    total: chex.Array = field(default_factory=lambda: jnp.array(0))
+    pi: jax.Array
+    y: jax.Array
+    z: jax.Array
+    aux_pi: jax.Array
+    total: jax.Array = field(default_factory=lambda: jnp.array(0))
 
     def compute_total(self, loss_costs: LossCostSettings) -> Self:
         """
@@ -495,15 +495,15 @@ class MetaLossAux:
 
     Parameters
     ----------
-    pg_loss : chex.Array
+    pg_loss : jax.Array
         Policy gradient loss
-    entropy_loss : chex.Array
+    entropy_loss : jax.Array
         Entropy loss
-    reg_loss : chex.Array
+    reg_loss : jax.Array
         Regularization loss
-    disco_h : chex.Array
+    disco_h : jax.Array
         Disco Network hidden state (`DiscoAgent`)
-    meta_h : chex.Array
+    meta_h : jax.Array
         Meta LNN hidden state (`DiscoAgent`)
     p_params : optax.Params
         Policy agent parameters
@@ -515,11 +515,11 @@ class MetaLossAux:
         Value agent optimizer state
     """
 
-    pg_loss: chex.Array
-    entropy_loss: chex.Array
-    reg_loss: chex.Array
-    disco_h: chex.Array
-    meta_h: chex.Array
+    pg_loss: jax.Array
+    entropy_loss: jax.Array
+    reg_loss: jax.Array
+    disco_h: jax.Array
+    meta_h: jax.Array
     p_params: optax.Params
     value_outs: ValueOutputs
     v_params: optax.Params
@@ -537,9 +537,9 @@ class MetaInnerStepCarry:
         Policy agent parameters
     v_params : optax.Params
         Value agent parameters
-    disco_h : chex.Array
+    disco_h : jax.Array
         Disco network hidden state
-    meta_h : chex.Array
+    meta_h : jax.Array
         Meta LNN hidden state
     p_opt_state : optax.OptState
         Policy agent optimizer state
@@ -553,8 +553,8 @@ class MetaInnerStepCarry:
 
     p_params: optax.Params
     v_params: optax.Params
-    disco_h: chex.Array
-    meta_h: chex.Array
+    disco_h: jax.Array
+    meta_h: jax.Array
     p_opt_state: optax.OptState
     v_opt_state: optax.OptState
     adv_ema: EMAState
@@ -571,26 +571,26 @@ class ChunkLogData:
 
     Parameters
     ----------
-    pg_loss : chex.Array
+    pg_loss : jax.Array
         Policy gradient loss per trainer `(C,)`
-    entropy_loss : chex.Array
+    entropy_loss : jax.Array
         Entropy regularisation loss per trainer `(C,)`
-    reg_loss : chex.Array
+    reg_loss : jax.Array
         Meta-regularisation loss per trainer `(C,)`
-    meta_loss : chex.Array
+    meta_loss : jax.Array
         Total meta-loss per trainer `(C,)`
-    advantages : chex.Array
+    advantages : jax.Array
         Raw advantages from the validation rollout per trainer
-    normalized_advantages : chex.Array
+    normalized_advantages : jax.Array
         EMA-normalised advantages per trainer
     """
 
-    pg_loss: chex.Array
-    entropy_loss: chex.Array
-    reg_loss: chex.Array
-    meta_loss: chex.Array
-    advantages: chex.Array
-    normalized_advantages: chex.Array
+    pg_loss: jax.Array
+    entropy_loss: jax.Array
+    reg_loss: jax.Array
+    meta_loss: jax.Array
+    advantages: jax.Array
+    normalized_advantages: jax.Array
 
 
 @struct.dataclass
@@ -602,9 +602,9 @@ class MetaGradOutput:
     ----------
     meta_grad : ArrayTree
         Meta-gradient with respect to the DiscoAgent parameters
-    disco_h : chex.Array
+    disco_h : jax.Array
         Updated DiscoNetwork hidden state
-    meta_h : chex.Array
+    meta_h : jax.Array
         Updated Meta-LNN hidden state
     p_params : optax.Params
         Policy parameters after N inner updates
@@ -612,17 +612,17 @@ class MetaGradOutput:
         Value parameters after N inner updates
     v_opt_state : optax.OptState
         Value optimizer state after N inner updates
-    pg_loss : chex.Array
+    pg_loss : jax.Array
         Policy gradient loss on the validation rollout
-    entropy_loss : chex.Array
+    entropy_loss : jax.Array
         Entropy regularisation loss
-    reg_loss : chex.Array
+    reg_loss : jax.Array
         Meta-regularisation loss (KL + entropy on predictions)
-    meta_loss : chex.Array
+    meta_loss : jax.Array
         Total meta-loss (pg + entropy + reg)
-    advantages : chex.Array
+    advantages : jax.Array
         Raw advantages from the validation rollout
-    normalized_advantages : chex.Array
+    normalized_advantages : jax.Array
         EMA-normalised advantages from the validation rollout
     adv_ema : EMAState
         Advantage EMA state after all N inner steps
@@ -631,17 +631,17 @@ class MetaGradOutput:
     """
 
     meta_grad: chex.ArrayTree
-    disco_h: chex.Array
-    meta_h: chex.Array
+    disco_h: jax.Array
+    meta_h: jax.Array
     p_params: optax.Params
     v_params: optax.Params
     v_opt_state: optax.OptState
-    pg_loss: chex.Array
-    entropy_loss: chex.Array
-    reg_loss: chex.Array
-    meta_loss: chex.Array
-    advantages: chex.Array
-    normalized_advantages: chex.Array
+    pg_loss: jax.Array
+    entropy_loss: jax.Array
+    reg_loss: jax.Array
+    meta_loss: jax.Array
+    advantages: jax.Array
+    normalized_advantages: jax.Array
     adv_ema: EMAState
     td_ema: EMAState
 
@@ -672,20 +672,20 @@ class LossStatistics:
 
     Parameters
     ----------
-    meta : chex.Array
+    meta : jax.Array
         Total meta loss
-    policy_gradient : chex.Array
+    policy_gradient : jax.Array
         Policy gradient loss
-    entropy : chex.Array
+    entropy : jax.Array
         Entropy loss
-    regularization : chex.Array
+    regularization : jax.Array
         Regularization loss
     """
 
-    meta: chex.Array
-    policy_gradient: chex.Array
-    entropy: chex.Array
-    regularization: chex.Array
+    meta: jax.Array
+    policy_gradient: jax.Array
+    entropy: jax.Array
+    regularization: jax.Array
 
     def to_dict(self) -> Dict[str, float]:
         return {
@@ -703,14 +703,14 @@ class RewardStatistics:
 
     Parameters
     ----------
-    rewards : chex.Array
+    rewards : jax.Array
         Windowed mean returns across trainers `(N,)`
-    lengths : chex.Array
+    lengths : jax.Array
         Windows mean episode lengths across trainers `(N,)`
     """
 
-    rewards: chex.Array
-    lengths: chex.Array
+    rewards: jax.Array
+    lengths: jax.Array
 
     @property
     def has_data(self) -> bool:
@@ -803,8 +803,8 @@ class MetaStepStats:
         zero = jnp.zeros((num_trainers,), dtype=jnp.float32)
 
         # Pre-allocate fixed-size buffers
-        self._reward_buf: chex.Array = zero
-        self._length_buf: chex.Array = zero
+        self._reward_buf: jax.Array = zero
+        self._length_buf: jax.Array = zero
 
         self._losses = LossStatistics(
             meta=zero,
@@ -819,8 +819,8 @@ class MetaStepStats:
         n = self._reward_count
 
         return RewardStatistics(
-            rewards=self._reward_buf[:n],  # type: ignore
-            lengths=self._length_buf[:n],  # type: ignore
+            rewards=self._reward_buf[:n],
+            lengths=self._length_buf[:n],
         )
 
     def record(
@@ -844,8 +844,8 @@ class MetaStepStats:
         i = self._idx
 
         if ep_return is not None:
-            self._reward_buf = self._reward_buf.at[i].set(jnp.float32(ep_return))  # type: ignore
-            self._length_buf = self._length_buf.at[i].set(jnp.float32(ep_length))  # type: ignore
+            self._reward_buf = self._reward_buf.at[i].set(jnp.float32(ep_return))
+            self._length_buf = self._length_buf.at[i].set(jnp.float32(ep_length))
             self._reward_count += 1
 
         # Write all four loss fields in one tree operation

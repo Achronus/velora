@@ -20,7 +20,7 @@ import jax
 import jax.numpy as jnp
 
 
-def to_time_first(x: chex.Array) -> chex.Array:
+def to_time_first(x: jax.Array) -> jax.Array:
     """
     Transpose from batch-first to time-first format for scan operations.
 
@@ -38,7 +38,7 @@ def to_time_first(x: chex.Array) -> chex.Array:
     return jnp.swapaxes(x, 0, 1)
 
 
-def to_batch_first(x: chex.Array) -> chex.Array:
+def to_batch_first(x: jax.Array) -> jax.Array:
     """
     Transpose from time-first to batch-first format after scan operations.
 
@@ -56,7 +56,7 @@ def to_batch_first(x: chex.Array) -> chex.Array:
     return jnp.swapaxes(x, 0, 1)
 
 
-def squeeze_time(x: chex.Array) -> chex.Array:
+def squeeze_time(x: jax.Array) -> jax.Array:
     """
     Squeeze the time dimension (axis 1) if `T=1`.
 

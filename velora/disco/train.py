@@ -257,7 +257,7 @@ class AgentTrainer:
         rollout: Rollout,
         adv_ema: EMAState,
         td_ema: EMAState,
-        action_dim_mask: chex.Array | None = None,
+        action_dim_mask: jax.Array | None = None,
     ) -> Tuple[ValueOutputs, EMAState, EMAState]:
         """
         Compute value outputs using Gaussian importance weights.
@@ -270,7 +270,7 @@ class AgentTrainer:
             Current advantage EMA state
         td_ema : EMAState
             Current TD-error EMA state
-        action_dim_mask : chex.Array (optional)
+        action_dim_mask : jax.Array (optional)
             Boolean mask `(max_action_dim,)`. Default is `None`
 
         Returns
@@ -959,12 +959,12 @@ class RuleTrainer:
         self,
         trainer: AgentTrainer,
         p_params: nnx.State,
-        encoding: chex.Array,
-        actions: chex.Array,
+        encoding: jax.Array,
+        actions: jax.Array,
         targets: DiscoAgentOutput,
-        discounts: chex.Array,
-        mask: chex.Array,
-    ) -> Tuple[chex.Array, chex.Array]:
+        discounts: jax.Array,
+        mask: jax.Array,
+    ) -> Tuple[jax.Array, jax.Array]:
         """
         Compute inner-loop policy loss for a single continuous update step.
 
@@ -978,22 +978,22 @@ class RuleTrainer:
             Read-only reference for functional forward
         p_params : flax.nnx.State
             Policy network parameters (differentiated by caller)
-        encoding : chex.Array
+        encoding : jax.Array
             Encoder embeddings `(B, T, F)`
-        actions : chex.Array
+        actions : jax.Array
             Continuous actions taken `(B, T, A)`
         targets : DiscoAgentOutput
             Disco targets for this update step
-        discounts : chex.Array
+        discounts : jax.Array
             Episode discount factors `(B, T)`
-        mask : chex.Array
+        mask : jax.Array
             Boolean mask `(max_action_dim,)` for valid action dimensions
 
         Returns
         -------
-        total_loss : chex.Array
+        total_loss : jax.Array
             Total weighted policy loss
-        pi_loss : chex.Array
+        pi_loss : jax.Array
             Policy KL divergence component
         """
         new_preds = trainer.policy_agent.functional_forward(
@@ -1017,10 +1017,10 @@ class RuleTrainer:
     def _compute_outer_losses(
         self,
         valid_rollout: Rollout,
-        adv: chex.Array,
-        scan_aux: Tuple[DiscoAgentOutput, chex.Array, chex.Array],
-        mask: chex.Array,
-    ) -> Tuple[chex.Array, chex.Array, chex.Array]:
+        adv: jax.Array,
+        scan_aux: Tuple[DiscoAgentOutput, jax.Array, jax.Array],
+        mask: jax.Array,
+    ) -> Tuple[jax.Array, jax.Array, jax.Array]:
         """
         Compute validation policy gradient, entropy, and regularization losses
         for continuous action spaces.
@@ -1029,21 +1029,21 @@ class RuleTrainer:
         ----------
         valid_rollout : Rollout
             Validation rollout `(B, T, ...)`
-        adv : chex.Array
+        adv : jax.Array
             Stop-gradient normalized advantages from validation
-        scan_aux : Tuple[DiscoAgentOutput, chex.Array, chex.Array]
+        scan_aux : Tuple[DiscoAgentOutput, jax.Array, jax.Array]
             Accumulated `(targets, target_mu, target_log_std)` from
             inner-loop scan steps
-        mask : chex.Array
+        mask : jax.Array
             Boolean mask `(max_action_dim,)` for valid action dimensions
 
         Returns
         -------
-        pg_loss : chex.Array
+        pg_loss : jax.Array
             Gaussian policy gradient loss
-        entropy_loss : chex.Array
+        entropy_loss : jax.Array
             Gaussian entropy regularization loss
-        reg_loss : chex.Array
+        reg_loss : jax.Array
             Target regularization loss
         """
         all_targets, all_target_mu, all_target_log_std = scan_aux
@@ -1076,15 +1076,15 @@ class RuleTrainer:
         meta_params: chex.ArrayTree,
         p_params: chex.ArrayTree,
         v_params: chex.ArrayTree,
-        disco_h: chex.Array,
-        meta_h: chex.Array,
+        disco_h: jax.Array,
+        meta_h: jax.Array,
         p_opt_state: chex.ArrayTree,
         v_opt_state: chex.ArrayTree,
         adv_ema: EMAState,
         td_ema: EMAState,
         train_rollouts: Rollout,
         valid_rollout: Rollout,
-        action_mask: chex.Array,
+        action_mask: jax.Array,
     ) -> MetaGradOutput:
         """
         Compute meta-gradient for a single agent through the inner loop.
@@ -1100,9 +1100,9 @@ class RuleTrainer:
             Policy network parameters for this trainer
         v_params : ArrayTree
             Value network parameters for this trainer
-        disco_h : chex.Array
+        disco_h : jax.Array
             Disco network hidden state `(B, H)`
-        meta_h : chex.Array
+        meta_h : jax.Array
             Meta-LNN hidden state `(B, H_meta)`
         p_opt_state : ArrayTree
             Policy optimizer state
@@ -1116,7 +1116,7 @@ class RuleTrainer:
             Training rollouts `(N, B, T, ...)`
         valid_rollout : Rollout
             Validation rollout `(1, T, ...)`
-        action_mask : chex.Array
+        action_mask : jax.Array
             Boolean mask `(max_actions,)` for valid actions
 
         Returns
@@ -1127,7 +1127,7 @@ class RuleTrainer:
 
         def meta_loss_fn(
             meta_params,
-        ) -> Tuple[chex.Array, Tuple[MetaLossAux, EMAState, EMAState]]:
+        ) -> Tuple[jax.Array, Tuple[MetaLossAux, EMAState, EMAState]]:
             def _inner_step(
                 carry: MetaInnerStepCarry, rollout: Rollout
             ) -> Tuple[MetaInnerStepCarry, Tuple]:
@@ -1168,7 +1168,7 @@ class RuleTrainer:
                         adv,
                         td,
                     )
-                    net_out = value_outs.value[:-1]  # type: ignore
+                    net_out = value_outs.value[:-1]
                     value_target = jax.lax.stop_gradient(
                         net_out + value_outs.normalized_td
                     )
@@ -1409,8 +1409,8 @@ class RuleTrainer:
             # Update disco/meta hidden states
             self.state = self.state.update_hidden(
                 idx,
-                chunk_out.disco_h[i].copy(),  # type: ignore
-                chunk_out.meta_h[i].copy(),  # type: ignore
+                chunk_out.disco_h[i].copy(),
+                chunk_out.meta_h[i].copy(),
             )
 
             # Norm gradient via per-trainer optimizer
@@ -1431,19 +1431,19 @@ class RuleTrainer:
             # Log metrics
             self._log_meta_metrics(
                 idx,
-                log_data.pg_loss[i],  # type: ignore
-                log_data.entropy_loss[i],  # type: ignore
-                log_data.reg_loss[i],  # type: ignore
-                log_data.meta_loss[i],  # type: ignore
-                log_data.advantages[i],  # type: ignore
-                log_data.normalized_advantages[i],  # type: ignore
+                log_data.pg_loss[i],
+                log_data.entropy_loss[i],
+                log_data.reg_loss[i],
+                log_data.meta_loss[i],
+                log_data.advantages[i],
+                log_data.normalized_advantages[i],
             )
 
             losses_i = LossStatistics(
-                meta=log_data.meta_loss[i],  # type: ignore
-                policy_gradient=log_data.pg_loss[i],  # type: ignore
-                entropy=log_data.entropy_loss[i],  # type: ignore
-                regularization=log_data.reg_loss[i],  # type: ignore
+                meta=log_data.meta_loss[i],
+                policy_gradient=log_data.pg_loss[i],
+                entropy=log_data.entropy_loss[i],
+                regularization=log_data.reg_loss[i],
             )
 
             ep_tracker: EpisodeTracker = self.pool.episode_trackers[idx]
@@ -1680,12 +1680,12 @@ class RuleTrainer:
     def _log_meta_metrics(
         self,
         trainer_idx: int,
-        pg_loss: chex.Array,
-        entropy_loss: chex.Array,
-        reg_loss: chex.Array,
-        total_loss: chex.Array,
-        advantages: chex.Array,
-        normalized_advantages: chex.Array,
+        pg_loss: jax.Array,
+        entropy_loss: jax.Array,
+        reg_loss: jax.Array,
+        total_loss: jax.Array,
+        advantages: jax.Array,
+        normalized_advantages: jax.Array,
     ) -> None:
         """
         Log meta-training metrics for a single trainer.
@@ -1694,17 +1694,17 @@ class RuleTrainer:
         ----------
         trainer_idx : int
             Index of the current agent trainer
-        pg_loss : chex.Array
+        pg_loss : jax.Array
             Policy gradient loss
-        entropy_loss : chex.Array
+        entropy_loss : jax.Array
             Entropy regularization loss
-        reg_loss : chex.Array
+        reg_loss : jax.Array
             L2 and KL regularization loss on meta-network targets
-        total_loss : chex.Array
+        total_loss : jax.Array
             Sum of all loss components
-        advantages : chex.Array
+        advantages : jax.Array
             Raw advantages from validation rollout
-        normalized_advantages : chex.Array
+        normalized_advantages : jax.Array
             EMA-normalised advantages from the validation rollout
         """
         metrics = {

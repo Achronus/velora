@@ -13,12 +13,11 @@
 # limitations under the License.
 # ==============================================================================
 
-import chex
 import jax
 import jax.numpy as jnp
 
 
-def compute_l2_mean_penalty(x: chex.Array) -> chex.Array:
+def compute_l2_mean_penalty(x: jax.Array) -> jax.Array:
     """
     Compute L2 penalty on the mean of a tensor.
 
@@ -28,21 +27,21 @@ def compute_l2_mean_penalty(x: chex.Array) -> chex.Array:
 
     Parameters
     ----------
-    x : chex.Array
+    x : jax.Array
         Input tensor of any shape
 
     Returns
     -------
-    penalty : chex.Array
+    penalty : jax.Array
         Scalar L2 penalty on the mean
     """
     return jnp.square(jnp.mean(x))
 
 
 def categorical_kl_divergence(
-    p_logits: chex.Array,
-    q_logits: chex.Array,
-) -> chex.Array:
+    p_logits: jax.Array,
+    q_logits: jax.Array,
+) -> jax.Array:
     """
     KL divergence `KL(p || q)` between two categorical distributions.
 
@@ -50,14 +49,14 @@ def categorical_kl_divergence(
 
     Parameters
     ----------
-    p_logits : chex.Array
+    p_logits : jax.Array
         Logits of distribution `p`.
-    q_logits : chex.Array
+    q_logits : jax.Array
         Logits of distribution `q`.
 
     Returns
     -------
-    kl : chex.Array
+    kl : jax.Array
         Per-element KL divergence (summed over the category axis).
     """
     p_log = jax.nn.log_softmax(p_logits, axis=-1)
@@ -67,9 +66,9 @@ def categorical_kl_divergence(
 
 
 def batched_index(
-    values: chex.Array,
-    indices: chex.Array,
-) -> chex.Array:
+    values: jax.Array,
+    indices: jax.Array,
+) -> jax.Array:
     """
     Index into the last axis of `values` using integer `indices`.
 
@@ -78,14 +77,14 @@ def batched_index(
 
     Parameters
     ----------
-    values : chex.Array
+    values : jax.Array
         Values to index. Shape: `(..., A)`
-    indices : chex.Array
+    indices : jax.Array
         Integer indices. Shape: `(...)`
 
     Returns
     -------
-    indexed : chex.Array
+    indexed : jax.Array
         Selected values. Shape: `(...)`
     """
     one_hot = jax.nn.one_hot(indices, jnp.shape(values)[-1])

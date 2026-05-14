@@ -16,6 +16,7 @@
 from typing import Tuple
 
 import chex
+import jax
 import jax.numpy as jnp
 from flax import nnx
 
@@ -116,23 +117,23 @@ class DiscoInputEncoder(nnx.Module):
         """
         return self._total_params
 
-    def _encode(self, x: chex.Array) -> chex.Array:
+    def _encode(self, x: jax.Array) -> jax.Array:
         """
         Encodes an array using Softmax.
 
         Parameters
         ----------
-        x : chex.Array
+        x : jax.Array
             Input to encode in shape `(B, T, F)`
 
         Returns
         -------
-        embedding : chex.Array
+        embedding : jax.Array
             Output embedding in shape: `(B, T, E)`
         """
         return nnx.softmax(x, axis=-1)
 
-    def __call__(self, rollout: Rollout) -> chex.Array:
+    def __call__(self, rollout: Rollout) -> jax.Array:
         """
         Performs a forward pass through the encoding.
 
@@ -148,7 +149,7 @@ class DiscoInputEncoder(nnx.Module):
 
         Returns
         -------
-        embedding : chex.Array
+        embedding : jax.Array
             Flattened embedding for the Disco network. Shape: `(B, T, E)`
             where `E = output_dim` (same as discrete variant).
         """
@@ -186,31 +187,31 @@ class DiscoInputEncoder(nnx.Module):
 
     def _encode_states(
         self,
-        y: chex.Array,
-        y_target: chex.Array,
-    ) -> Tuple[chex.Array, chex.Array]:
+        y: jax.Array,
+        y_target: jax.Array,
+    ) -> Tuple[jax.Array, jax.Array]:
         """
         Encode state-conditional predictions.
 
         Parameters
         ----------
-        y : chex.Array
+        y : jax.Array
             Observation-conditioned predictions. Shape: `(B, T, Y)`
-        y_target : chex.Array
+        y_target : jax.Array
             Target observation-conditioned predictions. Shape: `(B, T, Y)`
 
         Returns
         -------
-        y_embed : chex.Array
+        y_embed : jax.Array
             Y State embedding. Shape: `(B, T, E_y)`
-        y_target_embed : chex.Array
+        y_target_embed : jax.Array
             Y target state embedding. Shape: `(B, T, E_y)`
         """
         y_embed = self.state_encoder(self._encode(y))  # type: ignore
         y_target_embed = self.state_encoder(self._encode(y_target))  # type: ignore
         return y_embed, y_target_embed
 
-    def _encode_scalars(self, rewards: chex.Array, discounts: chex.Array) -> chex.Array:
+    def _encode_scalars(self, rewards: jax.Array, discounts: jax.Array) -> jax.Array:
         """
         Encode scalar inputs (rewards, discounts).
 
@@ -219,14 +220,14 @@ class DiscoInputEncoder(nnx.Module):
 
         Parameters
         ----------
-        rewards : chex.Array
+        rewards : jax.Array
             Rewards. Shape: `(B, T, 1)`
-        discounts : chex.Array
+        discounts : jax.Array
             Discounts. Shape: `(B, T, 1)`
 
         Returns
         -------
-        scalar_emb : chex.Array
+        scalar_emb : jax.Array
             Scalar embedding. Shape: `(B, T, E_s)`
         """
         rewards = jnp.squeeze(rewards, axis=-1)  # (B, T)
@@ -238,11 +239,11 @@ class DiscoInputEncoder(nnx.Module):
 
     def _encode_policy(
         self,
-        mu: chex.Array,
-        log_std: chex.Array,
-        mu_target: chex.Array,
-        log_std_target: chex.Array,
-    ) -> chex.Array:
+        mu: jax.Array,
+        log_std: jax.Array,
+        mu_target: jax.Array,
+        log_std_target: jax.Array,
+    ) -> jax.Array:
         """
         Encode Gaussian policy parameters into a summary embedding.
 
@@ -251,18 +252,18 @@ class DiscoInputEncoder(nnx.Module):
 
         Parameters
         ----------
-        mu : chex.Array
+        mu : jax.Array
             Policy mean. Shape: `(B, T, D)`
-        log_std : chex.Array
+        log_std : jax.Array
             Policy log standard deviation. Shape: `(B, T, D)`
-        mu_target : chex.Array
+        mu_target : jax.Array
             Target policy mean. Shape: `(B, T, D)`
-        log_std_target : chex.Array
+        log_std_target : jax.Array
             Target policy log standard deviation. Shape: `(B, T, D)`
 
         Returns
         -------
-        policy_emb : chex.Array
+        policy_emb : jax.Array
             Policy summary embedding. Shape: `(B, T, action_embed_dim)`
         """
         policy_input = jnp.concatenate(
@@ -274,12 +275,12 @@ class DiscoInputEncoder(nnx.Module):
 
     def _encode_action_conditional(
         self,
-        z: chex.Array,
-        q: chex.Array,
-        z_target: chex.Array,
-        q_target: chex.Array,
-        actions: chex.Array,
-    ) -> chex.Array:
+        z: jax.Array,
+        q: jax.Array,
+        z_target: jax.Array,
+        q_target: jax.Array,
+        actions: jax.Array,
+    ) -> jax.Array:
         """
         Encode action-conditional predictions and the taken action.
 
@@ -289,20 +290,20 @@ class DiscoInputEncoder(nnx.Module):
 
         Parameters
         ----------
-        z : chex.Array
+        z : jax.Array
             Action-conditioned predictions. Shape: `(B, T, Z)`
-        q : chex.Array
+        q : jax.Array
             Scalar Q-value. Shape: `(B, T, 1)`
-        z_target : chex.Array
+        z_target : jax.Array
             Target z predictions. Shape: `(B, T, Z)`
-        q_target : chex.Array
+        q_target : jax.Array
             Target Q-value. Shape: `(B, T, 1)`
-        actions : chex.Array
+        actions : jax.Array
             Continuous action taken. Shape: `(B, T, D)`
 
         Returns
         -------
-        action_cond_emb : chex.Array
+        action_cond_emb : jax.Array
             Action-conditional embedding. Shape: `(B, T, action_embed_dim)`
         """
         action_cond_input = jnp.concatenate(
@@ -419,7 +420,7 @@ class ImageEncoder(nnx.Module):
         """Output feature dimensionality of the encoder."""
         return self.output_dim
 
-    def __call__(self, x: chex.Array) -> chex.Array:
+    def __call__(self, x: jax.Array) -> jax.Array:
         """
         Perform a forward pass through the network.
 
@@ -535,7 +536,7 @@ class VectorEncoder(nnx.Module):
         """Output feature dimensionality of the encoder."""
         return self.output_dim
 
-    def __call__(self, x: chex.Array) -> chex.Array:
+    def __call__(self, x: jax.Array) -> jax.Array:
         """
         Forward pass through the encoder.
 
@@ -544,14 +545,14 @@ class VectorEncoder(nnx.Module):
 
         Parameters
         ----------
-        x : chex.Array
+        x : jax.Array
             Batch of vector observations:
             - `(B, D)` — single timestep
             - `(B, T, D)` — sequence
 
         Returns
         -------
-        features : chex.Array
+        features : jax.Array
             Encoded features `(B, T, F)`
         """
         if x.ndim == 2:

@@ -15,7 +15,7 @@
 
 from typing import Tuple
 
-import chex
+import jax
 
 from velora.compute.rl_ops import compute_gaussian_importance_weights
 from velora.compute.vtrace import compute_vtrace
@@ -31,7 +31,7 @@ def compute_value_outputs(
     td_state: EMAState,
     gamma: float,
     td_lambda: float,
-    action_dim_mask: chex.Array | None = None,
+    action_dim_mask: jax.Array | None = None,
 ) -> Tuple[ValueOutputs, EMAState, EMAState]:
     """
     Compute value function outputs from a trajectory of experience
@@ -51,7 +51,7 @@ def compute_value_outputs(
         Discount factor
     td_lambda : float
         TD lambda parameter
-    action_dim_mask : chex.Array (optional)
+    action_dim_mask : jax.Array (optional)
         Boolean mask `(D,)` for valid action dimensions.
         Default is `None`
 
@@ -74,23 +74,23 @@ def compute_value_outputs(
     # Importance weights from Gaussian policies
     # [:-1] = Drop last timestep
     rho = compute_gaussian_importance_weights(
-        rollout.preds.mu[:-1],  # type: ignore
-        rollout.preds.log_std[:-1],  # type: ignore
-        rollout.target_preds.mu[:-1],  # type: ignore
-        rollout.target_preds.log_std[:-1],  # type: ignore
-        rollout.actions[:-1],  # type: ignore
+        rollout.preds.mu[:-1],
+        rollout.preds.log_std[:-1],
+        rollout.target_preds.mu[:-1],
+        rollout.target_preds.log_std[:-1],
+        rollout.actions[:-1],
         action_dim_mask=action_dim_mask,
     )
 
     value_targets, advantages = compute_vtrace(
         rollout.values,
-        rollout.rewards[:-1],  # type: ignore
-        discounts[:-1],  # type: ignore
+        rollout.rewards[:-1],
+        discounts[:-1],
         td_lambda,
         rho,
     )
 
-    td = value_targets - rollout.values[:-1]  # type: ignore
+    td = value_targets - rollout.values[:-1]
 
     # Compute EMAs
     norm_adv, adv_state = ema_utils.update_and_normalize(advantages, adv_state)

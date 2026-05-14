@@ -16,6 +16,7 @@
 from typing import Optional, Tuple
 
 import chex
+import jax
 from flax import nnx
 
 from velora.disco.config.spec import DiscoHeadSpec
@@ -111,28 +112,28 @@ class DiscoNetwork(BaseCfC):
 
     def __call__(
         self,
-        obs: chex.Array,
+        obs: jax.Array,
         *,
-        h_state: Optional[chex.Array] = None,
-        timespans: Optional[chex.Array] = None,
-    ) -> Tuple[DiscoPredictions, chex.Array]:
+        h_state: Optional[jax.Array] = None,
+        timespans: Optional[jax.Array] = None,
+    ) -> Tuple[DiscoPredictions, jax.Array]:
         """
         Forward pass through the network.
 
         Parameters
         ----------
-        obs : chex.Array
+        obs : jax.Array
             Input observations with shape `(B, T, F)` or `(B, F)`
 
             - `batch_size (B)`: the number of samples per timestep
             - `seq_length (T)`: the number of sequences (e.g., trajectories)
             - `features (F)`: the features at each timestep
-        h_state : chex.Array (optional)
+        h_state : jax.Array (optional)
             Initial hidden state with shape `(B, H)`
 
             - `batch_size (B)`: the number of samples per timestep
             - `n_hidden (H)`: the total number of hidden neurons
-        timespans : chex.Array (optional)
+        timespans : jax.Array (optional)
             Time elapsed since previous timestep. For fixed intervals set to `None`.
             For varying timesteps shape must be `(T,)`
 
@@ -143,7 +144,7 @@ class DiscoNetwork(BaseCfC):
         target_preds : DiscoPredictions
             Network predictions for the command layer (`embedding`) and each
             head `(μ̂, log σ̂, ŷ, ẑ)`
-        h_state : chex.Array
+        h_state : jax.Array
             Final hidden state with shape `(B, H)`
         """
         x, h_state, timespans = self._preprocess(obs, h_state, timespans)

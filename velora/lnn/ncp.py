@@ -16,6 +16,7 @@
 from typing import Optional, Tuple
 
 import chex
+import jax
 from flax.typing import Initializer
 
 from velora.lnn.base import BaseCfC
@@ -121,11 +122,11 @@ class LNN(BaseCfC):
 
     def __call__(
         self,
-        x: chex.Array,
+        x: jax.Array,
         *,
-        h_state: Optional[chex.Array] = None,
-        timespans: Optional[chex.Array] = None,
-    ) -> Tuple[chex.Array, chex.Array]:
+        h_state: Optional[jax.Array] = None,
+        timespans: Optional[jax.Array] = None,
+    ) -> Tuple[jax.Array, jax.Array]:
         """
         Performs a forward pass through the network.
 

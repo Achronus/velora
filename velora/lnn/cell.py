@@ -15,7 +15,7 @@
 
 from typing import Any, Dict, Tuple
 
-import chex
+import jax
 import jax.numpy as jnp
 from flax import nnx
 from flax.typing import Initializer
@@ -55,7 +55,7 @@ class CellConfig:
         self,
         in_features: int,
         n_hidden: int,
-        mask: chex.Array,
+        mask: jax.Array,
         *,
         rngs: nnx.Rngs,
         init_type: Initializer,
@@ -127,7 +127,7 @@ class NCPLiquidCell(nnx.Module):
         self,
         in_features: int,
         n_hidden: int,
-        mask: chex.Array,
+        mask: jax.Array,
         *,
         rngs: nnx.Rngs = nnx.Rngs(params=0),
         init_type: Initializer = DEFAULT_HIDDEN_INIT,
@@ -186,7 +186,7 @@ class NCPLiquidCell(nnx.Module):
             hidden_init=self.init_type,
         )
 
-    def _prep_mask(self, mask: chex.Array) -> chex.Array:
+    def _prep_mask(self, mask: jax.Array) -> jax.Array:
         """
         Utility method that preprocesses mask to match layer size.
 
@@ -217,11 +217,11 @@ class NCPLiquidCell(nnx.Module):
 
     def _new_hidden(
         self,
-        x: chex.Array,
-        g_out: chex.Array,
-        h_out: chex.Array,
-        ts: chex.Array,
-    ) -> chex.Array:
+        x: jax.Array,
+        g_out: jax.Array,
+        h_out: jax.Array,
+        ts: jax.Array,
+    ) -> jax.Array:
         """
         Helper method that computes the new hidden state.
 
@@ -253,8 +253,8 @@ class NCPLiquidCell(nnx.Module):
         return g_head * f_head + gate_out * h_head
 
     def __call__(
-        self, x: chex.Array, hidden: chex.Array, timespans: chex.Array
-    ) -> Tuple[chex.Array, chex.Array]:
+        self, x: jax.Array, hidden: jax.Array, timespans: jax.Array
+    ) -> Tuple[jax.Array, jax.Array]:
         """
         Performs a forward pass through the cell.
 
@@ -287,7 +287,7 @@ class NCPLiquidCell(nnx.Module):
         return new_hidden, new_hidden
 
     def diagnostics(
-        self, x: chex.Array, hidden: chex.Array, name: str = "cell"
+        self, x: jax.Array, hidden: jax.Array, name: str = "cell"
     ) -> Dict[str, float]:
         """
         Extract mechanism-specific metrics for logging.
@@ -373,7 +373,7 @@ class DecayLiquidCell(NCPLiquidCell):
         self,
         in_features: int,
         n_hidden: int,
-        mask: chex.Array,
+        mask: jax.Array,
         *,
         rngs: nnx.Rngs = nnx.Rngs(params=0),
         init_type: Initializer = DEFAULT_HIDDEN_INIT,
@@ -413,11 +413,11 @@ class DecayLiquidCell(NCPLiquidCell):
 
     def _new_hidden(
         self,
-        x: chex.Array,
-        g_out: chex.Array,
-        h_out: chex.Array,
-        ts: chex.Array,
-    ) -> chex.Array:
+        x: jax.Array,
+        g_out: jax.Array,
+        h_out: jax.Array,
+        ts: jax.Array,
+    ) -> jax.Array:
         g_head = self.tanh(g_out)  # g(x, I, θ_g)
         h_head = self.tanh(h_out)  # h(x, I, θ_h)
 
@@ -434,7 +434,7 @@ class DecayLiquidCell(NCPLiquidCell):
         return g_head * f_head + gate_out * h_head
 
     def diagnostics(
-        self, x: chex.Array, hidden: chex.Array, name: str = "cell"
+        self, x: jax.Array, hidden: jax.Array, name: str = "cell"
     ) -> Dict[str, float]:
         x_cat = jnp.concat([x, hidden], axis=1)
         alpha = self.sigmoid(self.alpha_up(self.tanh(self.alpha_down(x_cat))))
@@ -492,7 +492,7 @@ class DeltaErasureLiquidCell(NCPLiquidCell):
         self,
         in_features: int,
         n_hidden: int,
-        mask: chex.Array,
+        mask: jax.Array,
         *,
         rngs: nnx.Rngs = nnx.Rngs(params=0),
         init_type: Initializer = DEFAULT_HIDDEN_INIT,
@@ -510,8 +510,8 @@ class DeltaErasureLiquidCell(NCPLiquidCell):
         self.beta_head = self._make_layer()
 
     def __call__(
-        self, x: chex.Array, hidden: chex.Array, timespans: chex.Array
-    ) -> Tuple[chex.Array, chex.Array]:
+        self, x: jax.Array, hidden: jax.Array, timespans: jax.Array
+    ) -> Tuple[jax.Array, jax.Array]:
         x_cat = jnp.concat([x, hidden], axis=1)
 
         # Get hidden expectation
@@ -533,7 +533,7 @@ class DeltaErasureLiquidCell(NCPLiquidCell):
         return new_hidden, new_hidden
 
     def diagnostics(
-        self, x: chex.Array, hidden: chex.Array, name: str = "cell"
+        self, x: jax.Array, hidden: jax.Array, name: str = "cell"
     ) -> Dict[str, float]:
         x_cat = jnp.concat([x, hidden], axis=1)
 
@@ -596,7 +596,7 @@ class AdaptiveLiquidCell(NCPLiquidCell):
         self,
         in_features: int,
         n_hidden: int,
-        mask: chex.Array,
+        mask: jax.Array,
         *,
         rngs: nnx.Rngs = nnx.Rngs(params=0),
         init_type: Initializer = DEFAULT_HIDDEN_INIT,
@@ -640,11 +640,11 @@ class AdaptiveLiquidCell(NCPLiquidCell):
 
     def _new_hidden(
         self,
-        x: chex.Array,
-        g_out: chex.Array,
-        h_out: chex.Array,
-        ts: chex.Array,
-    ) -> chex.Array:
+        x: jax.Array,
+        g_out: jax.Array,
+        h_out: jax.Array,
+        ts: jax.Array,
+    ) -> jax.Array:
         g_head = self.tanh(g_out)  # g(x, I, θ_g)
         h_head = self.tanh(h_out)  # h(x, I, θ_h)
 
@@ -661,8 +661,8 @@ class AdaptiveLiquidCell(NCPLiquidCell):
         return g_head * f_head + gate_out * h_head
 
     def __call__(
-        self, x: chex.Array, hidden: chex.Array, timespans: chex.Array
-    ) -> Tuple[chex.Array, chex.Array]:
+        self, x: jax.Array, hidden: jax.Array, timespans: jax.Array
+    ) -> Tuple[jax.Array, jax.Array]:
         x_cat = jnp.concat([x, hidden], axis=1)
 
         # Get hidden expectation
@@ -684,7 +684,7 @@ class AdaptiveLiquidCell(NCPLiquidCell):
         return new_hidden, new_hidden
 
     def diagnostics(
-        self, x: chex.Array, hidden: chex.Array, name: str = "cell"
+        self, x: jax.Array, hidden: jax.Array, name: str = "cell"
     ) -> Dict[str, float]:
         x_cat = jnp.concat([x, hidden], axis=1)
 

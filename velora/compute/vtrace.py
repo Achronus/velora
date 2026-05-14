@@ -15,7 +15,6 @@
 
 from typing import NamedTuple, Tuple
 
-import chex
 import jax
 import jax.numpy as jnp
 
@@ -26,34 +25,34 @@ class VTraceOutput(NamedTuple):
 
     Attributes
     ----------
-    errors : chex.Array
+    errors : jax.Array
         V-trace TD errors `(v_s - V(x_s))`. Shape: `(T,)`
-    pg_advantage : chex.Array
+    pg_advantage : jax.Array
         Policy-gradient advantages. Shape: `(T,)`
-    q_estimate : chex.Array
+    q_estimate : jax.Array
         Off-policy Q-value estimates. Shape: `(T,)`
     """
 
-    errors: chex.Array
-    pg_advantage: chex.Array
-    q_estimate: chex.Array
+    errors: jax.Array
+    pg_advantage: jax.Array
+    q_estimate: jax.Array
 
 
 def _vtrace_errors(
-    v_tm1: chex.Array,
-    v_t: chex.Array,
-    r_t: chex.Array,
-    discount_t: chex.Array,
-    rho_tm1: chex.Array,
+    v_tm1: jax.Array,
+    v_t: jax.Array,
+    r_t: jax.Array,
+    discount_t: jax.Array,
+    rho_tm1: jax.Array,
     lambda_: float,
     clip_rho_threshold: float,
-) -> chex.Array:
+) -> jax.Array:
     """Compute raw V-trace correction terms via a backward scan."""
     clipped_rho = jnp.minimum(clip_rho_threshold, rho_tm1)
     c_t = jnp.minimum(clip_rho_threshold, rho_tm1) * lambda_
 
     # Per-step TD error weighted by clipped importance ratio
-    delta = clipped_rho * (r_t + discount_t * v_t - v_tm1)  # type: ignore
+    delta = clipped_rho * (r_t + discount_t * v_t - v_tm1)
 
     def _scan_fn(acc, xs):
         delta_t, discount_t, c_t = xs
@@ -70,11 +69,11 @@ def _vtrace_errors(
 
 
 def vtrace_td_error_and_advantage(
-    v_tm1: chex.Array,
-    v_t: chex.Array,
-    r_t: chex.Array,
-    discount_t: chex.Array,
-    rho_tm1: chex.Array,
+    v_tm1: jax.Array,
+    v_t: jax.Array,
+    r_t: jax.Array,
+    discount_t: jax.Array,
+    rho_tm1: jax.Array,
     lambda_: float = 1.0,
     clip_rho_threshold: float = 1.0,
     clip_pg_rho_threshold: float = 1.0,
@@ -89,15 +88,15 @@ def vtrace_td_error_and_advantage(
 
     Parameters
     ----------
-    v_tm1 : chex.Array
+    v_tm1 : jax.Array
         State values at `t`. Shape: `(T,)`
-    v_t : chex.Array
+    v_t : jax.Array
         State values at `t+1`. Shape: `(T,)`
-    r_t : chex.Array
+    r_t : jax.Array
         Rewards at `t`. Shape: `(T,)`
-    discount_t : chex.Array
+    discount_t : jax.Array
         Discounts (`γ * (1 - done)`) at `t`. Shape: `(T,)`
-    rho_tm1 : chex.Array
+    rho_tm1 : jax.Array
         Importance weights `π(a|s) / μ(a|s)` at `t`. Shape: `(T,)`
     lambda_ : float
         Trace-decay parameter. Default is `1.0`.
@@ -129,7 +128,7 @@ def vtrace_td_error_and_advantage(
 
     # Shift targets forward: vs_{t+1} for each step
     # Last step bootstraps from v_t[-1] (the final next-state value)
-    vs_t_plus_1 = jnp.concatenate([vs[1:], v_t[-1:]], axis=0)  # type: ignore
+    vs_t_plus_1 = jnp.concatenate([vs[1:], v_t[-1:]], axis=0)
 
     # Policy-gradient advantage: ρ̄ * (r + γ·v_{s+1} - V(x_s))
     clipped_pg_rho = jnp.minimum(clip_pg_rho_threshold, rho_tm1)
@@ -146,22 +145,22 @@ def vtrace_td_error_and_advantage(
 
 
 def compute_vtrace(
-    values: chex.Array,
-    rewards: chex.Array,
-    discounts: chex.Array,
+    values: jax.Array,
+    rewards: jax.Array,
+    discounts: jax.Array,
     td_lambda: float,
-    rho: chex.Array,
-) -> Tuple[chex.Array, chex.Array]:
+    rho: jax.Array,
+) -> Tuple[jax.Array, jax.Array]:
     """
     Compute V-trace targets and advantages.
 
     Parameters
     ----------
-    values : chex.Array
+    values : jax.Array
         State value estimates. Shape: `(T+1, B)`
-    rewards : chex.Array
+    rewards : jax.Array
         Rewards. Shape: `(T, B)`
-    discounts : chex.Array
+    discounts : jax.Array
         Discount factors multiplied by gamma (0 at episode end). Shape: `(T, B)`
     td_lambda : float
         The `λ` used for computing advantage estimates.
@@ -170,14 +169,14 @@ def compute_vtrace(
         - `λ=0.0` → Use only 1-step TD (immediate reward + bootstrap)
         - `λ=1.0` → Use full Monte Carlo return (entire episode)
         - `λ=0.95` → Blend of n-step returns (weighted toward longer horizons)
-    rho : chex.Array
+    rho : jax.Array
         Importance weights. Shape: `(T, B)`
 
     Returns
     -------
-    value_targets : chex.Array
+    value_targets : jax.Array
         V-trace value targets. Shape: `(T, B)`
-    advantages : chex.Array
+    advantages : jax.Array
         V-trace advantages. Shape: `(T, B)`
     """
 
@@ -193,9 +192,9 @@ def compute_vtrace(
         )
 
     vtrace_fn = jax.vmap(vtrace_single, in_axes=1, out_axes=1)
-    vtrace_out = vtrace_fn(values[:-1], values[1:], rewards, discounts, rho)  # type: ignore
+    vtrace_out = vtrace_fn(values[:-1], values[1:], rewards, discounts, rho)
 
-    value_targets = vtrace_out.errors + values[:-1]  # type: ignore
+    value_targets = vtrace_out.errors + values[:-1]
     advantages = vtrace_out.pg_advantage
 
     return value_targets, advantages

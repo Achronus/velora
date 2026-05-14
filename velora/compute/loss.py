@@ -13,7 +13,6 @@
 # limitations under the License.
 # ==============================================================================
 
-import chex
 import jax
 import jax.numpy as jnp
 
@@ -21,10 +20,10 @@ from velora.compute.rl_ops import compute_gaussian_kl
 
 
 def compute_gaussian_entropy_loss(
-    log_std: chex.Array,
+    log_std: jax.Array,
     coef: float = 1e-2,
-    action_dim_mask: chex.Array | None = None,
-) -> chex.Array:
+    action_dim_mask: jax.Array | None = None,
+) -> jax.Array:
     """
     Compute Gaussian entropy loss for policy regularization.
 
@@ -32,16 +31,16 @@ def compute_gaussian_entropy_loss(
 
     Parameters
     ----------
-    log_std : chex.Array
+    log_std : jax.Array
         Policy log standard deviation. Shape: `(B, T, D)`
     coef : float (optional)
         Entropy coefficient. Default is `0.01`
-    action_dim_mask : chex.Array (optional)
+    action_dim_mask : jax.Array (optional)
         Boolean mask `(D,)` for valid action dimensions. Default is `None`
 
     Returns
     -------
-    loss : chex.Array
+    loss : jax.Array
         Scalar negative mean entropy loss
     """
     # Per-dimension entropy: ½ + ½ log(2π) + log σ
@@ -55,12 +54,12 @@ def compute_gaussian_entropy_loss(
 
 
 def compute_gaussian_policy_gradient_loss(
-    mu: chex.Array,
-    log_std: chex.Array,
-    actions: chex.Array,
-    advantages: chex.Array,
-    action_dim_mask: chex.Array | None = None,
-) -> chex.Array:
+    mu: jax.Array,
+    log_std: jax.Array,
+    actions: jax.Array,
+    advantages: jax.Array,
+    action_dim_mask: jax.Array | None = None,
+) -> jax.Array:
     """
     Compute differentiable policy gradient loss for continuous actions.
 
@@ -68,25 +67,25 @@ def compute_gaussian_policy_gradient_loss(
 
     Parameters
     ----------
-    mu : chex.Array
+    mu : jax.Array
         Policy mean. Shape: `(B, T, D)`
-    log_std : chex.Array
+    log_std : jax.Array
         Policy log standard deviation. Shape: `(B, T, D)`
-    actions : chex.Array
+    actions : jax.Array
         Actions taken. Shape: `(B, T, D)`
-    advantages : chex.Array
+    advantages : jax.Array
         Advantage estimates. Shape: `(T, B)`
-    action_dim_mask : chex.Array (optional)
+    action_dim_mask : jax.Array (optional)
         Boolean mask `(D,)` for valid action dimensions. Default is `None`
 
     Returns
     -------
-    loss : chex.Array
+    loss : jax.Array
         Per-timestep policy gradient loss. Shape: `(B, T-1)`
     """
-    mu = mu[:, :-1]  # (B, T-1, D), # type: ignore
-    log_std = log_std[:, :-1]  # (B, T-1, D), # type: ignore
-    actions = actions[:, :-1]  # (B, T-1, D), # type: ignore
+    mu = mu[:, :-1]  # (B, T-1, D)
+    log_std = log_std[:, :-1]  # (B, T-1, D)
+    actions = actions[:, :-1]  # (B, T-1, D)
 
     advantages = jnp.transpose(advantages)  # (T-1, B) -> (B, T-1)
 
@@ -107,12 +106,12 @@ def compute_gaussian_policy_gradient_loss(
 
 
 def compute_gaussian_aux_policy_loss(
-    aux_pi_pred: chex.Array,
-    next_mu: chex.Array,
-    next_log_std: chex.Array,
-    discounts: chex.Array,
-    action_dim_mask: chex.Array | None = None,
-) -> chex.Array:
+    aux_pi_pred: jax.Array,
+    next_mu: jax.Array,
+    next_log_std: jax.Array,
+    discounts: jax.Array,
+    action_dim_mask: jax.Array | None = None,
+) -> jax.Array:
     """
     Compute auxiliary 1-step policy prediction loss for continuous actions.
 
@@ -124,34 +123,34 @@ def compute_gaussian_aux_policy_loss(
 
     Parameters
     ----------
-    aux_pi_pred : chex.Array
+    aux_pi_pred : jax.Array
         Predicted next-step Gaussian parameters `(μ', log σ')`.
         Shape: `(B, T, 2D)` where `D = max_action_dim`
-    next_mu : chex.Array
+    next_mu : jax.Array
         Actual policy mean at next timestep. Shape: `(B, T, D)`
-    next_log_std : chex.Array
+    next_log_std : jax.Array
         Actual policy log-std at next timestep. Shape: `(B, T, D)`
-    discounts : chex.Array
+    discounts : jax.Array
         Episode continuation signals. Shape: `(B, T, 1)`
-    action_dim_mask : chex.Array (optional)
+    action_dim_mask : jax.Array (optional)
         Boolean mask `(D,)` for valid action dimensions. Default is `None`
 
     Returns
     -------
-    loss : chex.Array
+    loss : jax.Array
         Per-timestep auxiliary policy loss. Shape: `(B, T-1)`
     """
-    max_action_dim = jnp.shape(aux_pi_pred)[-1] // 2  # Static: 2D layout is (μ', log σ')
+    max_action_dim = (
+        jnp.shape(aux_pi_pred)[-1] // 2
+    )  # Static: 2D layout is (μ', log σ')
 
     # Split predicted (μ', log σ') from aux_pi output
-    pred_mu = aux_pi_pred[:, :-1, :max_action_dim]  # (B, T-1, D), # type: ignore
-    pred_log_std = aux_pi_pred[:, :-1, max_action_dim:]  # (B, T-1, D), # type: ignore
+    pred_mu = aux_pi_pred[:, :-1, :max_action_dim]  # (B, T-1, D)
+    pred_log_std = aux_pi_pred[:, :-1, max_action_dim:]  # (B, T-1, D)
 
     # Actual next-step policy (stop gradient — this is the target)
-    target_mu = jax.lax.stop_gradient(next_mu[:, 1:])  # (B, T-1, D), # type: ignore
-    target_log_std = jax.lax.stop_gradient(
-        next_log_std[:, 1:]  # type: ignore
-    )  # (B, T-1, D)
+    target_mu = jax.lax.stop_gradient(next_mu[:, 1:])  # (B, T-1, D)
+    target_log_std = jax.lax.stop_gradient(next_log_std[:, 1:])  # (B, T-1, D)
 
     # Gaussian KL between predicted and actual next-step policy
     loss = compute_gaussian_kl(
@@ -163,4 +162,4 @@ def compute_gaussian_aux_policy_loss(
     )
 
     # Mask out terminal states
-    return loss * jnp.squeeze(discounts[:, :-1], axis=-1)  # (B, T-1), # type: ignore
+    return loss * jnp.squeeze(discounts[:, :-1], axis=-1)  # (B, T-1)

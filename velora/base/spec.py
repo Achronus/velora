@@ -15,7 +15,7 @@
 
 from typing import Tuple
 
-import chex
+import jax
 import jax.numpy as jnp
 from flax import struct
 
@@ -27,13 +27,13 @@ class LayerSpec:
 
     Parameters
     ----------
-    mask : chex.Array
+    mask : jax.Array
         Sparse connectivity mask with polarities `(-1, 0, 1)`
     n_hidden : int
         Number of hidden units (output dimension)
     """
 
-    mask: chex.Array
+    mask: jax.Array
     n_hidden: int
 
     @property

@@ -16,6 +16,7 @@
 from typing import Tuple
 
 import chex
+import jax
 import jax.numpy as jnp
 from flax import nnx
 
@@ -97,30 +98,30 @@ class GaussianPolicyDecoder(nnx.Module):
 
     def __call__(
         self,
-        pi_hidden: chex.Array,
-        aux_pi_hidden: chex.Array,
+        pi_hidden: jax.Array,
+        aux_pi_hidden: jax.Array,
         *,
-        action_dim_mask: chex.Array,
-    ) -> Tuple[chex.Array, chex.Array, chex.Array]:
+        action_dim_mask: jax.Array,
+    ) -> Tuple[jax.Array, jax.Array, jax.Array]:
         """
         Project hidden representations to policy outputs.
 
         Parameters
         ----------
-        pi_hidden : chex.Array
+        pi_hidden : jax.Array
             OCM policy hidden representation. Shape: `(B, T, H)`
-        aux_pi_hidden : chex.Array
+        aux_pi_hidden : jax.Array
             ACM auxiliary policy hidden representation. Shape: `(B, T, H)`
-        action_dim_mask : chex.Array
+        action_dim_mask : jax.Array
             Boolean mask `(D,)` for valid action dimensions
 
         Returns
         -------
-        mu : chex.Array
+        mu : jax.Array
             Policy mean `(B, T, D)`, masked and zero-padded
-        log_std : chex.Array
+        log_std : jax.Array
             Policy log-std `(B, T, D)`, clamped and masked
-        aux_pi : chex.Array
+        aux_pi : jax.Array
             Predicted next-step Gaussian params `(B, T, 2D)`
         """
         mu = self.mu_proj(pi_hidden)  # type: ignore

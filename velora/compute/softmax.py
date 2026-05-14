@@ -13,7 +13,6 @@
 # limitations under the License.
 # ==============================================================================
 
-import chex
 import jax
 import jax.numpy as jnp
 
@@ -27,50 +26,50 @@ class Softmax:
 
     Parameters
     ----------
-    logits : chex.Array
+    logits : jax.Array
         Unnormalized log-probabilities. Shape: `(..., A)` where `A` is
         the number of discrete actions.
     """
 
-    def __init__(self, logits: chex.Array) -> None:
+    def __init__(self, logits: jax.Array) -> None:
         self._logits = logits
         self._log_probs = jax.nn.log_softmax(logits, axis=-1)
 
     @property
-    def logits(self) -> chex.Array:
+    def logits(self) -> jax.Array:
         """Raw logits."""
         return self._logits
 
     @property
-    def probs(self) -> chex.Array:
+    def probs(self) -> jax.Array:
         """Normalized probabilities."""
         return jax.nn.softmax(self._logits, axis=-1)
 
-    def log_prob(self, value: chex.Array) -> chex.Array:
+    def log_prob(self, value: jax.Array) -> jax.Array:
         """
         Log-probability of a discrete action under this distribution.
 
         Parameters
         ----------
-        value : chex.Array
+        value : jax.Array
             Integer action indices. Shape: `(...)`
 
         Returns
         -------
-        log_p : chex.Array
+        log_p : jax.Array
             Log-probabilities for the given actions. Shape: `(...)`
         """
         # One-hot encode and dot with log_probs (handles arbitrary batch dims)
         one_hot = jax.nn.one_hot(value, self._log_probs.shape[-1])
         return jnp.sum(self._log_probs * one_hot, axis=-1)
 
-    def entropy(self) -> chex.Array:
+    def entropy(self) -> jax.Array:
         """
         Shannon entropy of the distribution.
 
         Returns
         -------
-        h : chex.Array
+        h : jax.Array
             Entropy values. Shape: `(...)` (all dims except the last).
         """
         probs = jax.nn.softmax(self._logits, axis=-1)

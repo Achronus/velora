@@ -41,7 +41,7 @@ class EMAState:
 
     moment1: chex.ArrayTree
     moment2: chex.ArrayTree
-    decay_product: chex.Array
+    decay_product: jax.Array
 
     @classmethod
     def create(cls) -> Self:
@@ -101,10 +101,10 @@ class MovingAverage:
         squared_tree = jax.tree.map(jnp.square, x)
 
         def _update(
-            moment: chex.Array,
-            x: chex.Array,
+            moment: jax.Array,
+            x: jax.Array,
             pmean_axis_name: str | None = None,
-        ) -> chex.Array:
+        ) -> jax.Array:
             """
             Computes the mean across all learner devices involved in the `pmap`.
 
@@ -173,7 +173,7 @@ class MovingAverage:
         x: chex.ArrayTree,
         state: EMAState,
         subtract_mean: bool = True,
-    ) -> chex.Array:
+    ) -> jax.Array:
         """
         Normalizes `x` by dividing by the second moment and subtracting its mean.
 
@@ -212,7 +212,7 @@ class MovingAverage:
         state: EMAState,
         subtract_mean: bool = True,
         pmean_axis_name: str | None = None,
-    ) -> Tuple[chex.Array, EMAState]:
+    ) -> Tuple[jax.Array, EMAState]:
         """
         Updates EMA state and then normalizes `x` using it.
 

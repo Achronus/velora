@@ -13,7 +13,6 @@
 # limitations under the License.
 # ==============================================================================
 
-import chex
 import jax
 import jax.numpy as jnp
 import optax
@@ -79,7 +78,7 @@ class ScaleByAdanState:
 
     Parameters
     ----------
-    count : chex.Array
+    count : jax.Array
         Number of update steps taken.
     mu : optax.Updates
         Exponentially weighted average of gradients (first moment).
@@ -91,7 +90,7 @@ class ScaleByAdanState:
         Gradient from the previous step, used to compute gradient differences.
     """
 
-    count: chex.Array
+    count: jax.Array
     mu: optax.Updates
     nu: optax.Updates
     n: optax.Updates

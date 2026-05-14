@@ -13,7 +13,7 @@
 # limitations under the License.
 # ==============================================================================
 
-import chex
+import jax
 from flax import nnx
 from flax.typing import Initializer
 
@@ -53,7 +53,7 @@ class SparseLinear(nnx.Module):
         self,
         in_features: int,
         out_features: int,
-        mask: chex.Array,
+        mask: jax.Array,
         *,
         rngs: nnx.Rngs = nnx.Rngs(params=0),
         hidden_init: Initializer = DEFAULT_HIDDEN_INIT,
@@ -72,7 +72,7 @@ class SparseLinear(nnx.Module):
         bias_key = rngs.params()
         self.bias = nnx.Param(bias_init(bias_key, (out_features,)))
 
-    def __call__(self, x: chex.Array) -> chex.Array:
+    def __call__(self, x: jax.Array) -> jax.Array:
         """
         Applies a linear transformation to the inputs along the last dimension.
 

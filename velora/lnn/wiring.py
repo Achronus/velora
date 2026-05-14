@@ -16,7 +16,7 @@
 from dataclasses import fields
 from typing import Self, Tuple, Type
 
-import chex
+import jax
 import jax.numpy as jnp
 import numpy as np
 
@@ -47,7 +47,7 @@ def _synapse_count(count: int, density_level: float, *, scale: int = 1) -> int:
 
 def _make_mask(
     shape: Tuple[int, int], count: int, rng: np.random.Generator
-) -> chex.Array:
+) -> jax.Array:
     """
     Randomly assigns connections to nodes by populating sparsity mask.
 

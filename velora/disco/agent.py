@@ -352,12 +352,12 @@ class DiscoValueAgent(BaseAgent[ValueModules]):
 
     def __call__(
         self,
-        obs: chex.Array,
+        obs: jax.Array,
         *,
-        h_state: Optional[chex.Array] = None,
-        timespans: Optional[chex.Array] = None,
-        encoding: Optional[chex.Array] = None,
-    ) -> Tuple[chex.Array, chex.Array]:
+        h_state: Optional[jax.Array] = None,
+        timespans: Optional[jax.Array] = None,
+        encoding: Optional[jax.Array] = None,
+    ) -> Tuple[jax.Array, jax.Array]:
         """
         Forward pass through the agent.
 
@@ -391,9 +391,9 @@ class DiscoValueAgent(BaseAgent[ValueModules]):
 
         Returns
         -------
-        v : chex.Array
+        v : jax.Array
             State-value estimates with shape `(B, T, 1)` or `(B, 1)` if `T=1`
-        h_state : chex.Array
+        h_state : jax.Array
             Updated hidden state. Shape: `(B, HS)`
         """
         # Reuse pre-computed encoding or compute fresh
@@ -545,9 +545,9 @@ class DiscoAgent(BaseAgent[DiscoModules]):
     def _meta_conditioning(
         self,
         meta_proj: nnx.Linear,
-        embedding: chex.Array,
-        meta_h_state: chex.Array,
-    ) -> chex.Array:
+        embedding: jax.Array,
+        meta_h_state: jax.Array,
+    ) -> jax.Array:
         """
         Applies multiplicative interaction with meta conditioning to encoder output.
 
@@ -555,14 +555,14 @@ class DiscoAgent(BaseAgent[DiscoModules]):
         ----------
         meta_proj : nnx.Linear
             The active meta projection layer
-        embedding : chex.Array
+        embedding : jax.Array
             Encoder output. Shape: `(B, T, E)`
-        meta_h_state : chex.Array
+        meta_h_state : jax.Array
             Meta-LNN hidden state. Shape: `(B, H_meta)`
 
         Returns
         -------
-        result : chex.Array
+        result : jax.Array
             Conditioned embedding. Shape: `(B, T, E)`
         """
         # (B, H_meta) -> (B, E)
@@ -574,10 +574,10 @@ class DiscoAgent(BaseAgent[DiscoModules]):
         self,
         rollout: Rollout,
         *,
-        disco_h_state: chex.Array | None = None,
-        meta_h_state: chex.Array | None = None,
+        disco_h_state: jax.Array | None = None,
+        meta_h_state: jax.Array | None = None,
         params: nnx.State | None = None,
-    ) -> Tuple[DiscoAgentOutput, chex.Array, chex.Array]:
+    ) -> Tuple[DiscoAgentOutput, jax.Array, jax.Array]:
         """
         Generate targets for agent training.
 
@@ -585,10 +585,10 @@ class DiscoAgent(BaseAgent[DiscoModules]):
         ----------
         rollout : Rollout
             A trajectory of experience
-        disco_h_state : chex.Array (optional)
+        disco_h_state : jax.Array (optional)
             Hidden state for DiscoNetwork. Shape: `(B, H)`.
             Default is `None`
-        meta_h_state : chex.Array (optional)
+        meta_h_state : jax.Array (optional)
             Hidden state for MetaLNN. Shape: `(B, H_meta)`.
             Default is `None`
         params : nnx.State (optional)
@@ -599,9 +599,9 @@ class DiscoAgent(BaseAgent[DiscoModules]):
         -------
         targets : DiscoAgentOutput
             Generated targets `(μ̂, log σ̂, ŷ, ẑ)`
-        disco_h_state : chex.Array
+        disco_h_state : jax.Array
             Updated Disco network hidden state
-        meta_h_state : chex.Array
+        meta_h_state : jax.Array
             Updated Meta-LNN hidden state
         """
         # Condition based on functional approach
@@ -913,13 +913,13 @@ class PolicyAgent(BaseAgent[PolicyModules]):
 
     def __call__(
         self,
-        obs: chex.Array,
-        action: chex.Array,
+        obs: jax.Array,
+        action: jax.Array,
         *,
-        ocm_h_state: Optional[chex.Array] = None,
-        acm_h_state: Optional[chex.Array] = None,
-        timespans: Optional[chex.Array] = None,
-        encoding: Optional[chex.Array] = None,
+        ocm_h_state: Optional[jax.Array] = None,
+        acm_h_state: Optional[jax.Array] = None,
+        timespans: Optional[jax.Array] = None,
+        encoding: Optional[jax.Array] = None,
     ) -> Tuple[PolicyAgentOutput, PolicyAgentHiddenStates]:
         """
         Forward pass through the agent.
@@ -935,7 +935,7 @@ class PolicyAgent(BaseAgent[PolicyModules]):
             - `width (W)` the width of the image observation
             - `channels (C)` the number of channels in the image
 
-        action : chex.Array
+        action : jax.Array
             Continuous action vector padded to `max_action_dim`.
             Used for ACM conditioning
 
@@ -1011,11 +1011,11 @@ class PolicyAgent(BaseAgent[PolicyModules]):
 
     def functional_forward(
         self,
-        encoding: chex.Array,
-        action: chex.Array,
+        encoding: jax.Array,
+        action: jax.Array,
         params: nnx.State,
         *,
-        action_dim_mask: chex.Array | None = None,
+        action_dim_mask: jax.Array | None = None,
     ) -> PolicyAgentOutput:
         """
         Pure functional forward through OCM + ACM + Decoder
@@ -1023,17 +1023,17 @@ class PolicyAgent(BaseAgent[PolicyModules]):
 
         Parameters
         ----------
-        encoding : chex.Array
+        encoding : jax.Array
            Encoder embeddings `(B, T, F)`
 
             - `batch_size (B)` the number of samples per timestep
             - `seq_length (T)` the number of sequences (e.g., trajectories)
             - `features (F)` number of features in the embedding
-        action : chex.Array
+        action : jax.Array
             Continuous action vector `(B, T, D)` padded to `max_action_dim`
         params : nnx.State
             All trainable parameters
-        action_dim_mask : chex.Array (optional)
+        action_dim_mask : jax.Array (optional)
             Boolean mask `(max_action_dim,)` for valid action dimensions.
             Default is `None`
 
@@ -1066,15 +1066,15 @@ class PolicyAgent(BaseAgent[PolicyModules]):
             acm_preds.q,
         )
 
-    def act(self, mu: chex.Array, log_std: chex.Array) -> np.ndarray:
+    def act(self, mu: jax.Array, log_std: jax.Array) -> np.ndarray:
         """
         Sample continuous actions from the Gaussian policy.
 
         Parameters
         ----------
-        mu : chex.Array
+        mu : jax.Array
             Policy mean `(B, D)` or `(B, T, D)`
-        log_std : chex.Array
+        log_std : jax.Array
             Policy log standard deviation `(B, D)` or `(B, T, D)`
 
         Returns

@@ -16,6 +16,7 @@
 from typing import Optional, Tuple
 
 import chex
+import jax
 import jax.numpy as jnp
 
 from velora.disco.config.spec import ACMHeadSpec, OCMHeadSpec
@@ -98,28 +99,28 @@ class OCM(BaseCfC):
 
     def __call__(
         self,
-        obs: chex.Array,
+        obs: jax.Array,
         *,
-        h_state: Optional[chex.Array] = None,
-        timespans: Optional[chex.Array] = None,
-    ) -> Tuple[OCMPredictions, chex.Array]:
+        h_state: Optional[jax.Array] = None,
+        timespans: Optional[jax.Array] = None,
+    ) -> Tuple[OCMPredictions, jax.Array]:
         """
         Forward pass through the network.
 
         Parameters
         ----------
-        obs : chex.Array
+        obs : jax.Array
             Input observations with shape `(B, T, F)` or `(B, F)`
 
             - `batch_size (B)`: the number of samples per timestep
             - `seq_length (T)`: the number of sequences (e.g., trajectories)
             - `features (F)`: the features at each timestep
-        h_state : chex.Array (optional)
+        h_state : jax.Array (optional)
             Initial hidden state with shape `(B, H)`
 
             - `batch_size (B)`: the number of samples per timestep
             - `n_hidden (H)`: the total number of hidden neurons
-        timespans : chex.Array (optional)
+        timespans : jax.Array (optional)
             Time elapsed since previous timestep. For fixed intervals set to `None`.
             For varying timesteps shape must be `(T,)`
 
@@ -130,7 +131,7 @@ class OCM(BaseCfC):
         ocm_preds : OCMPredictions
             Network predictions for the command layer (`embedding`)
             and each head `(pi, y)`
-        h_state : chex.Array
+        h_state : jax.Array
             Final hidden state with shape `(B, H)`
         """
         x, h_state, timespans = self._preprocess(obs, h_state, timespans)
@@ -225,12 +226,12 @@ class ACM(BaseCfC):
 
     def __call__(
         self,
-        state_embedding: chex.Array,
-        action: chex.Array,
+        state_embedding: jax.Array,
+        action: jax.Array,
         *,
-        h_state: Optional[chex.Array] = None,
-        timespans: Optional[chex.Array] = None,
-    ) -> Tuple[ACMPredictions, chex.Array]:
+        h_state: Optional[jax.Array] = None,
+        timespans: Optional[jax.Array] = None,
+    ) -> Tuple[ACMPredictions, jax.Array]:
         """
         Performs a forward pass through the network.
 
@@ -239,21 +240,21 @@ class ACM(BaseCfC):
 
         Parameters
         ----------
-        state_embedding : chex.Array
+        state_embedding : jax.Array
             Embedded state from OCM with shape `(B, T, F)` or `(B, F)`
-        action : chex.Array
+        action : jax.Array
             Continuous action vector with shape `(B, T, D)` or `(B, D)`.
             Padded to `max_action_dim`.
-        h_state : chex.Array (optional)
+        h_state : jax.Array (optional)
             Initial hidden state with shape `(B, H)`
-        timespans : chex.Array (optional)
+        timespans : jax.Array (optional)
             Time elapsed since previous timestep `(T,)`
 
         Returns
         -------
         acm_preds : ACMPredictions
             Network predictions `(embedding, z, aux_pi, q)`
-        h_state : chex.Array
+        h_state : jax.Array
             Final hidden state with shape `(B, H)`
         """
         # Concatenate state embedding with action

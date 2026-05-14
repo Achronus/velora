@@ -13,7 +13,6 @@
 # limitations under the License.
 # ==============================================================================
 
-import chex
 import jax
 import jax.numpy as jnp
 
@@ -21,63 +20,63 @@ from velora.compute.softmax import Softmax
 
 
 def compute_softmax_importance_weights(
-    pi_logits: chex.Array,
-    mu_logits: chex.Array,
-    actions: chex.Array,
-) -> chex.Array:
+    pi_logits: jax.Array,
+    mu_logits: jax.Array,
+    actions: jax.Array,
+) -> jax.Array:
     """
     Compute importance sampling weights for off-policy correction.
 
     Parameters
     ----------
-    pi_logits : chex.Array
+    pi_logits : jax.Array
         Current policy logits. Shape: `(T, B, A)`
-    mu_logits : chex.Array
+    mu_logits : jax.Array
         Behavior policy logits. Shape: `(T, B, A)`
-    actions : chex.Array
+    actions : jax.Array
         Actions taken. Shape: `(T, B)`
 
     Returns
     -------
-    rho : chex.Array
+    rho : jax.Array
         Importance weights. Shape: `(T, B)`
     """
     log_pi = Softmax(pi_logits).log_prob(actions)
     log_mu = Softmax(mu_logits).log_prob(actions)
-    rho = jax.lax.stop_gradient(jnp.exp(log_pi - log_mu))  # type: ignore
+    rho = jax.lax.stop_gradient(jnp.exp(log_pi - log_mu))
     return rho
 
 
 def compute_gaussian_importance_weights(
-    mu_pi: chex.Array,
-    log_std_pi: chex.Array,
-    mu_mu: chex.Array,
-    log_std_mu: chex.Array,
-    actions: chex.Array,
-    action_dim_mask: chex.Array | None = None,
-) -> chex.Array:
+    mu_pi: jax.Array,
+    log_std_pi: jax.Array,
+    mu_mu: jax.Array,
+    log_std_mu: jax.Array,
+    actions: jax.Array,
+    action_dim_mask: jax.Array | None = None,
+) -> jax.Array:
     """
     Compute importance sampling weights for off-policy correction
     with Gaussian policies.
 
     Parameters
     ----------
-    mu_pi : chex.Array
+    mu_pi : jax.Array
         Current policy mean. Shape: `(T, B, D)`
-    log_std_pi : chex.Array
+    log_std_pi : jax.Array
         Current policy log-std. Shape: `(T, B, D)`
-    mu_mu : chex.Array
+    mu_mu : jax.Array
         Behavior policy mean. Shape: `(T, B, D)`
-    log_std_mu : chex.Array
+    log_std_mu : jax.Array
         Behavior policy log-std. Shape: `(T, B, D)`
-    actions : chex.Array
+    actions : jax.Array
         Actions taken. Shape: `(T, B, D)`
-    action_dim_mask : chex.Array (optional)
+    action_dim_mask : jax.Array (optional)
         Boolean mask `(D,)` for valid action dimensions. Default is `None`
 
     Returns
     -------
-    rho : chex.Array
+    rho : jax.Array
         Importance weights. Shape: `(T, B)`
     """
 
@@ -100,11 +99,11 @@ def compute_gaussian_importance_weights(
 
 
 def transform_to_2hot(
-    scalar: chex.Array,
+    scalar: jax.Array,
     min_value: float,
     max_value: float,
     num_bins: int,
-) -> chex.Array:
+) -> jax.Array:
     """
     Encode scalars as 2-hot categorical distributions over a uniform support.
 
@@ -114,7 +113,7 @@ def transform_to_2hot(
 
     Parameters
     ----------
-    scalar : chex.Array
+    scalar : jax.Array
         Scalar values to encode.
     min_value : float
         Minimum representable value.
@@ -125,7 +124,7 @@ def transform_to_2hot(
 
     Returns
     -------
-    probs : chex.Array
+    probs : jax.Array
         `(..., num_bins)` categorical distribution.
     """
     scalar = jnp.clip(scalar, min_value, max_value)
@@ -151,17 +150,17 @@ def transform_to_2hot(
 
 
 def transform_from_2hot(
-    probs: chex.Array,
+    probs: jax.Array,
     min_value: float,
     max_value: float,
     num_bins: int,
-) -> chex.Array:
+) -> jax.Array:
     """
     Decode a categorical distribution back to scalar (expected value).
 
     Parameters
     ----------
-    probs : chex.Array
+    probs : jax.Array
         Probability distribution over bins `(..., num_bins)`.
     min_value : float
         Minimum representable value.
@@ -172,7 +171,7 @@ def transform_from_2hot(
 
     Returns
     -------
-    scalar : chex.Array
+    scalar : jax.Array
         Expected scalar values.
     """
     support = jnp.linspace(min_value, max_value, num_bins)
@@ -180,12 +179,12 @@ def transform_from_2hot(
 
 
 def compute_gaussian_kl(
-    mu_target: chex.Array,
-    log_std_target: chex.Array,
-    mu_pred: chex.Array,
-    log_std_pred: chex.Array,
-    action_dim_mask: chex.Array | None = None,
-) -> chex.Array:
+    mu_target: jax.Array,
+    log_std_target: jax.Array,
+    mu_pred: jax.Array,
+    log_std_pred: jax.Array,
+    action_dim_mask: jax.Array | None = None,
+) -> jax.Array:
     """
     Compute KL divergence between two diagonal Gaussian distributions.
 
@@ -194,20 +193,20 @@ def compute_gaussian_kl(
 
     Parameters
     ----------
-    mu_target : chex.Array
+    mu_target : jax.Array
         Target mean. Shape: `(B, T, D)`
-    log_std_target : chex.Array
+    log_std_target : jax.Array
         Target log standard deviation. Shape: `(B, T, D)`
-    mu_pred : chex.Array
+    mu_pred : jax.Array
         Predicted mean. Shape: `(B, T, D)`
-    log_std_pred : chex.Array
+    log_std_pred : jax.Array
         Predicted log standard deviation. Shape: `(B, T, D)`
-    action_dim_mask : chex.Array (optional)
+    action_dim_mask : jax.Array (optional)
         Boolean mask `(D,)` for valid action dimensions. Default is `None`
 
     Returns
     -------
-    kl : chex.Array
+    kl : jax.Array
         Per-sample KL divergence. Shape: `(B, T)`
     """
     std_target = jnp.exp(log_std_target)
@@ -217,8 +216,8 @@ def compute_gaussian_kl(
     # Per-dimension KL: log(σ₂/σ₁) + (σ₁² + (μ₁-μ₂)²) / (2σ₂²) - ½
     per_dim_kl = (
         log_std_pred
-        - log_std_target  # type: ignore
-        + (jnp.square(std_target) + jnp.square(mu_target - mu_pred))  # type: ignore
+        - log_std_target
+        + (jnp.square(std_target) + jnp.square(mu_target - mu_pred))
         / (2.0 * var_pred + 1e-8)
         - 0.5
     )

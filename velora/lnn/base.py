@@ -226,11 +226,11 @@ class BaseCfC(nnx.Module):
     @final
     def _scan(
         self,
-        x: chex.Array,
-        h_state: chex.Array,
-        timespans: chex.Array,
+        x: jax.Array,
+        h_state: jax.Array,
+        timespans: jax.Array,
         reverse: bool = False,
-    ) -> Tuple[chex.Array, Tuple[chex.Array, ...]]:
+    ) -> Tuple[jax.Array, Tuple[jax.Array, ...]]:
         """
         Run forward scan through network.
 
@@ -249,9 +249,9 @@ class BaseCfC(nnx.Module):
 
         Returns
         -------
-        h_state : chex.Array
+        h_state : jax.Array
             Updated hidden state.
-        preds : Tuple[chex.Array, ...]
+        preds : Tuple[jax.Array, ...]
             Network predictions. Includes:
             - `embeddding` - output of the command layer
             - `n_head_outputs` - `n` additional outputs, one per motor head
@@ -259,9 +259,9 @@ class BaseCfC(nnx.Module):
         T = jnp.shape(x)[1]
 
         def _step(
-            h: Tuple[chex.Array, ...],
-            inputs: Tuple[chex.Array, chex.Array],
-        ) -> Tuple[Tuple[chex.Array, ...], Tuple[chex.Array, ...]]:
+            h: Tuple[jax.Array, ...],
+            inputs: Tuple[jax.Array, jax.Array],
+        ) -> Tuple[Tuple[jax.Array, ...], Tuple[jax.Array, ...]]:
             """Single step function."""
             x_t, ts_t = inputs  # x_t -> (B, F), ts_t -> scalar
             h_inter, h_command, *h_heads = h
@@ -331,10 +331,10 @@ class BaseCfC(nnx.Module):
 
     def _preprocess(
         self,
-        x: chex.Array,
-        h_state: Optional[chex.Array] = None,
-        timespans: Optional[chex.Array] = None,
-    ) -> Tuple[chex.Array, chex.Array, chex.Array]:
+        x: jax.Array,
+        h_state: Optional[jax.Array] = None,
+        timespans: Optional[jax.Array] = None,
+    ) -> Tuple[jax.Array, jax.Array, jax.Array]:
         """
         Overridable method. Preprocesses `__call__` method inputs.
 
@@ -365,11 +365,11 @@ class BaseCfC(nnx.Module):
 
         Returns
         -------
-        x : chex.Array
+        x : jax.Array
             Preprocessed input with shape `(B, T, F)`
-        h_state : chex.Array
+        h_state : jax.Array
             Hidden state with shape `(B, H)`
-        timespans : chex.Array
+        timespans : jax.Array
             Time intervals with shape `(T,)`
         """
         if x.ndim == 2:
@@ -384,7 +384,7 @@ class BaseCfC(nnx.Module):
 
         return x, h_state, timespans
 
-    def _postprocess(self, preds: Tuple[chex.Array, ...]) -> Tuple[chex.Array, ...]:
+    def _postprocess(self, preds: Tuple[jax.Array, ...]) -> Tuple[jax.Array, ...]:
         """
         Overridable method. Postprocess network predictions by applying batch-first transformations to all predictions.
 
@@ -392,17 +392,17 @@ class BaseCfC(nnx.Module):
 
         Parameters
         ----------
-        preds : Tuple[chex.Array, ...]
+        preds : Tuple[jax.Array, ...]
             Raw predictions from scan `(T, B, F)`
 
         Returns
         -------
-        outputs : Tuple[chex.Array, ...]
+        outputs : Tuple[jax.Array, ...]
             Transformed predictions `(B, T, F)`
         """
         return jax.tree.map(to_batch_first, preds)
 
-    def diagnostics(self, x: chex.Array, hidden: chex.Array) -> Dict[str, float]:
+    def diagnostics(self, x: jax.Array, hidden: jax.Array) -> Dict[str, float]:
         """
         Extract mechanism-specific metrics for logging.
 

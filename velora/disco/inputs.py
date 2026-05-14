@@ -15,7 +15,7 @@
 
 from typing import NamedTuple
 
-import chex
+import jax
 import optax
 
 from velora.disco.ema import EMAState
@@ -35,9 +35,9 @@ class GradChunkInputs(NamedTuple):
         Policy network parameters
     v_params : optax.Params
         Value network parameters
-    disco_h : chex.Array
+    disco_h : jax.Array
         Disco network hidden states `(C, B, H)`
-    meta_h : chex.Array
+    meta_h : jax.Array
         Meta-LNN hidden states `(C, B, H)`
     p_opt : optax.OptState
         Policy optimizer states
@@ -51,18 +51,18 @@ class GradChunkInputs(NamedTuple):
         Training rollouts `(C, N, B, T, ...)`
     valid_rollout : Rollout
         Validation rollouts `(C, 1, B, T, ...)`
-    masks : chex.Array
+    masks : jax.Array
         Boolean masks `(C, max_action_size)` for valid actions/dims
     """
 
     p_params: optax.Params
     v_params: optax.Params
-    disco_h: chex.Array
-    meta_h: chex.Array
+    disco_h: jax.Array
+    meta_h: jax.Array
     p_opt: optax.OptState
     v_opt: optax.OptState
     adv_ema: EMAState
     td_ema: EMAState
     train_rollout: Rollout
     valid_rollout: Rollout
-    masks: chex.Array
+    masks: jax.Array
