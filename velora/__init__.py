@@ -1,4 +1,6 @@
-from velora import base, cli, compute, disco, gym, lnn, nn, tracking, utils
+import mujorax  # noqa: F401 — registers envs in envrax's registry
+
+from velora import base, cli, compute, disco, lnn, nn, tracking, utils
 from velora.disco import (
     DiscoAgent,
     DiscoAgentSettings,
@@ -8,26 +10,6 @@ from velora.disco import (
     PolicyAgentSettings,
     RuleTrainer,
     RuleTrainerSettings,
-)
-from velora.gym import (
-    ATARI_57,
-    ATARI_BASE,
-    ATARI_EASY,
-    ATARI_HARD,
-    ATARI_MEDIUM,
-    BOX2D_5,
-    CONTINUOUS_41,
-    DMC_25,
-    DMC_COMPLEX,
-    DMC_LOCOMOTION,
-    DMC_MANIPULATION,
-    DMC_SIMPLE,
-    MUJOCO_11,
-    MUJOCO_BALANCE,
-    MUJOCO_LOCOMOTION,
-    MUJOCO_MANIPULATION,
-    EnvGroup,
-    EnvSet,
 )
 from velora.tracking import RunSettings
 
@@ -41,22 +23,4 @@ __all__ = [
     "EMASettings",
     "LossCostSettings",
     "RunSettings",
-    "ATARI_BASE",
-    "ATARI_EASY",
-    "ATARI_MEDIUM",
-    "ATARI_HARD",
-    "ATARI_57",
-    "BOX2D_5",
-    "CONTINUOUS_41",
-    "DMC_25",
-    "DMC_COMPLEX",
-    "DMC_LOCOMOTION",
-    "DMC_MANIPULATION",
-    "DMC_SIMPLE",
-    "MUJOCO_11",
-    "MUJOCO_BALANCE",
-    "MUJOCO_LOCOMOTION",
-    "MUJOCO_MANIPULATION",
-    "EnvSet",
-    "EnvGroup",
 ]

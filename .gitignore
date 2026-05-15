@@ -174,5 +174,14 @@ CHANGELOG.md
 metrics.db
 metrics.db-journal
 *.prof
-/logs
-/checkpoints
+
+# Local dev
+demo*.py
+start*.py
+/runs*
+.dockerignore
+Dockerfile
+
+# JAX persistent XLA compilation cache (envrax / velora)
+/.jax_cache*
+/.cache/jax

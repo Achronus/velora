@@ -13,113 +13,69 @@
 # limitations under the License.
 # ==============================================================================
 
-from typing import List, Self
+from typing import Self
 
-import chex
 import jax
 import jax.numpy as jnp
-import numpy as np
 from flax import struct
 
 from velora.disco.outputs import PolicyAgentOutput
-from velora.utils.structs import get_fields_by_index
-from velora.utils.transforms import to_time_first
 
 
 @struct.dataclass
 class Rollout:
     """
-    A single `(B, T, 1)` or stack of `N` rollouts `(N, B, T, 1)`.
+    Rollout trajectory data.
+
+    Used in two shapes:
+
+    - Buffer storage: `(P, N, B, T, ...)` — all trainers, all rollouts.
+    - Grad chunk (after `get_chunk`): `(C, N, B, T, ...)`, or
+      `(C, B, T, ...)` if sliced with `squeeze_n=True`.
+
+    Shape symbols
+    -------------
+    - `P` / `C` - trainer pool / chunk count.
+    - `N` - number of rollouts per collection phase.
+    - `B` - batch_size, number of vectorized environments.
+    - `T` - sequence length, timesteps in the trajectory.
+    - `A` - action dimensionality (max across env set).
+    - `E` - encoder output dim.
+    - `D` - prediction vector dim (`y` and `z`).
 
     Parameters
     ----------
     actions : jax.Array
-        Actions taken in the environment `(N, B, T, A)` or `(B, T, A)`
-
-        - n_rollouts (`N`) - the number of rollouts per trajectory
-        - batch_size (`B`) the number of vectorized environments
-        - seq_length (`T`) the number of timesteps in the trajectory (can be more than one episode)
-        - action_dim (`A`) the number of continuous actions taken
-
+        Actions taken `(..., B, T, A)`.
     rewards : jax.Array
-        Rewards generated from the environment `(N, B, T, 1)` or `(B, T, 1)`
-
-        - n_rollouts (`N`) - the number of rollouts per trajectory
-        - batch_size (`B`) the number of vectorized environments
-        - seq_length (`T`) the number of timesteps in the trajectory (can be more than one episode)
-
+        Environment rewards `(..., B, T, 1)`.
     discounts : jax.Array
-        Environment discounts `(N, B, T, 1)` or `(B, T, 1)`
-
-        Binary values: `1.0` = episode continues, `0.0` = episode ended
-
-        - n_rollouts (`N`) - the number of rollouts per trajectory
-        - batch_size (`B`) the number of vectorized environments
-        - seq_length (`T`) the number of timesteps in the trajectory (can be more than one episode)
-
+        Episode discounts `(..., B, T, 1)`. Binary `1.0` = continues,
+        `0.0` = episode ended.
     values : jax.Array
-        State value estimates `(N, B, T, 1)` or `(B, T, 1)`.
-
-        - n_rollouts (`N`) - the number of rollouts per trajectory
-        - batch_size (`B`) - the number of vectorized environments
-        - seq_length (`T`) - the number of timesteps in the trajectory (can be more than one episode)
+        State value estimates `(..., B, T, 1)`.
     preds : PolicyAgentOutput
-        Policy network outputs.
-        Each field has shape `(N, B, T, ...)` or `(B, T, ...)`
+        Policy network outputs, each field `(..., B, T, *)`.
     target_preds : PolicyAgentOutput
-        Target network outputs.
-        Each field has shape `(N, B, T, ...)` or `(B, T, ...)`
+        Target network outputs, each field `(..., B, T, *)`.
     """
 
-    actions: chex.Array
-    rewards: chex.Array
-    discounts: chex.Array
-    values: chex.Array
+    actions: jax.Array
+    rewards: jax.Array
+    discounts: jax.Array
+    values: jax.Array
     preds: PolicyAgentOutput
     target_preds: PolicyAgentOutput
 
-    @property
-    def is_stacked(self) -> bool:
-        """True if shape `(N, B, T, ...)`."""
-        return jnp.ndim(self.actions) == 4
-
-    @property
-    def seq_len(self) -> int:
-        """Trajectory length (`T`)."""
-        if self.is_stacked:
-            return jnp.shape(self.actions)[2]
-
-        return jnp.shape(self.actions)[1]
-
-    @property
-    def batch_size(self) -> int:
-        """Batch size (`B`)."""
-        if self.is_stacked:
-            return jnp.shape(self.actions)[1]
-
-        return jnp.shape(self.actions)[0]
-
-    @property
-    def n_rollouts(self) -> int:
-        """Number of rollouts (`N`)."""
-        if self.is_stacked:
-            return jnp.shape(self.actions)[0]
-
-        return 1
-
     def squeeze(self) -> Self:
         """
-        Removes size-1 dimension from `(rewards, discounts, values)`
-        and returns a new instance of the rollout.
-
-        Handles both shapes:
-            - Unstacked `(B, T, 1)`    → `(B, T)`
-            - Stacked   `(N, B, T, 1)` → `(N, B, T)`
+        Remove the trailing size-1 dimension from `rewards`, `discounts`,
+        and `values`. `(..., B, T, 1)` → `(..., B, T)`.
 
         Returns
         -------
         rollout : Rollout
-            New instance with trailing dimension removed
+            New instance with trailing dimension removed.
         """
         return self.__replace__(
             rewards=jnp.squeeze(self.rewards, axis=-1),
@@ -129,22 +85,18 @@ class Rollout:
 
     def to_time_first(self) -> Self:
         """
-        Transpose from batch-first to time-first format.
+        Swap the batch and time axes at positions `1` and `2`.
 
-        Handles both shapes:
-            - Unstacked `(B, T, ...)`    → `(T, B, ...)`
-            - Stacked   `(N, B, T, ...)` → `(N, T, B, ...)` — transposes axes 1 and 2
-
-        Useful for V-trace and other temporal computations that expect time
-        as the leading dimension.
+        For the canonical squeezed chunk shape `(C, B, T, ...)` this
+        produces `(C, T, B, ...)` — useful for V-trace and other
+        temporal computations that expect time first.
 
         Returns
         -------
         rollout : Rollout
-            New instance with time-first arrays
+            New instance with batch/time axes swapped.
         """
-        _swap = (lambda x: jnp.swapaxes(x, 1, 2)) if self.is_stacked else to_time_first
-
+        _swap = lambda x: jnp.swapaxes(x, 1, 2)  # noqa: E731
         return self.__replace__(
             actions=_swap(self.actions),
             rewards=_swap(self.rewards),
@@ -154,35 +106,69 @@ class Rollout:
             target_preds=jax.tree.map(_swap, self.target_preds),
         )
 
-    def __getitem__(self, idx: int) -> Self:
+    def write_step(
+        self,
+        rollout_idx: jax.Array,
+        step_idx: jax.Array,
+        actions: jax.Array,
+        rewards: jax.Array,
+        discounts: jax.Array,
+        values: jax.Array,
+        preds: PolicyAgentOutput,
+        target_preds: PolicyAgentOutput,
+    ) -> Self:
         """
-        Extract a single unstacked rollout by index.
+        Write one timestep across all trainers into rollout/step slot.
+
+        Only valid on the buffer-shaped `(P, N, B, T, ...)` rollout used
+        as `PoolRolloutBuffer.as_pytree()`. Returns a new `Rollout` with
+        all fields updated via `.at[:, rollout_idx, :, step_idx].set(...)`.
+        Both indices are JAX scalars so this composes inside `jax.lax.scan`.
 
         Parameters
         ----------
-        idx : int
-            Rollout index at `N` axis
+        rollout_idx : jax.Array
+            `jnp.int32` scalar — rollout slot `n`.
+        step_idx : jax.Array
+            `jnp.int32` scalar — timestep `t`.
+        actions, rewards, discounts, values : jax.Array
+            Per-trainer batched values shaped `(P, B, ...)`.
+        preds, target_preds : PolicyAgentOutput
+            Policy / target predictions shaped `(P, B, ...)`.
 
         Returns
         -------
         rollout : Rollout
-            A single `(B, T, ...)` rollout
-
-        Raises
-        ------
-        unstacked: IndexError
-            If called on an unstacked rollout
+            New `Rollout` with one timestep written.
         """
-        if not self.is_stacked:
-            raise IndexError("Cannot index an unstacked rollout.")
-
-        return Rollout(
-            actions=self.actions[idx],  # type: ignore
-            rewards=self.rewards[idx],  # type: ignore
-            discounts=self.discounts[idx],  # type: ignore
-            values=self.values[idx],  # type: ignore
-            preds=get_fields_by_index(self.preds, idx),
-            target_preds=get_fields_by_index(self.target_preds, idx),
+        n, t = rollout_idx, step_idx
+        return self.__replace__(
+            actions=self.actions.at[:, n, :, t].set(actions),
+            rewards=self.rewards.at[:, n, :, t].set(rewards),
+            discounts=self.discounts.at[:, n, :, t].set(discounts),
+            values=self.values.at[:, n, :, t].set(values),
+            preds=PolicyAgentOutput(
+                encoding=self.preds.encoding.at[:, n, :, t].set(preds.encoding),
+                mu=self.preds.mu.at[:, n, :, t].set(preds.mu),
+                log_std=self.preds.log_std.at[:, n, :, t].set(preds.log_std),
+                y=self.preds.y.at[:, n, :, t].set(preds.y),
+                z=self.preds.z.at[:, n, :, t].set(preds.z),
+                aux_pi=self.preds.aux_pi.at[:, n, :, t].set(preds.aux_pi),
+                q=self.preds.q.at[:, n, :, t].set(preds.q),
+            ),
+            target_preds=PolicyAgentOutput(
+                encoding=self.target_preds.encoding.at[:, n, :, t].set(
+                    target_preds.encoding
+                ),
+                mu=self.target_preds.mu.at[:, n, :, t].set(target_preds.mu),
+                log_std=self.target_preds.log_std.at[:, n, :, t].set(
+                    target_preds.log_std
+                ),
+                y=self.target_preds.y.at[:, n, :, t].set(target_preds.y),
+                z=self.target_preds.z.at[:, n, :, t].set(target_preds.z),
+                aux_pi=self.target_preds.aux_pi.at[:, n, :, t].set(target_preds.aux_pi),
+                q=self.target_preds.q.at[:, n, :, t].set(target_preds.q),
+            ),
         )
 
 
@@ -190,37 +176,47 @@ class PoolRolloutBuffer:
     """
     Batched rollout buffer for continuous action space trainers.
 
-    Stores experience for all trainers in pre-allocated numpy arrays
-    with shape `(P, N, B, T, ...)`, where `P` is the number of trainers.
+    Stores all per-trainer experience as a single buffer-shaped
+    `Rollout` pytree with leading dims `(P, N, B, T)`. The compiled
+    `pool.collect` reads it via `as_pytree`, threads it through the
+    `jax.lax.scan` carry, and writes the result back via
+    `load_from_pytree`. Grad consumers slice it via `get_chunk`.
 
-    Differs from `PoolRolloutBuffer` in:
-        - `actions` are `float32 (P, N, B, T, max_action_dim)` instead of
-          `int32 (P, N, B, T, 1)`
-        - Policy stored as `(mu, log_std)` instead of `pi` logits
-        - `z` has no action dimension: `(P, N, B, T, prediction_dim)`
-        - `aux_pi` is `(P, N, B, T, 2 * max_action_dim)` — predicted
-          next-step Gaussian params, not `(P, N, B, T, A, A)`
-        - `q` is scalar: `(P, N, B, T, 1)`
+    Shape symbols
+    -------------
+    - `P` - number of trainers.
+    - `N` - rollouts per collection phase.
+    - `B` - batch_size (vectorized envs per trainer).
+    - `T` - timesteps per rollout.
+    - `A` - max action dim across env set.
+    - `E` - encoder output dim.
+    - `D` - prediction vector dim.
+
+    Field layout (each leaf of `self._buffer`):
+        - `actions`: `(P, N, B, T, A)`.
+        - Policy / target stored as `(mu, log_std)` Gaussian params, each `(P, N, B, T, A)`.
+        - `z` has no action dim: `(P, N, B, T, D)`.
+        - `aux_pi`: `(P, N, B, T, 2 * A)` — predicted next-step Gaussian params.
+        - `q`: scalar `(P, N, B, T, 1)`.
 
     Parameters
     ----------
     num_trainers : int
-        Number of trainers (`P`)
+        Number of trainers (`P`).
     n_rollouts : int
-        Number of rollouts per collection phase (`N`)
+        Number of rollouts per collection phase (`N`).
     n_envs : int
-        Number of vectorized environments per trainer (`B`)
+        Vectorized environments per trainer (`B`).
     seq_len : int
-        Timesteps per rollout (`T`)
+        Timesteps per rollout (`T`).
     n_actions : int
-        Maximum continuous action dimensionality across all environments
+        Max continuous action dim across all environments (`A`).
     encoding_dim : int
-        Encoder output dimensionality
+        Encoder output dim (`E`).
     prediction_dim : int
-        Prediction vector size (`y` and `z`)
-    use_bfloat16 : bool (optional)
-        Cast rollout floats to `bfloat16` on accelerator transfer.
-        Default is `True`
+        Prediction vector size (`D`) — used for both `y` and `z`.
+    dtype : jnp.dtype, optional
+        Storage dtype for floating-point fields. Default is `jnp.float32`.
     """
 
     def __init__(
@@ -233,233 +229,96 @@ class PoolRolloutBuffer:
         encoding_dim: int,
         prediction_dim: int,
         *,
-        use_bfloat16: bool = True,
+        dtype: jnp.dtype = jnp.float32,
     ) -> None:
-        self._num_trainers = num_trainers
-        self._n_rollouts = n_rollouts
-        self._use_bfloat16 = use_bfloat16
+        shape = (num_trainers, n_rollouts, n_envs, seq_len)  # (P, N, B, T)
+        zeros = lambda last: jnp.zeros((*shape, last), dtype=dtype)  # noqa: E731
 
-        self.n_actions = n_actions
-        self.encoding_dim = encoding_dim
-        self.prediction_dim = prediction_dim
+        def _preds() -> PolicyAgentOutput:
+            return PolicyAgentOutput(
+                encoding=zeros(encoding_dim),
+                mu=zeros(n_actions),
+                log_std=zeros(n_actions),
+                y=zeros(prediction_dim),
+                z=zeros(prediction_dim),
+                aux_pi=zeros(2 * n_actions),
+                q=zeros(1),
+            )
 
-        self._shape = (num_trainers, n_rollouts, n_envs, seq_len)  # (P, N, B, T)
+        self._buffer = Rollout(
+            actions=zeros(n_actions),
+            rewards=zeros(1),
+            discounts=zeros(1),
+            values=zeros(1),
+            preds=_preds(),
+            target_preds=_preds(),
+        )
 
-        # Write indices
-        self._rollout_idx = 0
-        self._step_idx = 0
-
-        aux_pi_dim = 2 * n_actions
-
-        # Core arrays
-        self.actions = np.zeros((*self._shape, n_actions), dtype=np.float32)
-        self.rewards = np.zeros((*self._shape, 1), dtype=np.float32)
-        self.discounts = np.zeros((*self._shape, 1), dtype=np.float32)
-        self.values = np.zeros((*self._shape, 1), dtype=np.float32)
-
-        # Policy prediction arrays — Gaussian parameters
-        self.p_encoding = np.zeros((*self._shape, encoding_dim), dtype=np.float32)
-        self.p_mu = np.zeros((*self._shape, n_actions), dtype=np.float32)
-        self.p_log_std = np.zeros((*self._shape, n_actions), dtype=np.float32)
-        self.p_y = np.zeros((*self._shape, prediction_dim), dtype=np.float32)
-        self.p_z = np.zeros((*self._shape, prediction_dim), dtype=np.float32)
-        self.p_aux_pi = np.zeros((*self._shape, aux_pi_dim), dtype=np.float32)
-        self.p_q = np.zeros((*self._shape, 1), dtype=np.float32)
-
-        # Target prediction arrays
-        self.t_encoding = np.zeros((*self._shape, encoding_dim), dtype=np.float32)
-        self.t_mu = np.zeros((*self._shape, n_actions), dtype=np.float32)
-        self.t_log_std = np.zeros((*self._shape, n_actions), dtype=np.float32)
-        self.t_y = np.zeros((*self._shape, prediction_dim), dtype=np.float32)
-        self.t_z = np.zeros((*self._shape, prediction_dim), dtype=np.float32)
-        self.t_aux_pi = np.zeros((*self._shape, aux_pi_dim), dtype=np.float32)
-        self.t_q = np.zeros((*self._shape, 1), dtype=np.float32)
-
-        # Write indices
-        self._rollout_idx = 0
-        self._step_idx = 0
-
-    def write_step_batched(
-        self,
-        actions: np.ndarray,
-        rewards: np.ndarray,
-        discounts: np.ndarray,
-        values: np.ndarray,
-        preds: PolicyAgentOutput,
-        target_preds: PolicyAgentOutput,
-    ) -> None:
+    def as_pytree(self) -> Rollout:
         """
-        Write one timestep for ALL trainers simultaneously.
-
-        All inputs have a leading `(P, ...)` dimension. Uses
-        `np.copyto` into pre-allocated memory — zero allocations.
-
-        Parameters
-        ----------
-        actions : np.ndarray
-            `(P, B, 1)` int32
-        rewards : np.ndarray
-            `(P, B, 1)` float32
-        discounts : np.ndarray
-            `(P, B, 1)` float32
-        values : np.ndarray
-            `(P, B, 1)` float32
-        preds : PolicyAgentOutput
-            Policy predictions with fields `(P, B, ...)` as numpy
-        target_preds : PolicyAgentOutput
-            Target predictions with fields `(P, B, ...)` as numpy
-        """
-        n = self._rollout_idx
-        t = self._step_idx
-
-        # Core
-        np.copyto(self.actions[:, n, :, t], actions)
-        np.copyto(self.rewards[:, n, :, t], rewards)
-        np.copyto(self.discounts[:, n, :, t], discounts)
-        np.copyto(self.values[:, n, :, t], values)
-
-        # Policy preds
-        np.copyto(self.p_encoding[:, n, :, t], preds.encoding)
-        np.copyto(self.p_mu[:, n, :, t], preds.mu)
-        np.copyto(self.p_log_std[:, n, :, t], preds.log_std)
-        np.copyto(self.p_y[:, n, :, t], preds.y)
-        np.copyto(self.p_z[:, n, :, t], preds.z)
-        np.copyto(self.p_aux_pi[:, n, :, t], preds.aux_pi)
-        np.copyto(self.p_q[:, n, :, t], preds.q)
-
-        # Target preds
-        np.copyto(self.t_encoding[:, n, :, t], target_preds.encoding)
-        np.copyto(self.t_mu[:, n, :, t], target_preds.mu)
-        np.copyto(self.t_log_std[:, n, :, t], target_preds.log_std)
-        np.copyto(self.t_y[:, n, :, t], target_preds.y)
-        np.copyto(self.t_z[:, n, :, t], target_preds.z)
-        np.copyto(self.t_aux_pi[:, n, :, t], target_preds.aux_pi)
-        np.copyto(self.t_q[:, n, :, t], target_preds.q)
-
-        self._step_idx += 1
-
-    def _all_arrays(self) -> List[np.ndarray]:
-        """Return all pre-allocated arrays."""
-        return [
-            self.actions,
-            self.rewards,
-            self.discounts,
-            self.values,
-            self.p_encoding,
-            self.p_mu,
-            self.p_log_std,
-            self.p_y,
-            self.p_z,
-            self.p_aux_pi,
-            self.p_q,
-            self.t_encoding,
-            self.t_mu,
-            self.t_log_std,
-            self.t_y,
-            self.t_z,
-            self.t_aux_pi,
-            self.t_q,
-        ]
-
-    def get_chunk(self, start: int, end: int, squeeze_n: bool = False) -> Rollout:
-        """
-        Slice trainers `[start:end]` and transfer to accelerator as a `Rollout`.
-
-        Parameters
-        ----------
-        start : int
-            First trainer index (inclusive)
-        end : int
-            Last trainer index (exclusive)
-        squeeze_n : bool (optional)
-            Remove the rollout dimension `N`. Default is `False`
+        Return the buffer-shaped `Rollout` for scan carry.
 
         Returns
         -------
         rollout : Rollout
-            Stacked rollout on GPU with `PolicyAgentOutput` preds.
+            The full `(P, N, B, T, ...)` buffer pytree (zero-copy).
         """
-        s = slice(start, end)
+        return self._buffer
 
-        rollout = Rollout(
-            actions=jnp.asarray(self.actions[s]),
-            rewards=jnp.asarray(self.rewards[s]),
-            discounts=jnp.asarray(self.discounts[s]),
-            values=jnp.asarray(self.values[s]),
-            preds=PolicyAgentOutput(
-                encoding=jnp.asarray(self.p_encoding[s]),
-                mu=jnp.asarray(self.p_mu[s]),
-                log_std=jnp.asarray(self.p_log_std[s]),
-                y=jnp.asarray(self.p_y[s]),
-                z=jnp.asarray(self.p_z[s]),
-                aux_pi=jnp.asarray(self.p_aux_pi[s]),
-                q=jnp.asarray(self.p_q[s]),
-            ),
-            target_preds=PolicyAgentOutput(
-                encoding=jnp.asarray(self.t_encoding[s]),
-                mu=jnp.asarray(self.t_mu[s]),
-                log_std=jnp.asarray(self.t_log_std[s]),
-                y=jnp.asarray(self.t_y[s]),
-                z=jnp.asarray(self.t_z[s]),
-                aux_pi=jnp.asarray(self.t_aux_pi[s]),
-                q=jnp.asarray(self.t_q[s]),
-            ),
-        )
+    def load_from_pytree(self, rollout: Rollout) -> None:
+        """
+        Write back a post-scan buffer-shaped `Rollout`.
 
-        if self._use_bfloat16:
-            rollout = jax.tree.map(
-                lambda x: (
-                    x.astype(jnp.bfloat16)
-                    if jnp.issubdtype(x.dtype, jnp.floating)
-                    else x
-                ),
-                rollout,
-            )
+        Parameters
+        ----------
+        rollout : Rollout
+            Buffer-shaped `Rollout` produced by the scan's final carry.
+        """
+        self._buffer = rollout
 
+    def get_chunk(self, start: int, end: int, squeeze_n: bool = False) -> Rollout:
+        """
+        Slice trainers `[start:end]` as a `Rollout`. All arrays are
+        already on device — this is a zero-copy view.
+
+        Parameters
+        ----------
+        start : int
+            First trainer index (inclusive).
+        end : int
+            Last trainer index (exclusive).
+        squeeze_n : bool, optional
+            Remove the rollout dimension `N`. Default is `False`.
+
+        Returns
+        -------
+        rollout : Rollout
+            Stacked rollout with `PolicyAgentOutput` preds.
+        """
+        rollout = jax.tree.map(lambda x: x[start:end], self._buffer)
         if squeeze_n:
             rollout = jax.tree.map(lambda x: x[:, 0], rollout)
-
         return rollout
-
-    def get_single(self, trainer_idx: int) -> Rollout:
-        """Get a single trainer's rollout and transfer to accelerator."""
-        return self.get_chunk(trainer_idx, trainer_idx + 1)
-
-    def next_rollout(self) -> None:
-        """Advance all trainers to the next rollout slot."""
-        self._rollout_idx += 1
-        self._step_idx = 0
-
-    def reset_head(self) -> None:
-        """Reset write indices for the next collection phase."""
-        self._rollout_idx = 0
-        self._step_idx = 0
-
-    def prefault(self) -> None:
-        """Force the OS to map physical pages for all pre-allocated arrays."""
-        for arr in self._all_arrays():
-            arr.fill(0)
 
     def memory_mb(self) -> float:
         """
-        Total size of all pre-allocated numpy arrays in MB.
+        Total size of all pre-allocated buffers in MB.
 
         Returns
         -------
         size_mb : float
-            Combined size of all numpy buffers in megabytes
+            Combined size of all JAX buffers in megabytes.
         """
-        return sum(a.nbytes for a in self._all_arrays()) / 1e6
+        return sum(a.nbytes for a in jax.tree.leaves(self._buffer)) / 1e6
 
     def __repr__(self) -> str:
-        P, N, B, T = self.actions.shape[:4]
-        D = self.actions.shape[4]
+        P, N, B, T = jnp.shape(self._buffer.actions)[:4]
+        D = jnp.shape(self._buffer.actions)[4]
 
         return (
             f"PoolRolloutBuffer("
             f"trainers={P}, n_rollouts={N}, n_envs={B}, seq_len={T}, "
             f"max_action_dim={D}, "
-            f"rollout={self._rollout_idx}/{N}, step={self._step_idx}, "
             f"memory={self.memory_mb():.1f}MB"
             f")"
         )

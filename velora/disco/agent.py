@@ -26,7 +26,7 @@ from typing import (
 )
 
 import chex
-import gymnasium as gym
+import envrax
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -291,7 +291,7 @@ class DiscoValueAgent(BaseAgent[ValueModules]):
 
     Parameters
     ----------
-    obs_spec : gym.spaces.Box
+    obs_spec : envrax.Box
         A single observation space of the vectorized Gymnasium environment
     n_hidden : int
         Number of decision nodes for policy networks (inter + command nodes)
@@ -318,7 +318,7 @@ class DiscoValueAgent(BaseAgent[ValueModules]):
 
     def __init__(
         self,
-        obs_spec: gym.spaces.Box,
+        obs_spec: envrax.Box,
         n_hidden: int,
         *,
         config: DiscoValueSettings,
@@ -742,7 +742,7 @@ class DiscoAgent(BaseAgent[DiscoModules]):
         # Build full checkpoint template
         params = agent.get_params()
         meta_lr = meta.config.get("meta_lr", 0.001)
-        num_trainers = len(meta.envs) * meta.agents_per_env
+        num_trainers = len(meta.env_names) * meta.agents_per_env
         batch_size = meta.config.get("batch_size", 20)
 
         dummy_state = RuleTrainerState.create(
@@ -804,9 +804,9 @@ class PolicyAgent(BaseAgent[PolicyModules]):
 
     Parameters
     ----------
-    obs_spec : gym.spaces.Box
+    obs_spec : envrax.Box
         A single observation space of the vectorized Gymnasium environment
-    act_spec : gym.spaces.Box
+    act_spec : envrax.Box
         A single action space of the vectorized Gymnasium environment
     config : PolicyAgentSettings
         Configuration for the policy agent
@@ -826,8 +826,8 @@ class PolicyAgent(BaseAgent[PolicyModules]):
 
     def __init__(
         self,
-        obs_spec: gym.spaces.Box,
-        act_spec: gym.spaces.Box,
+        obs_spec: envrax.Box,
+        act_spec: envrax.Box,
         *,
         config: PolicyAgentSettings,
         key: chex.PRNGKey,

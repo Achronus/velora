@@ -19,10 +19,9 @@ from collections import defaultdict
 from typing import Callable, Dict, List, Self, Tuple
 
 import chex
-import gymnasium as gym
+import envrax
 import jax
 import jax.numpy as jnp
-import numpy as np
 import optax
 import orbax.checkpoint as ocp
 from flax import nnx
@@ -68,8 +67,7 @@ from velora.disco.utils.loss import (
     compute_meta_reg_loss,
     compute_policy_loss,
 )
-from velora.gym.envs import EnvGroup, EnvSet, MakeFn
-from velora.gym.workers import EnvWorkerPool
+from velora.disco.warm import WarmCompile
 from velora.nn.optim import scale_by_adan_no_denom
 from velora.tracking.episode import EpisodeTracker
 from velora.tracking.logger import MetricsLogger, RuntimeLogger
@@ -85,14 +83,12 @@ class AgentTrainer:
     """
     Factory for a single continuous-action agent training slot in the `TrainerPool`.
 
-    Creates `PolicyAgent`, `PolicyAgent`, environments, and
-    optimizer states. After construction, `TrainerPool` extracts
-    the agents, params, and state — this class serves as an initializer
-    and is recreated on trainer resets.
-
-    Environments are created temporarily during construction for
-    metadata extraction (action space, observation space) and then
-    closed — stepping is handled by `EnvWorkerPool` subprocesses.
+    Creates `PolicyAgent`, target `PolicyAgent`, `DiscoValueAgent`, and
+    optimizer states. After construction, `TrainerPool` extracts the
+    agents, params, and state — this class serves as an initializer and
+    is recreated on trainer resets. Environment stepping is handled by
+    the `MultiVecEnv` held by `TrainerPool`, so this class does not
+    own any env state.
 
     Lifetime
     ---------
@@ -107,13 +103,17 @@ class AgentTrainer:
     Parameters
     ----------
     env_name : str
-        The gymnasium environment name to train on
+        The registered envrax env name (e.g. `"mjx/hopper_hop-v0"`)
     config : AgentTrainerSettings
         Configuration for individual agent training
     key : chex.PRNGKey
         Random number generator key
-    make_fn : MakeFn
-        Factory function to create the environment
+    obs_space : envrax.Box
+        Per-env observation space (typically from
+        `multi_vec.single_observation_spaces[i]`)
+    action_space : envrax.Box
+        Per-env action space (typically from
+        `multi_vec.single_action_spaces[i]`)
     budget_rng : random.Random
         Python RNG used to sample the initial step budget
     max_action_dim : int
@@ -133,7 +133,8 @@ class AgentTrainer:
         config: AgentTrainerSettings,
         *,
         key: chex.PRNGKey,
-        make_fn: MakeFn,
+        obs_space: envrax.Box,
+        action_space: envrax.Box,
         budget_rng: random.Random,
         max_action_dim: int,
         max_obs_dim: int | None = None,
@@ -141,8 +142,8 @@ class AgentTrainer:
     ) -> None:
         self.config = config
         self.env_name = env_name
-
-        self.envs = make_fn(self.env_name, self.config.batch_size)
+        self.obs_space = obs_space
+        self.action_space = action_space
 
         self.jit_compile = jit_compile
         self.key = key
@@ -168,15 +169,12 @@ class AgentTrainer:
         self.max_action_dim = max_action_dim
         self.max_obs_dim = max_obs_dim
 
-        self.action_space: gym.spaces.Box = self.envs.single_action_space  # type: ignore
-        self.obs_space: gym.spaces.Box = self.envs.single_observation_space  # type: ignore
-
-        self.action_dim = int(np.prod(self.action_space.shape))
+        self.action_dim = math.prod(action_space.shape)
         self.key, agent_key, target_key, value_key = jax.random.split(key, 4)
 
         self.policy_agent = PolicyAgent(
-            self.obs_space,
-            self.action_space,
+            obs_space,
+            action_space,
             config=self.config.agent,
             key=agent_key,
             max_action_dim=self.max_action_dim,
@@ -185,8 +183,8 @@ class AgentTrainer:
         )
 
         self.target_agent = PolicyAgent(
-            self.obs_space,
-            self.action_space,
+            obs_space,
+            action_space,
             config=self.config.agent,
             key=target_key,
             max_action_dim=self.max_action_dim,
@@ -195,7 +193,7 @@ class AgentTrainer:
         )
 
         self.value_agent = DiscoValueAgent(
-            self.obs_space,
+            obs_space,
             self.config.agent.n_hidden,
             config=self.config.value,
             key=value_key,
@@ -204,13 +202,10 @@ class AgentTrainer:
             jit_compile=self.jit_compile,
         )
 
-        # Init state
-        current_obs, _ = self.envs.reset()
         self.state = AgentTrainerState.create(
             self.policy_optim.init(self.policy_agent.get_params()),
             self.value_optim.init(self.value_agent.get_params()),
-            current_obs=current_obs,
-        )  # (B, H)
+        )
 
         # Pre-compute action dim mask
         self.action_dim_mask = jnp.arange(self.max_action_dim) < self.action_dim
@@ -228,7 +223,7 @@ class AgentTrainer:
             1. Materializing parameters before optimizer init
             2. JIT compile caching
         """
-        obs_dim = self.max_obs_dim or self.obs_space.shape[0]
+        obs_dim = self.max_obs_dim or math.prod(self.obs_space.shape)
         dummy_obs = jnp.zeros(
             (self.config.batch_size, obs_dim),
             dtype=jnp.float32,
@@ -334,10 +329,6 @@ class AgentTrainer:
             else self.meta_optim.update
         )
 
-    def close(self) -> None:
-        """Clean up resources."""
-        self.envs.close()
-
 
 class RuleTrainer:
     """
@@ -357,14 +348,16 @@ class RuleTrainer:
 
     Parameters
     ----------
-    envs : EnvSet | EnvGroup
-        Environment set or group to use for rule discovery
+    envs : envrax.EnvSuite | envrax.EnvSet
+        Environment collection to train on. Pass a single suite
+        (e.g. `DmControlSuite()`, or `DmControlSuite()[:3]` for a curated
+        subset) or an `EnvSet` combining multiple suites.
     config : RuleTrainerSettings
         Configuration for meta-training
     agents_per_env : int (optional)
         Number of independent agent trainers to instantiate per environment.
-        For example, if we have 57 environments and 2 agents per environment we have
-        114 agent trainers. Formula: `n_agents = agents_per_env * n_envs`.
+        For example, if we have 25 environments and 2 agents per environment we have
+        50 agent trainers. Formula: `n_agents = agents_per_env * n_envs`.
 
         Each trainer has its own parameters, optimizer state, and lifetime
         budget, giving the meta-learner diverse gradient signals: agents at different
@@ -373,16 +366,13 @@ class RuleTrainer:
         Maximum number of trainers to `vmap` simultaneously. Higher values
         improve GPU utilization but increase VRAM usage. Reduce if
         out of memory (OOM). Default is `8`
-    num_env_workers : int (optional)
-        Number of threads for parallel environment stepping.
-        Default is `16`
     seed : int (optional)
         Random number generator seed. Default is `42`
     jit_compile : bool (optional)
         Flag to enable/disable JIT compilation. Default is `True`
     cache_dir : str | None (optional)
         Directory path for JAX's persistent XLA compilation cache.
-        Set to `None` to disable. Default is `".cache/jax"`
+        Set to `None` to disable. Default is `".jax_cache"`
 
         On repeated runs with the same model shapes, compilation is skipped and
         loaded from disk instead. Only active when `jit_compile=True`.
@@ -390,54 +380,34 @@ class RuleTrainer:
         Dashboard display settings. Default is `True`.
             - If `True` - renders the full Rich dashboard
             - If `False` - uses a lightweight `tqdm` progress bar instead
-    use_bfloat16 : bool (optional)
-        Flag to set all floating-point arrays in the returned `Rollout` to
-        `bfloat16` on accelerator transfer. Halves VRAM usage for rollout buffers with
-        negligible effect on training quality. `actions` remain `int32`.
-        Default is `True`
     """
 
     def __init__(
         self,
-        envs: EnvSet | EnvGroup,
+        envs: envrax.EnvSuite | envrax.EnvSet,
         config: RuleTrainerSettings,
         *,
         agents_per_env: int = 2,
         max_group_size: int = 8,
-        num_env_workers: int = 16,
         seed: int = 42,
         jit_compile: bool = True,
-        cache_dir: str | None = ".cache/jax",
+        cache_dir: str | None = ".jax_cache",
         verbose: bool = True,
-        use_bfloat16: bool = True,
     ) -> None:
-        # Verify valid worker size
-        EnvWorkerPool.verify_workers(num_env_workers)
-
         _cache_status = cache_status(cache_dir, jit_compile)
 
-        # JAX CPU only guard for bfloat16 - not supported on CPU only
-        _cpu_only = all(d.platform == "cpu" for d in jax.devices())
-        self.use_bfloat16 = False if _cpu_only else use_bfloat16
-
-        if jit_compile and cache_dir is not None:
-            jax.config.update("jax_compilation_cache_dir", cache_dir)
-            jax.config.update("jax_persistent_cache_min_compile_time_secs", 0)
-
-        if isinstance(envs, EnvGroup):
-            envs = EnvSet(envs)
+        if isinstance(envs, envrax.EnvSuite):
+            envs = envrax.EnvSet(envs)
 
         envs.verify_packages()
 
-        # Setup envs
-        self._env_set = envs
-        _unique_env_specs = envs.as_list()
-        self._env_specs = _unique_env_specs * agents_per_env
-        self._env_specs.sort(key=lambda x: x[0])  # group same-game slots together
-        self._unique_env_specs = _unique_env_specs
+        # Canonical name list + per-category counts
+        self._unique_env_names = envs.all_names()
+        self._env_categories = envs.env_categories()
+        self._env_specs = sorted(self._unique_env_names * agents_per_env)
 
-        self.env_names = [name for name, _ in self._env_specs]
-        self.num_envs = len(self._unique_env_specs)
+        self.env_names = list(self._env_specs)
+        self.num_envs = len(self._unique_env_names)
         self.num_trainers = len(self._env_specs)
 
         self.n_steps = config.n_meta_steps(self.num_trainers)
@@ -447,14 +417,10 @@ class RuleTrainer:
         self.config = config
         self.agents_per_env = agents_per_env
         self.max_group_size = max_group_size
-        self.num_env_workers = num_env_workers
         self.jit_compile = jit_compile
         self.cache_dir = cache_dir
-        self.use_bfloat16 = use_bfloat16
 
         self._seed = seed
-        self._env_groups = envs.groups
-        self._cpu = jax.devices("cpu")[0]
 
         # Init lineage
         self._parent_run: str | None = None
@@ -463,7 +429,7 @@ class RuleTrainer:
         # Init logger - one writer per unique env
         self.logger = MetricsLogger(self.config.run.log_dir)
         self.logger.add_writer("meta")
-        self.logger.add_writer_group("envs", envs.unique_names())
+        self.logger.add_writer_group("envs", self._unique_env_names)
 
         # Init runtime logger - capture warnings and stderr to runtime.log
         self.runtime_logger = RuntimeLogger(self.config.run.dirpath)
@@ -474,22 +440,30 @@ class RuleTrainer:
             key, self.num_trainers + 2
         )
 
-        # Batch functions
-        self.max_actions = envs.max_action_count(self.config.batch_size)
-        self.max_action_dim = self.max_actions
-        self.max_obs_dim = envs.max_obs_dim(self.config.batch_size) or None
+        # Build multi-vec env — one VecEnv per trainer slot
+        self.multi_vec_env = envrax.make_multi_vec(
+            self._env_specs,
+            n_envs=self.config.batch_size,
+            jit_compile=self.jit_compile,
+            pre_warm=False,
+            cache_dir=self.cache_dir,
+        )
+
+        # Padded shapes for `jax.vmap` over heterogeneous envs
+        self.max_action_dim, _obs_dim = self.multi_vec_env.pad_dims()
+        self.max_obs_dim = _obs_dim or None
+
         self._batch_grad_fn: Callable[..., MetaGradOutput] = None  # type: ignore
         self._batched_collect_fn: Callable = None  # type: ignore
 
         self._meta_optim_update: Callable = None  # type: ignore
 
         # Pre-computed constants
-        self._action_masks: Dict[int, chex.Array] = {}
+        self._action_masks: Dict[int, jax.Array] = {}
         self._hidden_shapes: HiddenShapeCache = None  # type: ignore
 
         # Training pools
         self.pool: TrainerPool = None  # type: ignore
-        self._env_worker_pool: EnvWorkerPool = None  # type: ignore
 
         # Init meta-agent and optimizer
         self.meta_agent = DiscoAgent(
@@ -521,7 +495,7 @@ class RuleTrainer:
         if verbose:
             self.console = DiscoConsoleDashboard(
                 self.config.console_config(
-                    envs=envs.env_categories(),
+                    envs=self._env_categories,
                     num_trainers=self.num_trainers,
                     n_chunks=_n_chunks,
                     params=self._dummy_params(self.trainer_keys[0]),
@@ -548,26 +522,25 @@ class RuleTrainer:
             Parameter counts for all agents
         """
         config = self.config.agent_trainer_config()
-        env_name, make_fn = self._env_specs[0]
-        envs = make_fn(env_name, self.config.batch_size)
+        obs_space: envrax.Box = self.multi_vec_env.single_observation_spaces[0]  # type: ignore
+        action_space: envrax.Box = self.multi_vec_env.single_action_spaces[0]  # type: ignore
 
         policy = PolicyAgent(
-            envs.single_observation_space,  # type: ignore
-            envs.single_action_space,  # type: ignore
+            obs_space,
+            action_space,
             config=config.agent,
             key=rng_key,
-            max_action_dim=self.max_actions,
+            max_action_dim=self.max_action_dim,
             max_obs_dim=self.max_obs_dim,
         )
 
         value = DiscoValueAgent(
-            envs.single_observation_space,  # type: ignore
+            obs_space,
             config.agent.n_hidden,
             config=config.value,
             key=rng_key,
             sparsity=config.agent.sparsity,
         )
-        envs.close()
 
         return DiscoParamsSettings(
             policy=policy.param_count,
@@ -575,112 +548,14 @@ class RuleTrainer:
             disco=self.meta_agent.param_count,
         )
 
-    def _warm_collect_fn(self) -> None:
-        """
-        Warm the batched collection forward pass and XLA host transfer.
-
-        Runs the vmapped forward function once with the pool's current arrays
-        to trigger JIT compilation and pre-warm GPU->CPU transfers.
-        """
-        dummy_obs = jnp.asarray(self.pool.obs)
-        dummy_actions = jnp.asarray(self.pool.prev_actions)
-        (
-            warm_preds,
-            warm_target_preds,
-            warm_values,
-            *_,
-        ) = self._batched_collect_fn(
-            dummy_obs,
-            dummy_actions,
-            self.pool.p_params,
-            self.pool.t_params,
-            self.pool.v_params,
-            self.pool.p_ocm_h,
-            self.pool.p_acm_h,
-            self.pool.t_ocm_h,
-            self.pool.t_acm_h,
-            self.pool.v_h,
-            self.pool.action_masks,
-        )
-
-        # Warm XLA's GPU->CPU host transfer
-        _ = jax.device_get((warm_preds, warm_target_preds, warm_values))
-
-        del dummy_obs, dummy_actions, warm_preds, warm_target_preds, warm_values
-        jax.effects_barrier()
-
-    def _warm_compile(self) -> None:
-        """
-        Pre-compile all gradient functions before training begins.
-
-        Warms:
-            1. `_batched_collect_fn` — vmapped forward pass over all trainers
-            2. `_batch_grad_fn` — vmapped meta-gradient for each chunk size
-            3. `_meta_optim_update` — shared meta optimizer
-            4. Per-trainer meta-optim updates
-
-        Uses the trainer pool's existing accelerator arrays for shape inference.
-        """
-        meta_params = self.meta_agent.get_params()
-
-        # Compile meta optimizer update fn (if needed)
-        self._meta_optim_update = (
-            self.meta_optim.update
-            if not self.jit_compile
-            else jax.jit(self.meta_optim.update)
-        )
-
-        # Warm the collection forward pass
-        self._warm_collect_fn()
-
-        # Pre-touch rollout buffer pages
-        self.pool.train_buffer.prefault()
-        self.pool.valid_buffer.prefault()
-
-        # Warm the gradient function for each chunk size
-        chunk_sizes = {min(self.max_group_size, self.num_trainers)}
-        remainder = self.num_trainers % self.max_group_size
-
-        if remainder and remainder != min(self.max_group_size, self.num_trainers):
-            chunk_sizes.add(remainder)  # Include remainder chunks
-
-        for chunk_size in chunk_sizes:
-            # Slice from pool's stacked arrays
-            disco_h, meta_h = [], []
-            for idx in range(chunk_size):
-                d_h, m_h = self.state.hidden.get(idx)
-                disco_h.append(d_h)
-                meta_h.append(m_h)
-
-            grad_inputs = self.pool.get_grad_inputs(
-                0,
-                chunk_size,
-                jnp.stack(disco_h),
-                jnp.stack(meta_h),
-            )
-            _ = self._batch_grad_fn(meta_params, *grad_inputs)
-            del grad_inputs  # cleanup
-
-        # Block until compilations are complete
-        jax.effects_barrier()
-
-        # Warm per-trainer meta-optim JIT
-        dummy_grad = jax.tree.map(jnp.zeros_like, meta_params)
-        for i in range(self.num_trainers):
-            _ = self.pool.meta_optim_updates[i](
-                dummy_grad,
-                self.pool.meta_opt_states[i],
-                meta_params,
-            )
-        jax.effects_barrier()
-
     def _create_trainer(
         self,
         env_name: str,
         config: AgentTrainerSettings,
         *,
         key: chex.PRNGKey,
-        make_fn: MakeFn,
+        obs_space: envrax.Box,
+        action_space: envrax.Box,
     ) -> AgentTrainer:
         """
         Creates a single agent trainer.
@@ -688,13 +563,15 @@ class RuleTrainer:
         Parameters
         ----------
         env_name : str
-            The gymnasium environment name
+            The registered envrax environment name (e.g. `"mjx/hopper_hop-v0"`)
         config : AgentTrainerSettings
             Configuration for individual agent training
         key : chex.PRNGKey
             Random number generator key
-        make_fn : MakeFn
-            Factory function to create the environment
+        obs_space : envrax.Box
+            Per-env observation space (from `multi_vec.single_observation_spaces[i]`)
+        action_space : envrax.Box
+            Per-env action space (from `multi_vec.single_action_spaces[i]`)
 
         Returns
         -------
@@ -705,7 +582,8 @@ class RuleTrainer:
             env_name,
             config,
             key=key,
-            make_fn=make_fn,
+            obs_space=obs_space,
+            action_space=action_space,
             budget_rng=self._budget_rng,
             max_action_dim=self.max_action_dim,
             max_obs_dim=self.max_obs_dim,
@@ -723,16 +601,17 @@ class RuleTrainer:
         trainer_keys : List[chex.PRNGKey]
             List of trainer random number generated keys
         """
-        setup_total = 2 * self.num_trainers + 4
+        setup_total = 2 * self.num_trainers + 7
         self.console.start_setup(setup_total)
 
         # Build trainers
-        for i, (env_name, make_fn) in enumerate(self._env_specs):
+        for i, env_name in enumerate(self._env_specs):
             trainer = self._create_trainer(
                 env_name,
                 self.config.agent_trainer_config(),
                 key=trainer_keys[i],
-                make_fn=make_fn,
+                obs_space=self.multi_vec_env.single_observation_spaces[i],  # type: ignore
+                action_space=self.multi_vec_env.single_action_spaces[i],  # type: ignore
             )
             self.trainers.append(trainer)
             self.console.update_setup()
@@ -759,26 +638,13 @@ class RuleTrainer:
         # Build functions
         self._batch_grad_fn = self._build_batch_grad_fn()
         self._batched_collect_fn = self._build_batched_collect_fn()
-
-        # Close main-process envs - workers own the stepping environments
-        for trainer in self.trainers:
-            trainer.envs.close()
-
         self.console.update_setup()
 
-        # Spawn subprocess worker pool
-        env_worker_specs = [
-            (name, make_fn, self.config.batch_size) for name, make_fn in self._env_specs
-        ]
-        self._env_worker_pool = EnvWorkerPool(
-            env_worker_specs,
-            self.num_env_workers,
-            action_type="continuous",
-            max_action_dim=self.max_action_dim,
-            max_obs_dim=self.max_obs_dim or 0,
-        )
+        # Compile all VecEnvs up front so the first training step doesn't block
+        self.multi_vec_env.compile(progress=False)
 
         # Build trainer pool — stacks all params/states as permanent GPU arrays
+        self.key, pool_rng = jax.random.split(self.key)
         self.pool = TrainerPool(
             self.trainers,
             max_action_dim=self.max_action_dim,
@@ -789,14 +655,14 @@ class RuleTrainer:
             batch_size=self.config.batch_size,
             encoding_dim=self.trainers[0].policy_agent.encoding_dim,
             prediction_dim=self.config.agent.prediction_size,
-            env_worker_pool=self._env_worker_pool,
-            use_bfloat16=self.use_bfloat16,
+            max_obs_dim=self.max_obs_dim or 0,
+            multi_vec_env=self.multi_vec_env,
+            init_rng=pool_rng,
         )
         self.console.update_setup()
 
-        # Pre-compile all chunk sizes so train() starts warm
-        self._warm_compile()
-        self.console.update_setup()
+        # Pre-compile all JAX kernels so train() starts warm
+        self._meta_optim_update = WarmCompile(self).run()
 
         # Warm all remaining eager JAX ops that run outside vmapped_fn
         _meta_params = self.meta_agent.get_params()
@@ -1298,12 +1164,10 @@ class RuleTrainer:
                 self.reset_trainer(idx)
                 self.pool.reset_trainer(idx, self.trainers[idx])
 
-        # Reset episode trackers and buffer write heads
+        # Reset episode trackers — buffer write cursor lives in the
+        # scan carry now, so no per-call buffer reset is needed.
         for tracker in self.pool.episode_trackers:
             tracker.reset()
-
-        self.pool.train_buffer.reset_head()
-        self.pool.valid_buffer.reset_head()
 
         # Training: collection phase
         self.pool.collect(
@@ -1564,9 +1428,8 @@ class RuleTrainer:
         total_env_steps: int | None = None,
         run: RunSettings | None = None,
         max_group_size: int = 8,
-        num_env_workers: int = 16,
         jit_compile: bool = True,
-        cache_dir: str | None = ".cache/jax",
+        cache_dir: str | None = ".jax_cache",
         verbose: bool = True,
     ) -> Self:
         """
@@ -1599,14 +1462,11 @@ class RuleTrainer:
             Maximum number of trainers to `vmap` simultaneously. Higher values
             improve GPU utilization but increase VRAM usage. Reduce if
             out of memory (OOM). Default is `8`
-        num_env_workers : int (optional)
-            Number of threads for parallel environment stepping.
-            Default is `16`
         jit_compile : bool (optional)
             Flag to enable/disable JIT compilation. Default is `True`
         cache_dir : str | None (optional)
             Directory path for JAX's persistent XLA compilation cache.
-            Set to `None` to disable. Default is `".cache/jax"`
+            Set to `None` to disable. Default is `".jax_cache"`
         verbose : bool (optional)
             Dashboard display settings. Default is `True`.
                 - If `True` - renders the full Rich dashboard
@@ -1632,8 +1492,7 @@ class RuleTrainer:
             meta_run = parent_manager.load_metadata(RuleTrainerMetadata)
             restored_step = checkpoint_step or parent_manager.latest_step
 
-            # Reconstruct environment groups and config from saved metadata
-            envs = EnvSet(*[EnvGroup.load(g) for g in meta_run.envs])
+            # Reconstruct env name list and config from saved metadata
             config: RuleTrainerSettings = load_config(
                 RuleTrainerSettings,
                 meta_run.config,
@@ -1651,16 +1510,14 @@ class RuleTrainer:
 
             # Construct fresh trainer (new run dir, meta_step=0)
             trainer = cls(
-                envs,
+                envrax.EnvSet.from_names(meta_run.env_names),
                 config=config,
                 agents_per_env=meta_run.agents_per_env,
                 max_group_size=max_group_size,
-                num_env_workers=num_env_workers,
                 seed=meta_run.seed,
                 jit_compile=jit_compile,
                 cache_dir=cache_dir,
                 verbose=verbose,
-                use_bfloat16=meta_run.use_bfloat16,
             )
 
             # Restore meta-agent params from parent checkpoint (fresh state)
@@ -1707,14 +1564,15 @@ class RuleTrainer:
         normalized_advantages : jax.Array
             EMA-normalised advantages from the validation rollout
         """
-        metrics = {
-            "meta/pg_loss": float(pg_loss),
-            "meta/entropy_loss": float(entropy_loss),
-            "meta/reg_loss": float(reg_loss),
-            "meta/total_loss": float(total_loss),
-            "meta/advantages": float(jnp.mean(advantages)),
-            "meta/normalized_advantages": float(jnp.mean(normalized_advantages)),
+        metric_tree = {
+            "meta/pg_loss": pg_loss,
+            "meta/entropy_loss": entropy_loss,
+            "meta/reg_loss": reg_loss,
+            "meta/total_loss": total_loss,
+            "meta/advantages": jnp.mean(advantages),
+            "meta/normalized_advantages": jnp.mean(normalized_advantages),
         }
+        metrics: Dict[str, float] = jax.device_get(metric_tree)
         self.logger.log(
             f"envs/{self.env_names[trainer_idx]}",
             self.state.meta_step,
@@ -1798,10 +1656,9 @@ class RuleTrainer:
             config=dump_config(self.config),
             agents_per_env=self.agents_per_env,
             max_group_size=self.max_group_size,
-            num_env_workers=self.num_env_workers,
             seed=self._seed,
-            envs=[g.dump() for g in self._env_groups],
-            use_bfloat16=self.use_bfloat16,
+            env_names=self._unique_env_names,
+            env_categories=self._env_categories,
             disco_key=get_rng_key_data(self.meta_agent.key),
             parent_run=self._parent_run,
             parent_checkpoint_step=self._parent_checkpoint_step,
@@ -1882,8 +1739,7 @@ class RuleTrainer:
         trainer_idx : int
             Index of the trainer to reset
         """
-        env_name, make_fn = self._env_specs[trainer_idx]
-        self.trainers[trainer_idx].close()
+        env_name = self._env_specs[trainer_idx]
 
         # Fresh RNG keys
         self.key, new_key = jax.random.split(self.key, 2)
@@ -1893,7 +1749,8 @@ class RuleTrainer:
             env_name,
             self.config.agent_trainer_config(),
             key=new_key,
-            make_fn=make_fn,
+            obs_space=self.multi_vec_env.single_observation_spaces[trainer_idx],  # type: ignore[arg-type]
+            action_space=self.multi_vec_env.single_action_spaces[trainer_idx],  # type: ignore[arg-type]
         )
 
         # Init fresh per-trainer meta-gradient optimizer
@@ -1911,9 +1768,6 @@ class RuleTrainer:
 
     def close(self) -> None:
         """Clean up resources."""
-        if self.pool is not None:
-            self.pool.close()
-
         self.cp_manager.close()
         self.logger.close()
         self.runtime_logger.close()
