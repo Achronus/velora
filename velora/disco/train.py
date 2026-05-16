@@ -179,7 +179,6 @@ class AgentTrainer:
             key=agent_key,
             max_action_dim=self.max_action_dim,
             max_obs_dim=self.max_obs_dim,
-            jit_compile=self.jit_compile,
         )
 
         self.target_agent = PolicyAgent(
@@ -189,7 +188,6 @@ class AgentTrainer:
             key=target_key,
             max_action_dim=self.max_action_dim,
             max_obs_dim=self.max_obs_dim,
-            jit_compile=self.jit_compile,
         )
 
         self.value_agent = DiscoValueAgent(
@@ -199,7 +197,6 @@ class AgentTrainer:
             key=value_key,
             sparsity=self.config.agent.sparsity,
             max_obs_dim=self.max_obs_dim,
-            jit_compile=self.jit_compile,
         )
 
         self.state = AgentTrainerState.create(
@@ -470,7 +467,6 @@ class RuleTrainer:
             config=config.disco_agent,
             key=meta_key,
             max_action_dim=self.max_action_dim,
-            jit_compile=self.jit_compile,
         )
         self.meta_optim = optax.adam(config.meta_lr)
 

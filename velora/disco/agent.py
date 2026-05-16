@@ -90,18 +90,18 @@ ModulesT = TypeVar("ModulesT", bound=tuple)
 class BaseAgent(Generic[ModulesT]):
     """
     Base class for all agents. Auto-discovers sub-modules and provides
-    shared parameter management, compilation, and merge logic.
+    shared parameter management and functional-merge logic.
 
     Sub-modules are auto-detected by scanning `self.__dict__` for private
     attributes (`_[name]`) that have an `active_params` property — these are
-    neural network modules. Detection happens during `_compile()`.
+    neural network modules. Detection happens during `_init_modules()`.
 
     Provides
     --------
     - `active_params`, `total_params`, `param_count` — aggregate counts
     - `get_params()`, `update_params()` — extract / apply parameter states
     - `merge_params()` — reconstruct modules from explicit parameters
-    - `_compile()` — cache graphdefs, optionally JIT-compile all modules
+    - `_init_modules()` — register submodules and cache their split graphdefs
     """
 
     _module_registry: Dict[str, str]
@@ -243,22 +243,25 @@ class BaseAgent(Generic[ModulesT]):
             for name in self._module_registry
         )
 
-    def _compile(self, jit_compile: bool) -> ModulesT:
+    def _init_modules(self) -> ModulesT:
         """
-        Auto-discover modules, cache graphdefs, and optionally JIT-compile.
+        Auto-discover submodules, cache their split graphdefs, and
+        return them as a typed `ModulesT` tuple.
+
+        For each discovered submodule the `nnx.split(...)` graphdef and
+        non-param state are cached on `self._<name>_graphdef` and
+        `self._<name>_rest`, so `functional_forward` / `merge_params`
+        can reconstruct the modules from explicit parameter pytrees
+        without re-running `nnx.split` on every call.
 
         Must be called at the end of subclass `__init__` after all
         `self._xxx` module attributes have been set.
 
-        Parameters
-        ----------
-        jit_compile : bool
-            Whether to JIT compile the modules
-
         Returns
         -------
         modules : ModulesT
-            Compiled (or original) modules in registration order
+            Modules in registration order, as the agent's typed
+            NamedTuple.
         """
         self._module_registry = self._discover_modules()
         self._modules_type = self._resolve_modules_type()
@@ -270,9 +273,6 @@ class BaseAgent(Generic[ModulesT]):
             setattr(self, f"_{name}_rest", rest)
 
         modules = [getattr(self, attr) for attr in self._module_registry.values()]
-
-        if jit_compile:
-            modules = [nnx.jit(m) for m in modules]
 
         return self._modules_type._make(modules)  # type: ignore[attr-defined]
 
@@ -312,8 +312,6 @@ class DiscoValueAgent(BaseAgent[ValueModules]):
         When provided, the encoder's input layer is sized to
         `max_obs_dim` so that all encoders share the same weight shape
         (required for `jax.vmap`). Default is `None`
-    jit_compile : bool (optional)
-        Flag to enable/disable JIT compilation. Default is `False`
     """
 
     def __init__(
@@ -325,7 +323,6 @@ class DiscoValueAgent(BaseAgent[ValueModules]):
         key: chex.PRNGKey,
         sparsity: float = 0.5,
         max_obs_dim: int | None = None,
-        jit_compile: bool = False,
     ) -> None:
         self.obs_spec = obs_spec
         self.config = config
@@ -348,7 +345,7 @@ class DiscoValueAgent(BaseAgent[ValueModules]):
             sparsity=sparsity,
         )
 
-        self.encoder, self.net = self._compile(jit_compile)
+        self.encoder, self.net = self._init_modules()
 
     def __call__(
         self,
@@ -468,8 +465,6 @@ class DiscoAgent(BaseAgent[DiscoModules]):
     freeze : bool (optional)
         Freezes parameters so they cannot be trained.
         Useful for reusing trained target rules. Default is `False`
-    jit_compile : bool (optional)
-        Flag to enable/disable JIT compilation. Default is `False`
     """
 
     def __init__(
@@ -479,7 +474,6 @@ class DiscoAgent(BaseAgent[DiscoModules]):
         key: chex.PRNGKey,
         max_action_dim: int,
         freeze: bool = False,
-        jit_compile: bool = False,
     ) -> None:
         self.config = config.with_max_action_dim(max_action_dim)
         self.key = key
@@ -519,9 +513,7 @@ class DiscoAgent(BaseAgent[DiscoModules]):
             rngs=nnx.Rngs(proj_key),
         )
 
-        self.encoder, self.disco_net, self.meta_lnn, self.meta_proj = self._compile(
-            jit_compile
-        )
+        self.encoder, self.disco_net, self.meta_lnn, self.meta_proj = self._init_modules()
 
         self.optimizer = optax.chain(
             optax.clip_by_global_norm(self.config.max_grad_norm),
@@ -696,7 +688,6 @@ class DiscoAgent(BaseAgent[DiscoModules]):
         *,
         checkpoint_step: int | None = None,
         freeze: bool = True,
-        jit_compile: bool = False,
     ) -> Self:
         """
         Load a discovered update rule from a run directory.
@@ -715,8 +706,6 @@ class DiscoAgent(BaseAgent[DiscoModules]):
             restores the latest. Default is `None`
         freeze : bool (optional)
             Freezes parameters so they cannot be trained. Default is `True`
-        jit_compile : bool (optional)
-            Whether to JIT compile. Default is `False`
 
         Returns
         -------
@@ -736,7 +725,6 @@ class DiscoAgent(BaseAgent[DiscoModules]):
             key=key,
             max_action_dim=config.max_action_dim,
             freeze=freeze,
-            jit_compile=jit_compile,
         )
 
         # Build full checkpoint template
@@ -820,8 +808,6 @@ class PolicyAgent(BaseAgent[PolicyModules]):
         When provided, the encoder's input layer is sized to
         `max_obs_dim` so that all encoders share the same weight shape
         (required for `jax.vmap`). Default is `None`
-    jit_compile : bool (optional)
-        Flag to enable/disable JIT compilation. Default is `False`
     """
 
     def __init__(
@@ -833,7 +819,6 @@ class PolicyAgent(BaseAgent[PolicyModules]):
         key: chex.PRNGKey,
         max_action_dim: int,
         max_obs_dim: int | None = None,
-        jit_compile: bool = False,
     ) -> None:
         self.obs_spec = obs_spec
         self.act_spec = act_spec
@@ -884,7 +869,7 @@ class PolicyAgent(BaseAgent[PolicyModules]):
             key=key_decoder,
         )
 
-        self.encoder, self.ocm, self.acm, self.decoder = self._compile(jit_compile)
+        self.encoder, self.ocm, self.acm, self.decoder = self._init_modules()
 
     @property
     def encoding_dim(self) -> int:
