@@ -139,7 +139,7 @@ class NCPLiquidCell(nnx.Module):
         self.rngs = rngs
 
         # Absolute to maintain masking (-1 -> 1)
-        self.sparsity_mask = self._prep_mask(mask)
+        self.sparsity_mask = nnx.data(self._prep_mask(mask))
 
         self.tanh = nnx.tanh  # Bounded: [-1, 1]
         self.sigmoid = nnx.sigmoid  # Bounded: [0, 1]
