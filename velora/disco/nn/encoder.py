@@ -352,7 +352,6 @@ class ImageEncoder(nnx.Module):
     def __init__(self, in_channels: int, n_hidden: int, key: chex.PRNGKey) -> None:
         self.in_channels = in_channels
         self.n_hidden = n_hidden
-        self.key = key
 
         base_scale = 16
         scale_factor = 20
@@ -362,7 +361,7 @@ class ImageEncoder(nnx.Module):
         self.base_channels = max(base_scale, (n_hidden // scale_factor) * base_scale)
         self.output_dim = max(output_scale, (n_hidden // scale_factor) * output_scale)
 
-        rngs = nnx.Rngs(params=self.key)
+        rngs = nnx.Rngs(params=key)
 
         self.conv1 = nnx.Conv(
             self.in_channels,
@@ -507,14 +506,13 @@ class VectorEncoder(nnx.Module):
         self.obs_dim = obs_dim
         self.max_obs_dim = max_obs_dim or obs_dim
         self.n_hidden = n_hidden
-        self.key = key
 
         # Dynamic encoder scaling for output
         output_scale = 64
         scale_factor = 20
         self.output_dim = max(output_scale, (n_hidden // scale_factor) * output_scale)
 
-        rngs = nnx.Rngs(params=self.key)
+        rngs = nnx.Rngs(params=key)
 
         self.proj = nnx.Linear(self.max_obs_dim, self.output_dim, rngs=rngs)
 

@@ -120,12 +120,11 @@ class BaseCfC(nnx.Module):
         self.n_neurons = n_neurons
         self.sparsity = sparsity
         self.init_type = init_type
-        self.key = key
 
         self._cell = cell or CellConfig(AdaptiveLiquidCell)
 
         self.seed = jax.random.key_data(key)[-1].item()
-        self.rngs = nnx.Rngs(params=self.key)
+        self.rngs = nnx.Rngs(params=key)
 
         self.wiring: NCPWiringSpec = nnx.data(self._build_wiring())
 
