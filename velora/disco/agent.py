@@ -13,6 +13,7 @@
 # limitations under the License.
 # ==============================================================================
 
+import math
 from pathlib import Path
 from typing import (
     Dict,
@@ -29,7 +30,6 @@ import chex
 import envrax
 import jax
 import jax.numpy as jnp
-import numpy as np
 import optax
 import orbax.checkpoint as ocp
 from flax import nnx
@@ -840,7 +840,7 @@ class PolicyAgent(BaseAgent[PolicyModules]):
         self.config = config
         self.key = key
 
-        self.action_dim = int(np.prod(act_spec.shape))
+        self.action_dim = int(math.prod(act_spec.shape))
         self.max_action_dim = max_action_dim
 
         # Action space bounds for clipping
@@ -1065,40 +1065,3 @@ class PolicyAgent(BaseAgent[PolicyModules]):
             aux_pi,
             acm_preds.q,
         )
-
-    def act(self, mu: jax.Array, log_std: jax.Array) -> np.ndarray:
-        """
-        Sample continuous actions from the Gaussian policy.
-
-        Parameters
-        ----------
-        mu : jax.Array
-            Policy mean `(B, D)` or `(B, T, D)`
-        log_std : jax.Array
-            Policy log standard deviation `(B, D)` or `(B, T, D)`
-
-        Returns
-        -------
-        actions : np.Array
-            Sampled actions `(B, max_action_dim)` clipped to action bounds
-        """
-        mu = np.asarray(mu)
-        log_std = np.asarray(log_std)
-
-        # Handle both squeezed (B, A) and non-squeezed (B, T, A) inputs
-        if mu.ndim == 3:
-            mu = mu.squeeze(axis=1)
-            log_std = log_std.squeeze(axis=1)
-
-        # Compute actions
-        std = np.exp(log_std)
-        noise = np.random.randn(*mu.shape).astype(np.float32)
-        actions = mu + std * noise
-
-        actions[:, : self.action_dim] = np.clip(
-            actions[:, : self.action_dim],
-            self.action_low,
-            self.action_high,
-        )
-        actions[:, self.action_dim :] = 0.0
-        return actions.astype(np.float32)
