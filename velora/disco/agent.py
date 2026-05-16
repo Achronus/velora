@@ -292,7 +292,7 @@ class DiscoValueAgent(BaseAgent[ValueModules]):
     Parameters
     ----------
     obs_spec : envrax.Box
-        A single observation space of the vectorized Gymnasium environment
+        A single observation space of the vectorized environment
     n_hidden : int
         Number of decision nodes for policy networks (inter + command nodes)
     config : DiscoValueSettings
@@ -805,9 +805,9 @@ class PolicyAgent(BaseAgent[PolicyModules]):
     Parameters
     ----------
     obs_spec : envrax.Box
-        A single observation space of the vectorized Gymnasium environment
+        A single observation space of the vectorized environment
     act_spec : envrax.Box
-        A single action space of the vectorized Gymnasium environment
+        A single action space of the vectorized environment
     config : PolicyAgentSettings
         Configuration for the policy agent
     key : jax.random.PRNGKey

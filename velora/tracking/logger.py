@@ -69,8 +69,7 @@ class RuntimeLogger:
     Intercepts three streams into a single `runtime.log` file:
 
     1. **Python warnings** — via `logging.captureWarnings(True)` with
-       a `FileHandler`. Catches `warnings.warn()` from JAX, numpy,
-       gymnasium, etc.
+       a `FileHandler`. Catches `warnings.warn()` from JAX, etc.
     2. **Python stderr** — via a tee that writes to both the terminal
        and the log file. Catches tracebacks, logging output, and any
        `print(..., file=sys.stderr)` calls.
