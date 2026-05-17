@@ -25,7 +25,7 @@ dependencies = [
     "optax==0.2.8",
     "tensorboard>=2.20.0",
     "tensorboardx>=2.6.5",
-    "mujorax==0.1.4",
+    "mujorax==0.1.5",
 ]
 
 [project.urls]
