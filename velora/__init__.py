@@ -10,11 +10,6 @@ from velora.disco import (
     RuleTrainerSettings,
 )
 from velora.gym import (
-    ATARI_57,
-    ATARI_BASE,
-    ATARI_EASY,
-    ATARI_HARD,
-    ATARI_MEDIUM,
     BOX2D_5,
     CONTINUOUS_41,
     DMC_25,
@@ -26,8 +21,13 @@ from velora.gym import (
     MUJOCO_BALANCE,
     MUJOCO_LOCOMOTION,
     MUJOCO_MANIPULATION,
-    EnvGroup,
     EnvSet,
+    EnvSpec,
+    EnvSuite,
+    get_spec,
+    make,
+    register,
+    register_suite,
 )
 from velora.tracking import RunSettings
 
@@ -41,11 +41,6 @@ __all__ = [
     "EMASettings",
     "LossCostSettings",
     "RunSettings",
-    "ATARI_BASE",
-    "ATARI_EASY",
-    "ATARI_MEDIUM",
-    "ATARI_HARD",
-    "ATARI_57",
     "BOX2D_5",
     "CONTINUOUS_41",
     "DMC_25",
@@ -58,5 +53,10 @@ __all__ = [
     "MUJOCO_LOCOMOTION",
     "MUJOCO_MANIPULATION",
     "EnvSet",
-    "EnvGroup",
+    "EnvSpec",
+    "EnvSuite",
+    "get_spec",
+    "make",
+    "register",
+    "register_suite",
 ]

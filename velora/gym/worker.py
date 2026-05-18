@@ -28,33 +28,6 @@ CMD_RESET = 2
 CMD_CLOSE = 3
 
 
-class _FrameStackReshape(gym.ObservationWrapper):
-    """
-    Moves frame stack dimension to channels: `(FS, H, W, 1) → (H, W, FS)`.
-
-    Inlined copy of `velora.gym.wrappers.FrameStackReshape`.
-    """
-
-    def __init__(self, env: gym.Env) -> None:
-        super().__init__(env)
-        old_space = env.observation_space
-        assert isinstance(old_space, gym.spaces.Box)
-        old_shape = old_space.shape
-        assert old_shape is not None and len(old_shape) == 4
-        FS, H, W, C = old_shape
-        assert C == 1, f"Expected grayscale input with C=1, got C={C}"
-
-        self.observation_space = gym.spaces.Box(
-            low=old_space.low.min(),
-            high=old_space.high.max(),
-            shape=(H, W, FS),
-            dtype=old_space.dtype,  # type: ignore
-        )
-
-    def observation(self, observation: np.ndarray) -> np.ndarray:
-        return np.transpose(np.squeeze(observation, axis=-1), (1, 2, 0))
-
-
 def _read_exact(fd: int, n: int) -> bytes:
     """Read exactly `n` bytes from a file descriptor."""
     chunks = []
@@ -80,46 +53,6 @@ def _write_all(fd: int, data: bytes) -> None:
     while offset < len(view):
         written = os.write(fd, view[offset:])
         offset += written
-
-
-def _create_atari_env(
-    name: str,
-    batch_size: int,
-    max_episode_steps: int,
-) -> gym.vector.VectorEnv:
-    """
-    Create a `SyncVectorEnv` with standard Atari preprocessing.
-
-    Inlined from `velora.gym.make.make_atari_env` to avoid importing
-    velora (and transitively JAX) in the worker subprocess.
-    """
-    from gymnasium.vector import SyncVectorEnv
-    from gymnasium.wrappers import AtariPreprocessing, FrameStackObservation, TimeLimit
-
-    spec = gym.spec(name)
-    natural_limit = spec.max_episode_steps
-    effective_limit = (
-        min(natural_limit, max_episode_steps)
-        if natural_limit is not None
-        else max_episode_steps
-    )
-
-    def _make_single() -> gym.Env:
-        env = gym.make(name, render_mode="rgb_array", frameskip=1)
-        env = AtariPreprocessing(
-            env,
-            noop_max=10,
-            frame_skip=4,
-            screen_size=84,
-            grayscale_obs=True,
-            grayscale_newaxis=True,
-        )
-        env = FrameStackObservation(env, stack_size=4)
-        env = _FrameStackReshape(env)
-        env = TimeLimit(env, max_episode_steps=effective_limit)
-        return env
-
-    return SyncVectorEnv([_make_single for _ in range(batch_size)])
 
 
 def _create_generic_env(
@@ -183,12 +116,9 @@ def _create_env(
     max_episode_steps: int,
 ) -> gym.vector.VectorEnv:
     """Dispatch to the correct environment creator based on env name prefix."""
-    if name.startswith("ALE/"):
-        return _create_atari_env(name, batch_size, max_episode_steps)
-    elif name.startswith("dm_control/"):
+    if name.startswith("dm_control/"):
         return _create_dmc_env(name, batch_size, max_episode_steps)
-    else:
-        return _create_generic_env(name, batch_size, max_episode_steps)
+    return _create_generic_env(name, batch_size, max_episode_steps)
 
 
 class EnvWorker(ABC):
@@ -221,12 +151,6 @@ class EnvWorker(ABC):
         self._max_episode_steps = max_episode_steps
         self._cmd_fd = cmd_fd
         self._result_fd = result_fd
-
-        # Register ALE only when needed
-        if any(spec[0].startswith("ALE/") for spec in env_specs):
-            import ale_py
-
-            gym.register_envs(ale_py)
 
         # Create and reset all environments
         self._envs: List[gym.vector.VectorEnv] = []
@@ -428,13 +352,13 @@ def main() -> None:
 
     # Communication channels: stdin (commands), stdout (results).
     # Save the real stdout fd for communication, then redirect fd 1
-    # to devnull so ALE's C-level ROM-loading prints vanish.
+    # to devnull so C-level env-initialization prints don't corrupt the pipe.
     cmd_fd = sys.stdin.fileno()
     result_fd = os.dup(sys.stdout.fileno())
 
-    # Redirect fd 1 to devnull so any prints from environment
-    # creation (ALE ROM banners, MuJoCo init, gymnasium logging, etc.)
-    # don't corrupt the binary protocol on the communication pipe.
+    # Redirect fd 1 to devnull so any prints from environment creation
+    # (MuJoCo init, gymnasium logging, etc.) don't corrupt the binary
+    # protocol on the communication pipe.
     devnull = os.open(os.devnull, os.O_WRONLY)
     os.dup2(devnull, 1)
     os.dup2(devnull, 2)

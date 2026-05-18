@@ -13,21 +13,17 @@
 # limitations under the License.
 # ==============================================================================
 
+from collections import defaultdict
 from dataclasses import dataclass, field
 from importlib.util import find_spec
-from typing import Callable, Dict, Iterator, List, Self, Tuple, Union
+from typing import Callable, Dict, Iterator, List, Self, Union
 
 import gymnasium as gym
 import numpy as np
 from gymnasium.vector import VectorEnv
 
 from velora.gym.error import MissingPackageError
-from velora.gym.make import (
-    make_atari_env,
-    make_box2d_env,
-    make_dmc_env,
-    make_mujoco_env,
-)
+from velora.gym.make import make_box2d_env, make_dmc_env, make_mujoco_env
 
 MakeFn = Callable[..., VectorEnv]
 
@@ -35,175 +31,188 @@ MakeFn = Callable[..., VectorEnv]
 @dataclass(frozen=True)
 class EnvSpec:
     """
-    Specification for a single environment in the scheduler.
+    Specification for a single environment — the unit of registration.
+
+    Mirrors `envrax.EnvSpec` in shape so `velora.gym.make(name)` is
+    call-site compatible with `envrax.make(name)`. Unlike envrax, which
+    stores a `JaxEnv` class, this spec stores a Gymnasium factory
+    (`make_fn`) returning a `gymnasium.vector.VectorEnv`.
 
     Parameters
     ----------
     name : str
-        Gymnasium environment ID (e.g., `"ALE/Pong-v5"`)
+        Canonical environment ID (e.g. `"Ant-v5"`,
+        `"dm_control/cartpole-balance-v0"`).
     make_fn : MakeFn
-        Factory function `(env_name, num_vec_envs) -> VectorEnv`
-    category : str
-        Environment category for scheduling constraints
+        Factory function `(name, num_envs, **kwargs) -> VectorEnv`.
+    suite : str
+        Suite category tag (e.g. `"MuJoCo"`). Populated by
+        `register_suite` from the parent `EnvSuite.category`.
     """
 
     name: str
     make_fn: MakeFn
-    category: str
+    suite: str = ""
 
 
 @dataclass
-class EnvGroup:
+class EnvSuite:
     """
-    Base environment group dataclass.
+    A named, versioned collection of environments from one Gymnasium suite.
 
-    Attributes
+    Mirrors `envrax.EnvSuite` shape. Subclasses pin `prefix`, `category`,
+    `version`, `required_packages`, override `make_fn` to return their
+    factory, and override `get_name` to produce canonical IDs.
+
+    Parameters
     ----------
     prefix : str
-        The prefix for environment names (e.g., "ALE" for Atari)
+        Namespace prefix for environment names (e.g. `"dm_control"`).
     category : str
-        Category name of the group
+        Human-readable category label (e.g. `"MuJoCo"`).
+    version : str
+        Version suffix applied by `get_name` (e.g. `"v5"`). Default is `"v0"`.
+    required_packages : List[str]
+        Python packages that must be importable for this suite to work.
     envs : List[str]
-        List of environment names in this group
+        Short environment names. The canonical `EnvSpec.name` is produced
+        by `get_name`.
     """
 
     prefix: str = ""
     category: str = ""
-    version: str = "v5"
+    version: str = "v0"
     required_packages: List[str] = field(default_factory=list)
     envs: List[str] = field(default_factory=list)
 
     @property
     def n_envs(self) -> int:
-        """Number of environments in this group."""
+        """Number of environments in this suite."""
         return len(self.envs)
 
     @property
     def make_fn(self) -> MakeFn:
-        """Factory function for creating environments in this group."""
+        """Factory function for creating environments in this suite."""
         raise NotImplementedError("Subclasses must implement make_fn")
+
+    @property
+    def specs(self) -> List[EnvSpec]:
+        """
+        `EnvSpec` instances for every environment in this suite.
+
+        Mirrors `envrax.EnvSuite.specs`. Each spec's `name` is the
+        canonical ID produced by `get_name`.
+
+        Returns
+        -------
+        specs : List[EnvSpec]
+            One spec per environment, all sharing this suite's `make_fn`.
+        """
+        return [
+            EnvSpec(name=self.get_name(e), make_fn=self.make_fn, suite=self.category)
+            for e in self.envs
+        ]
 
     def get_name(self, env: str, version: str | None = None) -> str:
         """
-        Get the full environment name with prefix and version.
+        Return the canonical ID for a single environment.
 
         Parameters
         ----------
         env : str
-            The base environment name
+            Short environment name.
         version : str (optional)
-            The version suffix. Default is `None` (uses group's version)
+            Override the suite's default version suffix.
 
         Returns
         -------
         name : str
-            Full environment name (e.g., "ALE/Breakout-v5")
+            Canonical environment ID (e.g. `"Ant-v5"`).
         """
         raise NotImplementedError("Subclasses must implement get_name")
 
     def all_names(self, version: str | None = None) -> List[str]:
         """
-        Get all full environment names in this group.
+        Canonical IDs for every environment in this suite.
 
         Parameters
         ----------
         version : str (optional)
-            The version suffix. Default is `None` (uses group's version)
+            Override the suite's default version suffix.
 
         Returns
         -------
         names : List[str]
-            List of full environment names
+            One canonical ID per environment.
         """
-        return [self.get_name(env, version) for env in self.envs]
+        return [self.get_name(e, version) for e in self.envs]
 
     def __contains__(self, env: str) -> bool:
-        """Check if an environment is in this group."""
         return env in self.envs
 
-    def __getitem__(self, key: Union[int, slice]) -> "EnvGroup":
+    def __getitem__(self, key: Union[int, slice]) -> "EnvSuite":
         """
-        Slice the environment group to get a subset.
+        Return a new suite containing only the selected environment(s).
 
         Parameters
         ----------
         key : int | slice
-            Index or slice for selecting environments
+            Index or slice into `self.envs`.
 
         Returns
         -------
-        group : EnvGroup
-            New EnvGroup with the selected environments
+        suite : EnvSuite
+            Same subclass as `self`, with the subset of envs.
         """
         if isinstance(key, int):
             selected = [self.envs[key]]
         else:
             selected = self.envs[key]
 
-        return self.__class__(prefix=self.prefix, envs=selected)
+        return self.__class__(
+            prefix=self.prefix,
+            category=self.category,
+            version=self.version,
+            required_packages=self.required_packages,
+            envs=selected,
+        )
 
-    def __iter__(self) -> Iterator[Tuple[str, MakeFn]]:
-        """Iterate over (env_name, make_fn) tuples."""
+    def __iter__(self) -> Iterator[str]:
+        """Yield canonical ID strings."""
         for env in self.envs:
-            yield self.get_name(env), self.make_fn
+            yield self.get_name(env)
 
     def __len__(self) -> int:
-        """Return number of environments."""
         return len(self.envs)
 
     def check(self) -> Dict[str, bool]:
         """
-        Check if required packages are installed.
+        Whether each required package is importable.
 
         Returns
         -------
         status : Dict[str, bool]
-            Mapping of package names to installation status
+            Mapping of package name to installation status.
         """
         return {pkg: find_spec(pkg) is not None for pkg in self.required_packages}
 
     def is_available(self) -> bool:
-        """
-        Check if all required packages are installed.
-
-        Returns
-        -------
-        available : bool
-            True if all required packages are installed
-        """
+        """Whether all required packages are installed."""
         return all(self.check().values())
-
-    def as_specs(self) -> List[EnvSpec]:
-        """
-        Convert all environments in this group to scheduler specs.
-
-        Returns
-        -------
-        specs : List[EnvSpec]
-            One spec per environment in this group
-        """
-        return [
-            EnvSpec(
-                name=env_name,
-                make_fn=make_fn,
-                category=self.category,
-            )
-            for env_name, make_fn in self
-        ]
 
     def dump(self) -> Dict[str, object]:
         """
-        Serialize this group to a JSON-compatible dictionary.
+        Serialize this suite to a JSON-compatible dictionary.
 
         Captures the class name and module path so the exact subclass
-        can be reconstructed via `load` regardless of where the
-        class lives in the package hierarchy.
+        can be reconstructed via `load` regardless of where the class
+        lives in the package hierarchy.
 
         Returns
         -------
         data : Dict[str, object]
             Serialized representation containing keys -
-            `[class, module, prefix, category, version, required_packages, envs]`
+            `[class, module, prefix, category, version, required_packages, envs]`.
         """
         return {
             "class": self.__class__.__name__,
@@ -218,35 +227,24 @@ class EnvGroup:
     @classmethod
     def load(cls, data: Dict[str, object]) -> Self:
         """
-        Reconstruct an `EnvGroup` subclass from a serialized dictionary.
-
-        Uses the saved `module` and `class` keys to dynamically import
-        and instantiate the correct subclass, so the exact environment
-        group is restored even if its module path changes between versions.
+        Reconstruct an `EnvSuite` subclass from a serialized dictionary.
 
         Parameters
         ----------
         data : Dict[str, object]
-            Dictionary produced by `dump`
+            Dictionary produced by `dump`.
 
         Returns
         -------
-        group : EnvGroup
-            Reconstructed environment group instance
-
-        Raises
-        ------
-        import_error : ImportError
-            If the saved module cannot be imported
-        module_error : AttributeError
-            If the saved class is not found in the module
+        suite : EnvSuite
+            Reconstructed environment suite instance.
         """
         import importlib
 
         module = importlib.import_module(str(data["module"]))
-        group_cls = getattr(module, data["class"])  # type: ignore
+        suite_cls = getattr(module, data["class"])  # type: ignore
 
-        return group_cls(
+        return suite_cls(
             prefix=data["prefix"],
             category=data["category"],
             version=data["version"],
@@ -256,98 +254,11 @@ class EnvGroup:
 
 
 @dataclass
-class AtariEnvs(EnvGroup):
-    """
-    [Atari Learning Environment](https://ale.farama.org/) (ALE).
-
-    57 classic Atari 2600 games.
-    """
-
-    prefix: str = "ALE"
-    category: str = "Atari"
-    version: str = "v5"
-    required_packages: List[str] = field(
-        default_factory=lambda: ["gymnasium", "ale_py"]
-    )
-    envs: List[str] = field(
-        default_factory=lambda: [
-            "Alien",
-            "Amidar",
-            "Assault",
-            "Asterix",
-            "Asteroids",
-            "Atlantis",
-            "BankHeist",
-            "BattleZone",
-            "BeamRider",
-            "Berzerk",
-            "Bowling",
-            "Boxing",
-            "Breakout",
-            "Centipede",
-            "ChopperCommand",
-            "CrazyClimber",
-            "Defender",
-            "DemonAttack",
-            "DoubleDunk",
-            "Enduro",
-            "FishingDerby",
-            "Freeway",
-            "Frostbite",
-            "Gopher",
-            "Gravitar",
-            "Hero",
-            "IceHockey",
-            "Jamesbond",
-            "Kangaroo",
-            "Krull",
-            "KungFuMaster",
-            "MontezumaRevenge",
-            "MsPacman",
-            "NameThisGame",
-            "Phoenix",
-            "Pitfall",
-            "Pong",
-            "PrivateEye",
-            "Qbert",
-            "Riverraid",
-            "RoadRunner",
-            "Robotank",
-            "Seaquest",
-            "Skiing",
-            "Solaris",
-            "SpaceInvaders",
-            "StarGunner",
-            "Surround",
-            "Tennis",
-            "TimePilot",
-            "Tutankham",
-            "UpNDown",
-            "Venture",
-            "VideoPinball",
-            "WizardOfWor",
-            "YarsRevenge",
-            "Zaxxon",
-        ]
-    )
-
-    @property
-    def make_fn(self) -> MakeFn:
-        """Factory function for creating Atari environments."""
-        return make_atari_env
-
-    def get_name(self, env: str, version: str | None = None) -> str:
-        """Get full name: ALE/{env}-v5"""
-        ver = version if version is not None else self.version
-        return f"{self.prefix}/{env}-{ver}"
-
-
-@dataclass
-class MuJoCoEnvs(EnvGroup):
+class MuJoCoEnvs(EnvSuite):
     """
     [MuJoCo](https://mujoco.org/) continuous control environments.
 
-    13 standard continuous control benchmarks via Gymnasium v5.
+    11 standard continuous control benchmarks via Gymnasium v5.
     """
 
     prefix: str = ""
@@ -374,22 +285,22 @@ class MuJoCoEnvs(EnvGroup):
 
     @property
     def make_fn(self) -> MakeFn:
-        """Factory function for creating MuJoCo environments."""
         return make_mujoco_env
 
     def get_name(self, env: str, version: str | None = None) -> str:
-        """Get full name: {env}-v5"""
         ver = version if version is not None else self.version
         return f"{env}-{ver}"
 
 
 @dataclass
-class DMCEnvs(EnvGroup):
+class DMCEnvs(EnvSuite):
     """
     [DeepMind Control Suite](https://github.com/google-deepmind/dm_control)
     environments.
 
-    21 continuous control environments with diverse dynamics and reward structures.
+    25 continuous control environments with diverse dynamics and reward
+    structures, accessed via `dm_control.suite` directly (bypasses
+    `dm_control.locomotion` and its labmaze dependency).
     """
 
     prefix: str = "dm_control"
@@ -430,23 +341,22 @@ class DMCEnvs(EnvGroup):
 
     @property
     def make_fn(self) -> MakeFn:
-        """Factory function for creating DMC environments."""
         return make_dmc_env
 
     def get_name(self, env: str, version: str | None = None) -> str:
-        """Get full name: dm_control/{domain}-{task}-v0"""
         ver = version if version is not None else self.version
         return f"{self.prefix}/{env}-{ver}"
 
 
 @dataclass
-class Box2DEnvs(EnvGroup):
+class Box2DEnvs(EnvSuite):
     """
     [Box2D](https://box2d.org/) and Gymnasium classic control environments
     with continuous action spaces.
 
-    6 environments spanning procedural terrain, thrust control, and
-    classic control problems.
+    5 environments spanning procedural terrain, thrust control, and classic
+    control problems. Version suffix is baked into each env name so
+    `get_name` is the identity function.
     """
 
     prefix: str = ""
@@ -465,130 +375,165 @@ class Box2DEnvs(EnvGroup):
 
     @property
     def make_fn(self) -> MakeFn:
-        """Factory function for creating Box2D environments."""
         return make_box2d_env
 
     def get_name(self, env: str, version: str | None = None) -> str:
-        """Get full name (version already included in env name)."""
         return env
+
+
+class _RegisteredSuite(EnvSuite):
+    """Suite whose envs already hold canonical IDs — used by `EnvSet.from_names`.
+
+    Resolves `specs` directly from the registry so each env can carry
+    its own `make_fn` even when grouped under one suite.
+    """
+
+    def get_name(self, env: str, version: str | None = None) -> str:
+        return env
+
+    @property
+    def make_fn(self) -> MakeFn:
+        raise NotImplementedError(
+            "_RegisteredSuite has no single make_fn; use spec.make_fn per env."
+        )
+
+    @property
+    def specs(self) -> List[EnvSpec]:
+        return [get_spec(e) for e in self.envs]
 
 
 class EnvSet:
     """
-    A collection of environment groups for training across multiple suites.
+    An ordered collection of `EnvSuite` instances.
 
-    Combines multiple `EnvGroup` instances into a single iterable that yields
-    `(env_name, make_fn)` tuples. Supports slicing and combining groups.
+    Mirrors `envrax.EnvSet`. Yields canonical ID strings when iterated
+    and supports merging two sets with `+`.
 
     Parameters
     ----------
-    *groups : EnvGroup
-        Variable number of environment groups to combine
+    *suites : EnvSuite
+        Variable number of environment suites to combine.
 
     Examples
     --------
-    >>> env_set = EnvSet(ATARI[:10], PROCGEN)
-    >>> for env_name, make_fn in env_set:
-    ...     envs = make_fn(env_name, num_envs=8)
+    >>> env_set = EnvSet(MUJOCO_11, BOX2D_5)
+    >>> for name in env_set:
+    ...     env = make(name, num_envs=8)
     """
 
-    def __init__(self, *groups: EnvGroup) -> None:
-        self._groups: List[EnvGroup] = list(groups)
+    def __init__(self, *suites: EnvSuite) -> None:
+        self._suites: List[EnvSuite] = list(suites)
 
     @property
     def n_envs(self) -> int:
-        """Total number of environments across all groups."""
-        return sum(g.n_envs for g in self._groups)
+        """Total number of environments across all suites."""
+        return sum(s.n_envs for s in self._suites)
 
     @property
-    def groups(self) -> List[EnvGroup]:
-        """List of environment groups in this set."""
-        return self._groups
+    def suites(self) -> List[EnvSuite]:
+        """List of environment suites in this set."""
+        return self._suites
 
     def all_names(self, version: str | None = None) -> List[str]:
         """
-        Get all full environment names across all groups.
+        Canonical IDs for every environment across all suites.
 
         Parameters
         ----------
         version : str (optional)
-            The version suffix. Default is `None`
+            Override the default version suffix for all suites.
 
         Returns
         -------
         names : List[str]
-            List of full environment names
+            One canonical ID per environment.
         """
-        names = []
-        for group in self._groups:
-            names.extend(group.all_names(version))
-
+        names: List[str] = []
+        for suite in self._suites:
+            names.extend(suite.all_names(version))
         return names
 
     def unique_names(self, version: str | None = None) -> List[str]:
         """
-        Get all unique environment names across all groups.
+        Unique canonical IDs across all suites.
 
         Parameters
         ----------
         version : str (optional)
-            The version suffix. Default is `None`
+            Override the default version suffix.
 
         Returns
         -------
         names : List[str]
-            List of unique environment names
+            List of unique canonical IDs.
         """
         return list(set(self.all_names(version)))
 
-    def as_list(self) -> List[Tuple[str, MakeFn]]:
+    def as_specs(self) -> List[EnvSpec]:
         """
-        Convert the environment set to a list of `(env_name, make_fn)` tuples.
+        Flat list of every `EnvSpec` across all suites.
 
         Returns
         -------
-        env_specs : List[Tuple[str, MakeFn]]
-            List of environment specifications
+        specs : List[EnvSpec]
+            One spec per environment in registration order.
         """
-        return list(self)
+        specs: List[EnvSpec] = []
+        for suite in self._suites:
+            specs.extend(suite.specs)
+        return specs
+
+    def as_list(self) -> List[tuple]:
+        """
+        Flat list of `(canonical_name, make_fn)` tuples across all suites.
+
+        Returns
+        -------
+        env_list : List[Tuple[str, MakeFn]]
+            One `(name, make_fn)` per environment in registration order.
+        """
+        return [(spec.name, spec.make_fn) for spec in self.as_specs()]
+
+    @property
+    def groups(self) -> List[EnvSuite]:
+        """Alias for `suites` retained for downstream compatibility."""
+        return self._suites
 
     def env_categories(self) -> Dict[str, int]:
         """
-        Get a dictionary of environment categories and their counts.
+        Mapping of category name to environment count.
 
         Returns
         -------
         categories : Dict[str, int]
-            Mapping of category names to environment counts
+            One entry per distinct `EnvSuite.category` across this set.
         """
         counts: Dict[str, int] = {}
-        for g in self._groups:
-            counts[g.category] = counts.get(g.category, 0) + g.n_envs
-
+        for s in self._suites:
+            counts[s.category] = counts.get(s.category, 0) + s.n_envs
         return counts
 
     def max_action_count(self, batch_size: int) -> int:
         """
-        Probe each unique environment to determine the maximum action count.
+        Probe each environment to determine the maximum action count.
 
-        For discrete spaces (`gym.spaces.Discrete`), returns the max number of
-        actions. For continuous spaces (`gym.spaces.Box`), returns the max
-        action dimensionality.
+        For `gym.spaces.Discrete`, returns the max number of actions.
+        For `gym.spaces.Box`, returns the max action dimensionality.
 
         Parameters
         ----------
         batch_size : int
-            Number of vectorized environments to create per probe
+            Number of vectorized environments to create per probe.
 
         Returns
         -------
         max_actions : int
-            Maximum action count or dimensionality across all environments
+            Maximum action count or dimensionality across all environments.
         """
         max_actions = 0
 
-        for env_name, make_fn in self.as_list():
-            env = make_fn(env_name, batch_size)
+        for spec in self.as_specs():
+            env = spec.make_fn(spec.name, batch_size)
             action_space = env.single_action_space
 
             if isinstance(action_space, gym.spaces.Discrete):
@@ -602,28 +547,28 @@ class EnvSet:
 
     def max_obs_dim(self, batch_size: int) -> int:
         """
-        Probe each unique environment to determine the maximum observation
+        Probe each environment to determine the maximum observation
         dimensionality.
 
-        For vector observations (`gym.spaces.Box` with 1D shape), returns
-        the max observation dimension. For image observations (3D shape),
-        returns `0` (images are assumed homogeneous via preprocessing).
+        For 1D `gym.spaces.Box` observations, returns the max obs dim.
+        For 3D image observations, returns `0` (assumed homogeneous via
+        preprocessing).
 
         Parameters
         ----------
         batch_size : int
-            Number of vectorized environments to create per probe
+            Number of vectorized environments to create per probe.
 
         Returns
         -------
         max_obs : int
             Maximum observation dimensionality across all environments,
-            or `0` if all observations are images
+            or `0` if all observations are images.
         """
         max_obs = 0
 
-        for env_name, make_fn in self.as_list():
-            env = make_fn(env_name, batch_size)
+        for spec in self.as_specs():
+            env = spec.make_fn(spec.name, batch_size)
             obs_space = env.single_observation_space
 
             if isinstance(obs_space, gym.spaces.Box) and len(obs_space.shape) == 1:
@@ -633,138 +578,166 @@ class EnvSet:
 
         return max_obs
 
-    def __iter__(self) -> Iterator[Tuple[str, MakeFn]]:
-        """Iterate over (env_name, make_fn) tuples from all groups."""
-        for group in self._groups:
-            yield from group
+    def __iter__(self) -> Iterator[str]:
+        """Yield canonical ID strings from all suites in order."""
+        for suite in self._suites:
+            yield from suite
 
     def __len__(self) -> int:
-        """Total number of environments."""
         return self.n_envs
 
     def __add__(self, other: Self) -> Self:
-        """Combine two EnvSets."""
-        return type(self)(*self._groups, *other._groups)
+        return type(self)(*self._suites, *other._suites)
+
+    @classmethod
+    def from_names(cls, names: List[str]) -> Self:
+        """
+        Build an `EnvSet` from a list of registered canonical IDs.
+
+        Names are looked up via the registry and grouped by their suite
+        category tag (`EnvSpec.suite`). Used to reconstruct an `EnvSet`
+        from persisted state without needing the original suite class
+        hierarchy.
+
+        Parameters
+        ----------
+        names : List[str]
+            Registered canonical env IDs.
+
+        Returns
+        -------
+        env_set : EnvSet
+            One `_RegisteredSuite` per distinct category, holding matching specs.
+        """
+        by_cat: Dict[str, List[str]] = defaultdict(list)
+        for name in names:
+            spec = get_spec(name)
+            by_cat[spec.suite].append(spec.name)
+
+        suites = [
+            _RegisteredSuite(category=category, envs=env_names)
+            for category, env_names in by_cat.items()
+        ]
+        return cls(*suites)
 
     def verify_packages(self) -> None:
         """
-        Verify all required packages are installed for every environment group.
+        Verify all required packages are installed for every suite.
 
         Raises
         ------
         error : MissingPackageError
-            If any group has missing required packages
+            If any suite has missing required packages.
         """
-        missing = {}
-        for group in self._groups:
-            status = group.check()
+        missing: Dict[str, List[str]] = {}
+        for suite in self._suites:
+            status = suite.check()
             not_installed = [pkg for pkg, ok in status.items() if not ok]
             if not_installed:
-                missing[group.category] = not_installed
+                missing[suite.category] = not_installed
 
         if missing:
             lines = [f"  {cat}: {', '.join(pkgs)}" for cat, pkgs in missing.items()]
             raise MissingPackageError(
-                "Missing required packages for environment groups:\n" + "\n".join(lines)
+                "Missing required packages for environment suites:\n" + "\n".join(lines)
             )
 
     def __repr__(self) -> str:
-        group_info = ", ".join(
-            f"{g.__class__.__name__}({g.n_envs})" for g in self._groups
+        suite_info = ", ".join(
+            f"{s.__class__.__name__}({s.n_envs})" for s in self._suites
         )
-        return f"EnvSet({group_info}, total={self.n_envs})"
-
-    def as_specs(self) -> List[EnvSpec]:
-        """
-        Convert all environments across all groups to scheduler specs.
-
-        Returns
-        -------
-        specs : List[EnvSpec]
-            One spec per environment across all groups
-        """
-        specs = []
-        for group in self._groups:
-            specs.extend(group.as_specs())
-
-        return specs
+        return f"EnvSet({suite_info}, total={self.n_envs})"
 
 
-# Pre-instantiated environment groups for convenience
-ATARI_BASE = AtariEnvs(
-    envs=[
-        "Assault",
-        "Atlantis",
-        "Boxing",
-        "Breakout",
-        "CrazyClimber",
-        "DemonAttack",
-        "Gopher",
-        "Kangaroo",
-        "Krull",
-        "NameThisGame",
-        "RoadRunner",
-        "Robotank",
-        "StarGunner",
-        "VideoPinball",
-    ],
-)
-ATARI_EASY = AtariEnvs(
-    envs=[
-        "BeamRider",
-        "Enduro",
-        "FishingDerby",
-        "Freeway",
-        "Hero",
-        "IceHockey",
-        "Jamesbond",
-        "KungFuMaster",
-        "Phoenix",
-        "Pong",
-        "Qbert",
-        "SpaceInvaders",
-        "Tennis",
-        "TimePilot",
-        "Tutankham",
-        "UpNDown",
-    ],
-)
-ATARI_MEDIUM = AtariEnvs(
-    envs=[
-        "Alien",
-        "Amidar",
-        "Asterix",
-        "BankHeist",
-        "BattleZone",
-        "Centipede",
-        "ChopperCommand",
-        "Defender",
-        "Riverraid",
-        "Seaquest",
-        "Venture",
-        "WizardOfWor",
-        "Zaxxon",
-    ],
-)
-ATARI_HARD = AtariEnvs(
-    envs=[
-        "Asteroids",
-        "Berzerk",
-        "Bowling",
-        "DoubleDunk",
-        "Frostbite",
-        "Gravitar",
-        "MontezumaRevenge",
-        "MsPacman",
-        "Pitfall",
-        "PrivateEye",
-        "Skiing",
-        "Solaris",
-        "Surround",
-        "YarsRevenge",
-    ],
-)
-ATARI_57 = AtariEnvs()
+_REGISTRY: Dict[str, EnvSpec] = {}
+
+
+def register(name: str, make_fn: MakeFn, *, suite: str = "") -> None:
+    """
+    Register a single environment in the `velora.gym` registry.
+
+    Mirrors `envrax.register`. After registration, the env can be
+    instantiated via `velora.gym.make(name)`.
+
+    Parameters
+    ----------
+    name : str
+        Canonical environment ID (e.g. `"Ant-v5"`).
+    make_fn : MakeFn
+        Factory `(name, num_envs, **kwargs) -> VectorEnv`.
+    suite : str (optional)
+        Suite category tag for introspection.
+
+    Raises
+    ------
+    env_exists : ValueError
+        If `name` is already registered.
+    """
+    if name in _REGISTRY:
+        raise ValueError(f"Env '{name}' is already registered")
+    _REGISTRY[name] = EnvSpec(name=name, make_fn=make_fn, suite=suite)
+
+
+def register_suite(suite: EnvSuite, *, version: str | None = None) -> None:
+    """
+    Register every environment in an `EnvSuite` in one shot.
+
+    Mirrors `envrax.register_suite`. Skips environments whose canonical
+    ID is already registered (idempotent).
+
+    Parameters
+    ----------
+    suite : EnvSuite
+        Suite whose environments should be registered.
+    version : str (optional)
+        Override the suite's default version when computing canonical IDs.
+    """
+    for env in suite.envs:
+        canonical = suite.get_name(env, version=version)
+        if canonical in _REGISTRY:
+            continue
+        _REGISTRY[canonical] = EnvSpec(
+            name=canonical,
+            make_fn=suite.make_fn,
+            suite=suite.category,
+        )
+
+
+def registered_names() -> List[str]:
+    """Sorted list of every canonical ID currently in the registry."""
+    return sorted(_REGISTRY.keys())
+
+
+def registry() -> Dict[str, EnvSpec]:
+    """Shallow copy of the registry mapping (canonical ID → `EnvSpec`)."""
+    return dict(_REGISTRY)
+
+
+def get_spec(name: str) -> EnvSpec:
+    """
+    Return the full `EnvSpec` for a registered environment.
+
+    Mirrors `envrax.get_spec`.
+
+    Parameters
+    ----------
+    name : str
+        Registered canonical environment ID.
+
+    Returns
+    -------
+    spec : EnvSpec
+        Registered specification.
+
+    Raises
+    ------
+    unknown_env : ValueError
+        If `name` is not registered.
+    """
+    if name not in _REGISTRY:
+        raise ValueError(f"Env '{name}' is not registered")
+    return _REGISTRY[name]
+
 
 MUJOCO_LOCOMOTION = MuJoCoEnvs(
     envs=[

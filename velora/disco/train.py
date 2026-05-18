@@ -68,7 +68,7 @@ from velora.disco.utils.loss import (
     compute_meta_reg_loss,
     compute_policy_loss,
 )
-from velora.gym.envs import EnvGroup, EnvSet, MakeFn
+from velora.gym.envs import EnvSet, EnvSuite, MakeFn
 from velora.gym.workers import EnvWorkerPool
 from velora.nn.optim import scale_by_adan_no_denom
 from velora.tracking.episode import EpisodeTracker
@@ -357,7 +357,7 @@ class RuleTrainer:
 
     Parameters
     ----------
-    envs : EnvSet | EnvGroup
+    envs : EnvSet | EnvSuite
         Environment set or group to use for rule discovery
     config : RuleTrainerSettings
         Configuration for meta-training
@@ -399,7 +399,7 @@ class RuleTrainer:
 
     def __init__(
         self,
-        envs: EnvSet | EnvGroup,
+        envs: EnvSet | EnvSuite,
         config: RuleTrainerSettings,
         *,
         agents_per_env: int = 2,
@@ -424,20 +424,19 @@ class RuleTrainer:
             jax.config.update("jax_compilation_cache_dir", cache_dir)
             jax.config.update("jax_persistent_cache_min_compile_time_secs", 0)
 
-        if isinstance(envs, EnvGroup):
+        if isinstance(envs, EnvSuite):
             envs = EnvSet(envs)
 
         envs.verify_packages()
 
         # Setup envs
         self._env_set = envs
-        _unique_env_specs = envs.as_list()
-        self._env_specs = _unique_env_specs * agents_per_env
-        self._env_specs.sort(key=lambda x: x[0])  # group same-game slots together
-        self._unique_env_specs = _unique_env_specs
-
+        make_fns = {s.name: s.make_fn for s in envs.as_specs()}
+        self._env_specs = sorted(
+            [(name, make_fns[name]) for name in envs.unique_names()] * agents_per_env,
+            key=lambda x: x[0],
+        )
         self.env_names = [name for name, _ in self._env_specs]
-        self.num_envs = len(self._unique_env_specs)
         self.num_trainers = len(self._env_specs)
 
         self.n_steps = config.n_meta_steps(self.num_trainers)
@@ -1633,7 +1632,7 @@ class RuleTrainer:
             restored_step = checkpoint_step or parent_manager.latest_step
 
             # Reconstruct environment groups and config from saved metadata
-            envs = EnvSet(*[EnvGroup.load(g) for g in meta_run.envs])
+            envs = EnvSet(*[EnvSuite.load(g) for g in meta_run.envs])
             config: RuleTrainerSettings = load_config(
                 RuleTrainerSettings,
                 meta_run.config,
