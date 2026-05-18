@@ -159,20 +159,13 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 
-# Extras
-/wandb*
-/examples/*saved/
-/examples/*wandb/
-/examples/*videos/
-/examples/*logs/
-/examples/checkpoints*
-/examples/*viz/
-/examples/*solutions/
-/old
-/_build
-CHANGELOG.md
-metrics.db
-metrics.db-journal
-*.prof
-/logs
-/checkpoints
+# Local dev
+demo*.py
+start*.py
+/runs*
+.dockerignore
+Dockerfile
+
+# JAX persistent XLA compilation cache (envrax / velora)
+/.jax_cache*
+/.cache/jax
