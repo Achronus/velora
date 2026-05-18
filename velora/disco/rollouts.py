@@ -15,7 +15,6 @@
 
 from typing import List, Self
 
-import chex
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -71,10 +70,10 @@ class Rollout:
         Each field has shape `(N, B, T, ...)` or `(B, T, ...)`
     """
 
-    actions: chex.Array
-    rewards: chex.Array
-    discounts: chex.Array
-    values: chex.Array
+    actions: jax.Array
+    rewards: jax.Array
+    discounts: jax.Array
+    values: jax.Array
     preds: PolicyAgentOutput
     target_preds: PolicyAgentOutput
 

@@ -287,7 +287,7 @@ class AgentTrainerState:
         EMA state for advantage normalization
     td_ema : EMAState
         EMA state for TD error normalization
-    current_obs : chex.Array
+    current_obs : jax.Array
         Current observation from environment
     steps_trained : int (optional)
         Total training steps completed. Default is `0`
@@ -300,7 +300,7 @@ class AgentTrainerState:
     adv_ema: EMAState
     td_ema: EMAState
 
-    current_obs: chex.Array
+    current_obs: jax.Array
     steps_trained: int = 0
 
     @classmethod
@@ -308,7 +308,7 @@ class AgentTrainerState:
         cls,
         policy_opt_state: optax.OptState,
         value_opt_state: optax.OptState,
-        current_obs: chex.Array,
+        current_obs: jax.Array,
     ) -> Self:
         """
         Creates a new state instance.
@@ -319,7 +319,7 @@ class AgentTrainerState:
             Initialized policy optimizer state
         value_opt_state : optax.OptState
             Initialized value optimizer state
-        current_obs : chex.Array
+        current_obs : jax.Array
             Initial observation from environment
 
         Returns
@@ -404,13 +404,13 @@ class AgentTrainerState:
         """
         return self.__replace__(adv_ema=adv_ema, td_ema=td_ema)
 
-    def update_obs(self, new_obs: chex.Array) -> Self:
+    def update_obs(self, new_obs: jax.Array) -> Self:
         """
         Update observation state.
 
         Parameters
         ----------
-        new_obs : chex.Array
+        new_obs : jax.Array
             New current observation
 
         Returns
