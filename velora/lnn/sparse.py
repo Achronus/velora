@@ -61,7 +61,7 @@ class SparseLinear(nnx.Module):
     ) -> None:
         self.in_features = in_features
         self.out_features = out_features
-        self.mask = mask
+        self.mask = nnx.Variable(mask)
         self.kernel_init = hidden_init
         self.bias_init = bias_init
 
