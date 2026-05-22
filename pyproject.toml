@@ -25,7 +25,7 @@ dependencies = [
     "optax==0.2.8",
     "tensorboard>=2.20.0",
     "tensorboardx>=2.6.5",
-    "mujorax==0.1.5",
+    "mujorax==0.1.6",
 ]
 
 [project.urls]
@@ -43,7 +43,6 @@ test = [
     "pillow>=12.2.0",
     "pytest-cov>=7.1.0",
 ]
-notebook = ["notebook==7.5.6", "ipywidgets>=8.1.8"]
 
 [build-system]
 requires = ["hatchling"]
