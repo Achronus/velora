@@ -52,8 +52,7 @@ class EpisodeTracker:
     def record(
         self,
         rewards: np.ndarray,
-        terminated: np.ndarray,
-        truncated: np.ndarray,
+        dones: np.ndarray,
     ) -> None:
         """
         Update accumulators for one environment step.
@@ -62,18 +61,14 @@ class EpisodeTracker:
         ----------
         rewards : np.ndarray
             Raw environment rewards `(num_envs,)`
-        terminated : np.ndarray
-            Terminal flags `(num_envs,)`
-        truncated : np.ndarray
-            Truncated flags `(num_envs,)`
+        dones : np.ndarray
+            Episode termination flags `(num_envs,)`
         """
         self._current_returns += rewards.squeeze()
         self._current_lengths += 1
 
-        done = terminated | truncated
-
-        if done.any():
-            for i in np.where(done)[0]:
+        if dones.any():
+            for i in np.where(dones)[0]:
                 r = float(self._current_returns[i])
                 l = int(self._current_lengths[i])  # noqa: E741
 

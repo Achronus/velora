@@ -492,16 +492,17 @@ class TrainerPool:
 
         # Episode tracking: one device_get for the whole rollout
         if training:
-            rewards_cpu: jax.Array = jax.device_get(all_rewards)  # (T_total, P, B)
-            dones_cpu: jax.Array = jax.device_get(all_dones)  # (T_total, P, B)
-            t_total = jnp.shape(rewards_cpu)[0]
+            rewards_cpu = np.asarray(jax.device_get(all_rewards))  # (T_total, P)
+            dones_cpu = np.asarray(jax.device_get(all_dones))  # (T_total, P)
+            t_total = rewards_cpu.shape[0]
+
             for i in range(self.num_trainers):
                 tracker = self.episode_trackers[i]
                 for t in range(t_total):
+                    # tracker expects (num_envs=1,) shaped arrays
                     tracker.record(
-                        rewards_cpu[t, i],  # type: ignore
-                        dones_cpu[t, i],  # type: ignore
-                        dones_cpu[t, i],  # type: ignore
+                        rewards_cpu[t, i : i + 1],
+                        dones_cpu[t, i : i + 1],
                     )
 
     def soft_update_targets(self, tau: float) -> None:
