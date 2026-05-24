@@ -120,19 +120,28 @@ class WarmCompile:
         Parameters
         ----------
         training : bool
-            `True` to warm the training scan (uses `train_buffer`);
-            `False` to warm the validation scan (uses `valid_buffer`).
+            `True` to warm the training scan (writes into
+            `train_buffer.storage`); `False` to warm the validation
+            scan (overwrites `valid_rollout`).
         """
         pool = self._t.pool
         cfg = self._t.config
 
         if training:
-            buffer = pool.train_buffer
-            total_steps, seq_len = cfg.n_updates * cfg.seq_len, cfg.seq_len
+            n_rollouts = cfg.n_updates
+            seq_len = cfg.seq_len
+            init_buf = pool.train_buffer.storage
+            slot_indices = (
+                pool.train_buffer.write_idx
+                + jnp.arange(n_rollouts, dtype=jnp.int32)
+            ) % pool.train_buffer.capacity
         else:
-            buffer = pool.valid_buffer
-            valid_seq_len = cfg.seq_len * 2
-            total_steps, seq_len = valid_seq_len, valid_seq_len
+            n_rollouts = 1
+            seq_len = cfg.seq_len * 2
+            init_buf = pool.valid_rollout
+            slot_indices = jnp.arange(n_rollouts, dtype=jnp.int32)
+
+        total_steps = n_rollouts * seq_len
 
         init_carry = CollectCarry(
             obs=pool.obs,
@@ -145,7 +154,7 @@ class WarmCompile:
             v_h=pool.v_h,
             rng=jax.random.key(0),
             write_idx=jnp.int32(0),
-            buf=buffer.as_pytree(),
+            buf=init_buf,
         )
 
         _, all_rewards, all_dones = pool._compiled_collect(
@@ -153,6 +162,7 @@ class WarmCompile:
             init_carry,
             total_steps,
             seq_len,
+            slot_indices,
             pool.p_params,
             pool.t_params,
             pool.v_params,
@@ -177,35 +187,37 @@ class WarmCompile:
             via `in_axes=None` in `_batch_grad_fn`'s vmap signature.
         """
         pool = self._t.pool
-        chunk_sizes = {min(self._t.max_group_size, self._t.num_trainers)}
-        remainder = self._t.num_trainers % self._t.max_group_size
-        if remainder and remainder != min(self._t.max_group_size, self._t.num_trainers):
-            chunk_sizes.add(remainder)
+        chunk_size = self._t._chunk_size
 
-        snap = (
-            pool.p_params,
-            pool.v_params,
-            pool.t_params,
-            pool.v_opt,
-            pool.adv_ema,
-            pool.td_ema,
+        snap = tuple(
+            jax.tree.map(lambda x: x.copy(), t)
+            for t in (
+                pool.p_params,
+                pool.v_params,
+                pool.t_params,
+                pool.v_opt,
+                pool.adv_ema,
+                pool.td_ema,
+            )
         )
 
-        for chunk_size in chunk_sizes:
-            disco_h, meta_h = [], []
-            for idx in range(chunk_size):
-                d_h, m_h = self._t.state.hidden.get(idx)
-                disco_h.append(d_h)
-                meta_h.append(m_h)
-            grad_inputs = pool.get_grad_inputs(
-                0,
-                chunk_size,
-                jnp.stack(disco_h),
-                jnp.stack(meta_h),
-            )
-            chunk_out = self._t._batch_grad_fn(meta_params, *grad_inputs)
-            pool.update_from_grad(0, chunk_size, chunk_out)
-            del grad_inputs, chunk_out
+        disco_h, meta_h = [], []
+        for idx in range(chunk_size):
+            d_h, m_h = self._t.state.hidden.get(idx)
+            disco_h.append(d_h)
+            meta_h.append(m_h)
+        grad_inputs = pool.get_grad_inputs(
+            0,
+            chunk_size,
+            jnp.stack(disco_h),
+            jnp.stack(meta_h),
+            rng=jax.random.key(0),
+            n_updates=self._t.config.n_updates,
+            batch_size=self._t.config.batch_size,
+        )
+        chunk_out = self._t._batch_grad_fn(meta_params, *grad_inputs)
+        pool.update_from_grad(0, chunk_out)
+        del grad_inputs, chunk_out
 
         # Restore snapshots so warm-up doesn't bleed state into training
         (
@@ -232,10 +244,10 @@ class WarmCompile:
 
     def _per_trainer_meta_optim(self, meta_params: chex.ArrayTree) -> None:
         """
-        Warm the per-trainer meta-gradient optimizer updates.
+        Warm the vmapped meta-gradient optimizer update.
 
-        Each trainer holds its own Adan-with-clip optimizer state for
-        meta-gradient normalization; each one compiles on first use.
+        One jitted Adan-with-clip update is vmapped over the stacked
+        per-trainer state — compiles once, not once per trainer.
 
         Parameters
         ----------
@@ -243,10 +255,13 @@ class WarmCompile:
             Current meta-network parameters — used as the `params`
             argument to the optimizer's `update` fn.
         """
-        dummy_grad = jax.tree.map(jnp.zeros_like, meta_params)
-        for i in range(self._t.num_trainers):
-            _ = self._t.pool.meta_optim_updates[i](
-                dummy_grad,
-                self._t.pool.meta_opt_states[i],
-                meta_params,
-            )
+        P = self._t.num_trainers
+        dummy_grads = jax.tree.map(
+            lambda p: jnp.broadcast_to(jnp.zeros_like(p), (P, *p.shape)),
+            meta_params,
+        )
+        _ = jax.vmap(self._t.pool.meta_optim_update, in_axes=(0, 0, None))(
+            dummy_grads,
+            self._t.pool.meta_opt_state,
+            meta_params,
+        )

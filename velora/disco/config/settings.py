@@ -381,7 +381,15 @@ class AgentTrainerSettings:
         Number of agent updates to backpropagate through for meta-gradient
         computation (sliding window size)
     batch_size : int
-        Trajectory batch size (number of vectorized environments)
+        Number of trajectories per agent update. Composed of
+        `(1 - replay_ratio)` fresh + `replay_ratio` replay trajectories
+        sampled from the `MixedBuffer`.
+    replay_ratio : float
+        Fraction of each per-update batch drawn from replay; the rest
+        is taken from the most-recently inserted fresh trajectories.
+        Must be in `[0.0, 1.0]`.
+    replay_capacity : int
+        Per-agent ring size (in trajectory slots) for the replay buffer.
     """
 
     agent: PolicyAgentSettings
@@ -393,6 +401,9 @@ class AgentTrainerSettings:
     seq_len: int
     n_updates: int
     batch_size: int
+
+    replay_ratio: float
+    replay_capacity: int
 
 
 @struct.dataclass(frozen=True)
@@ -438,8 +449,8 @@ class RuleTrainerSettings:
     total_env_steps : int (optional)
         Total environment step budget across all trainers. Default is `500M`
     batch_size : int (optional)
-        Trajectory batch size. Controls the number of vectorized environments used per agent.
-        Default is `20`
+        Number of trajectories per agent update (composed of on-policy +
+        off-policy samples) retrieved from a buffer. Default is `20`
     n_updates : int (optional)
         Number of agent updates to backpropagate through for meta-gradient
         computation (sliding window size). Default is `20`
@@ -448,6 +459,12 @@ class RuleTrainerSettings:
         Default is `20`
     tau : float (optional)
         Soft update coefficient for target network updates. Default is `0.995`
+    replay_ratio : float (optional)
+        Fraction of each per-update batch drawn from replay. The rest is
+        the most-recently inserted fresh trajectories. Default is `0.9`
+    replay_capacity : int (optional)
+        Per-agent ring size (in trajectory slots) for the replay buffer.
+        Default is `1000`
     """
 
     agent: PolicyAgentSettings = struct.field(default_factory=PolicyAgentSettings)
@@ -470,6 +487,9 @@ class RuleTrainerSettings:
     seq_len: int = 20
 
     tau: float = 0.995
+
+    replay_ratio: float = 0.9
+    replay_capacity: int = 1000
 
     @property
     def steps_per_meta(self) -> int:
@@ -538,6 +558,8 @@ class RuleTrainerSettings:
             seq_len=self.seq_len,
             n_updates=self.n_updates,
             batch_size=self.batch_size,
+            replay_ratio=self.replay_ratio,
+            replay_capacity=self.replay_capacity,
         )
 
     def console_config(

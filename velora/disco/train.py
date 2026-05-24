@@ -15,7 +15,6 @@
 
 import math
 import random
-from collections import defaultdict
 from typing import Callable, Dict, List, Self, Tuple
 
 import chex
@@ -76,7 +75,57 @@ from velora.tracking.settings import RunSettings
 from velora.utils.config import dump_config, load_config
 from velora.utils.format import cache_status
 from velora.utils.seed import get_rng_key_data
-from velora.utils.transforms import squeeze_time, unstack_pytree
+from velora.utils.transforms import squeeze_time
+
+
+def _configure_jax_cache(cache_dir: str | None) -> None:
+    """
+    Set aggressive JAX persistent-cache flags and point the cache at
+    `cache_dir`. Without `jax_compilation_cache_dir`, the persistent
+    cache is disabled and every process restart pays the full compile
+    cost — even when the on-disk flags below are tuned.
+
+    Parameters
+    ----------
+    cache_dir : str | None
+        Directory used by JAX as the persistent XLA cache. When `None`
+        the cache is left at its default (effectively disabled).
+    """
+    jax.config.update("jax_persistent_cache_min_compile_time_secs", 0.0)
+    jax.config.update("jax_persistent_cache_min_entry_size_bytes", 0)
+
+    if cache_dir is not None:
+        jax.config.update("jax_compilation_cache_dir", cache_dir)
+
+
+def _resolve_chunk_size(num_trainers: int, max_group_size: int) -> int:
+    """
+    Largest divisor of `num_trainers` not exceeding `max_group_size`.
+
+    Picking a divisor guarantees every chunk has identical shape, so
+    `_batch_grad_fn` compiles a single XLA kernel rather than one per
+    chunk-size variant.
+
+    Parameters
+    ----------
+    num_trainers : int
+        Total number of trainers to chunk.
+    max_group_size : int
+        Upper bound on the chunk size (memory budget proxy).
+
+    Returns
+    -------
+    chunk_size : int
+        The largest divisor of `num_trainers` such that
+        `chunk_size <= min(max_group_size, num_trainers)`.
+    """
+    cap = min(max_group_size, num_trainers)
+
+    for d in range(cap, 0, -1):
+        if num_trainers % d == 0:
+            return d
+
+    return 1
 
 
 class AgentTrainer:
@@ -156,14 +205,13 @@ class AgentTrainer:
 
         self.meta_optim: optax.GradientTransformation = None  # type: ignore
         self.meta_opt_state: optax.OptState = None  # type: ignore
-        self.meta_optim_update: Callable = None  # type: ignore
 
         # Lifetime tracking
         self._env_steps: int = 0
         self._step_budget: int = sample_budget(budget_rng)
 
         # Episode tracking
-        self.episode_tracker = EpisodeTracker(self.config.batch_size)
+        self.episode_tracker = EpisodeTracker(1)
         self._collection_step = 0
 
         self.max_action_dim = max_action_dim
@@ -221,14 +269,8 @@ class AgentTrainer:
             2. JIT compile caching
         """
         obs_dim = self.max_obs_dim or math.prod(self.obs_space.shape)
-        dummy_obs = jnp.zeros(
-            (self.config.batch_size, obs_dim),
-            dtype=jnp.float32,
-        )
-        dummy_action = jnp.zeros(
-            (self.config.batch_size, 1, self.max_action_dim),
-            dtype=jnp.float32,
-        )
+        dummy_obs = jnp.zeros((1, obs_dim), dtype=jnp.float32)
+        dummy_action = jnp.zeros((1, 1, self.max_action_dim), dtype=jnp.float32)
 
         _, h_policy = self.policy_agent(dummy_obs, dummy_action)
         _, h_target = self.target_agent(dummy_obs, dummy_action)
@@ -319,13 +361,6 @@ class AgentTrainer:
         )
         self.meta_opt_state = self.meta_optim.init(meta_params)
 
-        # JIT compile update fn (if needed)
-        self.meta_optim_update = (
-            jax.jit(self.meta_optim.update)
-            if self.jit_compile
-            else self.meta_optim.update
-        )
-
 
 class RuleTrainer:
     """
@@ -391,6 +426,7 @@ class RuleTrainer:
         cache_dir: str | None = ".jax_cache",
         verbose: bool = True,
     ) -> None:
+        _configure_jax_cache(cache_dir)
         _cache_status = cache_status(cache_dir, jit_compile)
 
         if isinstance(envs, envrax.EnvSuite):
@@ -414,10 +450,13 @@ class RuleTrainer:
         self.config = config
         self.agents_per_env = agents_per_env
         self.max_group_size = max_group_size
+
         self.jit_compile = jit_compile
         self.cache_dir = cache_dir
 
         self._seed = seed
+
+        self._chunk_size = _resolve_chunk_size(self.num_trainers, max_group_size)
 
         # Init lineage
         self._parent_run: str | None = None
@@ -437,17 +476,26 @@ class RuleTrainer:
             key, self.num_trainers + 2
         )
 
-        # Build multi-vec env — one VecEnv per trainer slot
-        self.multi_vec_env = envrax.make_multi_vec(
-            self._env_specs,
-            n_envs=self.config.batch_size,
-            jit_compile=self.jit_compile,
-            pre_warm=False,
-            cache_dir=self.cache_dir,
-        )
+        # Build multi-env — one single `JaxEnv` per trainer slot
+        env_by_name: Dict[str, envrax.JaxEnv] = {
+            name: envrax.make(
+                name,
+                jit_compile=self.jit_compile,
+                pre_warm=False,
+                cache_dir=self.cache_dir,
+            )
+            for name in self._unique_env_names
+        }
+        envs_by_trainer: Dict[str, envrax.JaxEnv] = {
+            f"trainer_{i}": env_by_name[name] for i, name in enumerate(self._env_specs)
+        }
+        self.multi_env = envrax.make_multi(envs_by_trainer)
+
+        # Ordered list of dict keys matching trainer order for slot lookups
+        self._trainer_env_keys: List[str] = self.multi_env.env_keys
 
         # Padded shapes for `jax.vmap` over heterogeneous envs
-        self.max_action_dim, _obs_dim = self.multi_vec_env.pad_dims()
+        self.max_action_dim, _obs_dim = self.multi_env.pad_dims()
         self.max_obs_dim = _obs_dim or None
 
         self._batch_grad_fn: Callable[..., MetaGradOutput] = None  # type: ignore
@@ -486,7 +534,7 @@ class RuleTrainer:
         self.cp_manager = CheckpointManager(self.config.run)
 
         # init console dashboard
-        _n_chunks = math.ceil(self.num_trainers / self.max_group_size)
+        _n_chunks = self.num_trainers // self._chunk_size
 
         if verbose:
             self.console = DiscoConsoleDashboard(
@@ -518,8 +566,9 @@ class RuleTrainer:
             Parameter counts for all agents
         """
         config = self.config.agent_trainer_config()
-        obs_space: envrax.Box = self.multi_vec_env.single_observation_spaces[0]  # type: ignore
-        action_space: envrax.Box = self.multi_vec_env.single_action_spaces[0]  # type: ignore
+        first_key = self._trainer_env_keys[0]
+        obs_space: envrax.Box = self.multi_env.observation_spaces[first_key]  # type: ignore
+        action_space: envrax.Box = self.multi_env.action_spaces[first_key]  # type: ignore
 
         policy = PolicyAgent(
             obs_space,
@@ -602,12 +651,13 @@ class RuleTrainer:
 
         # Build trainers
         for i, env_name in enumerate(self._env_specs):
+            key = self._trainer_env_keys[i]
             trainer = self._create_trainer(
                 env_name,
                 self.config.agent_trainer_config(),
                 key=trainer_keys[i],
-                obs_space=self.multi_vec_env.single_observation_spaces[i],  # type: ignore
-                action_space=self.multi_vec_env.single_action_spaces[i],  # type: ignore
+                obs_space=self.multi_env.observation_spaces[key],  # type: ignore
+                action_space=self.multi_env.action_spaces[key],  # type: ignore
             )
             self.trainers.append(trainer)
             self.console.update_setup()
@@ -636,8 +686,9 @@ class RuleTrainer:
         self._batched_collect_fn = self._build_batched_collect_fn()
         self.console.update_setup()
 
-        # Compile all VecEnvs up front so the first training step doesn't block
-        self.multi_vec_env.compile(progress=False)
+        # Compile each unique inner JaxEnv up front; sharing by name
+        # means P=N_unique compiles, not P=N_trainers.
+        self.multi_env.compile(progress=False)
 
         # Build trainer pool — stacks all params/states as permanent GPU arrays
         self.key, pool_rng = jax.random.split(self.key)
@@ -648,11 +699,12 @@ class RuleTrainer:
             hidden_shapes=self._hidden_shapes,
             n_updates=self.config.n_updates,
             seq_len=self.config.seq_len,
-            batch_size=self.config.batch_size,
             encoding_dim=self.trainers[0].policy_agent.encoding_dim,
             prediction_dim=self.config.agent.prediction_size,
             max_obs_dim=self.max_obs_dim or 0,
-            multi_vec_env=self.multi_vec_env,
+            multi_env=self.multi_env,
+            replay_capacity=self.config.replay_capacity,
+            replay_ratio=self.config.replay_ratio,
             init_rng=pool_rng,
         )
         self.console.update_setup()
@@ -1151,8 +1203,8 @@ class RuleTrainer:
         updates step budgets and episode logging, performs soft target
         updates, then runs the validation collection phase.
 
-        All rollout data is written directly into `pool.train_buffer`
-        and `pool.valid_buffer`.
+        Training rollouts land in `pool.train_buffer` (a `MixedBuffer`
+        ring); the validation rollout overwrites `pool.valid_rollout`.
         """
         # Handle resets before collection
         for idx in range(self.num_trainers):
@@ -1240,12 +1292,16 @@ class RuleTrainer:
         stacked_disco_h = jnp.stack(stacked_disco_h)
         stacked_meta_h = jnp.stack(stacked_meta_h)
 
-        # Get all gradient inputs from pool
+        # Get all gradient inputs from pool — split rng for replay sampling
+        self.key, sample_rng = jax.random.split(self.key)
         grad_inputs = self.pool.get_grad_inputs(
             start,
             end,
             stacked_disco_h,
             stacked_meta_h,
+            rng=sample_rng,
+            n_updates=self.config.n_updates,
+            batch_size=self.config.batch_size,
         )
 
         # Single accelerator call for entire chunk
@@ -1256,39 +1312,42 @@ class RuleTrainer:
         del grad_inputs, stacked_disco_h, stacked_meta_h
 
         # Populate gradient params/states back into pool
-        self.pool.update_from_grad(start, end, chunk_out)
+        self.pool.update_from_grad(start, chunk_out)
 
         # Only transfer scalar logging data to CPU
         log_data: ChunkLogData = jax.device_get(chunk_out.log_data())
 
-        # Post-batch: accumulate gradients and log metrics
+        # Vmapped meta-optim update over the whole chunk — one jit call
+        chunk_opt = jax.tree.map(lambda x: x[start:end], self.pool.meta_opt_state)
+        normed_grads_stack, new_chunk_opt = jax.vmap(
+            self.pool.meta_optim_update, in_axes=(0, 0, None)
+        )(chunk_out.meta_grad, chunk_opt, meta_params)
+
+        # Scatter updated chunk back into the stacked pool state
+        self.pool.meta_opt_state = jax.tree.map(
+            lambda dst, src: dst.at[start:end].set(src),
+            self.pool.meta_opt_state,
+            new_chunk_opt,
+        )
+
+        # Sum per-trainer normed gradients into the running meta-grad accumulator
+        accumulated_grad = jax.tree.map(
+            lambda acc, g: acc + g.sum(axis=0),
+            accumulated_grad,
+            normed_grads_stack,
+        )
+
+        # Per-trainer host-side bookkeeping (hidden state + metric logging)
         chunk_size = end - start
         for i in range(chunk_size):
             idx = start + i
 
-            # Update disco/meta hidden states
             self.state = self.state.update_hidden(
                 idx,
                 chunk_out.disco_h[i].copy(),
                 chunk_out.meta_h[i].copy(),
             )
 
-            # Norm gradient via per-trainer optimizer
-            meta_grad_i = unstack_pytree(chunk_out.meta_grad, i)
-            normed_grad, new_meta_opt_state = self.pool.meta_optim_updates[idx](
-                meta_grad_i,
-                self.pool.meta_opt_states[idx],
-                meta_params,
-            )
-            self.pool.meta_opt_states[idx] = new_meta_opt_state
-
-            accumulated_grad = jax.tree.map(
-                lambda acc, g: acc + g,
-                accumulated_grad,
-                normed_grad,
-            )
-
-            # Log metrics
             self._log_meta_metrics(
                 idx,
                 log_data.pg_loss[i],
@@ -1355,9 +1414,9 @@ class RuleTrainer:
                 self._get_rollouts()
                 jax.effects_barrier()  # flush async ops
 
-                # Process all chunks
-                for start in range(0, self.num_trainers, self.max_group_size):
-                    end = min(start + self.max_group_size, self.num_trainers)
+                # Process all chunks — uniform size via `_chunk_size`
+                for start in range(0, self.num_trainers, self._chunk_size):
+                    end = start + self._chunk_size
                     chunk_envs = self.pool.env_names[start:end]
 
                     self.console.update_progress(
@@ -1579,27 +1638,27 @@ class RuleTrainer:
         """
         Compute DiscoNetwork cell diagnostics averaged across all trainers.
 
-        For each trainer, computes diagnostics from the current disco
-        hidden state, then averages scalar metrics across the trainer
-        population. Results are logged to per-layer TensorBoard writers
-        under `disco/` so that layers overlay on the same charts.
+        Stacks per-trainer disco hidden states into one `(P, B, H)`
+        tensor and vmaps `diagnostics` across the population — one JAX
+        dispatch instead of `num_trainers` sequential ones. Averages
+        scalar outputs over the population axis and logs to per-layer
+        TensorBoard writers under `disco/`.
         """
-        # Accumulate per-trainer diagnostics
-        accum: Dict[str, List[float]] = defaultdict(list)
-
         disco_in_features = self.meta_agent._disco_net.in_features
 
-        for i in range(self.num_trainers):
-            disco_h, _ = self.state.hidden.get(i)
-            batch_size = jnp.shape(disco_h)[0]
-            x = jnp.zeros((batch_size, disco_in_features))
+        stacked_h = jnp.stack(
+            [self.state.hidden.get(i)[0] for i in range(self.num_trainers)]
+        )  # (P, B, H_disco)
+        P = stacked_h.shape[0]
+        batch_size = stacked_h.shape[1]
+        x = jnp.zeros((P, batch_size, disco_in_features))
 
-            diag = self.meta_agent._disco_net.diagnostics(x, disco_h)
-            for key, value in diag.items():
-                accum[key].append(value)
+        diag_stacked = jax.vmap(self.meta_agent._disco_net.diagnostics)(
+            x, stacked_h
+        )
+        averaged_tree = jax.tree.map(lambda v: jnp.mean(v), diag_stacked)
+        averaged: Dict[str, float] = jax.device_get(averaged_tree)
 
-        # Average across trainers and log to per-layer writers
-        averaged = {key: sum(vals) / len(vals) for key, vals in accum.items()}
         self.logger.log_group("disco", self.state.meta_step, averaged)
 
     def _apply_meta_update(self, avg_grad: chex.ArrayTree) -> None:
@@ -1741,12 +1800,13 @@ class RuleTrainer:
         self.key, new_key = jax.random.split(self.key, 2)
 
         # Init new trainer
+        key = self._trainer_env_keys[trainer_idx]
         new_trainer = self._create_trainer(
             env_name,
             self.config.agent_trainer_config(),
             key=new_key,
-            obs_space=self.multi_vec_env.single_observation_spaces[trainer_idx],  # type: ignore[arg-type]
-            action_space=self.multi_vec_env.single_action_spaces[trainer_idx],  # type: ignore[arg-type]
+            obs_space=self.multi_env.observation_spaces[key],  # type: ignore[arg-type]
+            action_space=self.multi_env.action_spaces[key],  # type: ignore[arg-type]
         )
 
         # Init fresh per-trainer meta-gradient optimizer
