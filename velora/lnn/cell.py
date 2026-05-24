@@ -315,10 +315,10 @@ class NCPLiquidCell(nnx.Module):
         gate = self.sigmoid(fh_g + fh_h)  # ts=1.0
 
         return {
-            f"{name}/gate_mean": float(jnp.mean(gate)),
-            f"{name}/gate_std": float(jnp.std(gate)),
-            f"{name}/gate_min": float(jnp.min(gate)),
-            f"{name}/gate_max": float(jnp.max(gate)),
+            f"{name}/gate_mean": jnp.mean(gate),
+            f"{name}/gate_std": jnp.std(gate),
+            f"{name}/gate_min": jnp.min(gate),
+            f"{name}/gate_max": jnp.max(gate),
         }
 
 
@@ -440,10 +440,10 @@ class DecayLiquidCell(NCPLiquidCell):
         alpha = self.sigmoid(self.alpha_up(self.tanh(self.alpha_down(x_cat))))
 
         return {
-            f"{name}/alpha_mean": float(jnp.mean(alpha)),
-            f"{name}/alpha_std": float(jnp.std(alpha)),
-            f"{name}/alpha_min": float(jnp.min(alpha)),
-            f"{name}/alpha_max": float(jnp.max(alpha)),
+            f"{name}/alpha_mean": jnp.mean(alpha),
+            f"{name}/alpha_std": jnp.std(alpha),
+            f"{name}/alpha_min": jnp.min(alpha),
+            f"{name}/alpha_max": jnp.max(alpha),
         }
 
 
@@ -542,9 +542,9 @@ class DeltaErasureLiquidCell(NCPLiquidCell):
         recon_error = jnp.mean(jnp.abs(expected - hidden))
 
         return {
-            f"{name}/beta_mean": float(jnp.mean(beta)),
-            f"{name}/beta_std": float(jnp.std(beta)),
-            f"{name}/reconstruction_error": float(recon_error),
+            f"{name}/beta_mean": jnp.mean(beta),
+            f"{name}/beta_std": jnp.std(beta),
+            f"{name}/reconstruction_error": recon_error,
         }
 
 
@@ -699,11 +699,11 @@ class AdaptiveLiquidCell(NCPLiquidCell):
         alpha = self.sigmoid(self.alpha_up(self.tanh(self.alpha_down(x_corrected))))
 
         return {
-            f"{name}/alpha_mean": float(jnp.mean(alpha).item()),
-            f"{name}/alpha_std": float(jnp.std(alpha).item()),
-            f"{name}/alpha_min": float(jnp.min(alpha).item()),
-            f"{name}/alpha_max": float(jnp.max(alpha).item()),
-            f"{name}/beta_mean": float(jnp.mean(beta).item()),
-            f"{name}/beta_std": float(jnp.std(beta).item()),
-            f"{name}/reconstruction_error": float(recon_error.item()),
+            f"{name}/alpha_mean": jnp.mean(alpha),
+            f"{name}/alpha_std": jnp.std(alpha),
+            f"{name}/alpha_min": jnp.min(alpha),
+            f"{name}/alpha_max": jnp.max(alpha),
+            f"{name}/beta_mean": jnp.mean(beta),
+            f"{name}/beta_std": jnp.std(beta),
+            f"{name}/reconstruction_error": recon_error,
         }
