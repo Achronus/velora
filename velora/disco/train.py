@@ -66,7 +66,6 @@ from velora.disco.utils.loss import (
     compute_meta_reg_loss,
     compute_policy_loss,
 )
-from velora.disco.warm import WarmCompile
 from velora.nn.optim import scale_by_adan_no_denom
 from velora.tracking.episode import EpisodeTracker
 from velora.tracking.logger import MetricsLogger, RuntimeLogger
@@ -443,7 +442,8 @@ class RuleTrainer:
         self.num_envs = len(self._unique_env_names)
         self.num_trainers = len(self._env_specs)
 
-        self.n_steps = config.n_meta_steps(self.num_trainers)
+        # +1 for the warm step
+        self.n_steps = config.n_meta_steps(self.num_trainers) + 1
         self._budget_rng = random.Random(seed)
 
         # Store params
@@ -646,7 +646,7 @@ class RuleTrainer:
         trainer_keys : List[chex.PRNGKey]
             List of trainer random number generated keys
         """
-        setup_total = 2 * self.num_trainers + 7
+        setup_total = 2 * self.num_trainers + 2
         self.console.start_setup(setup_total)
 
         # Build trainers
@@ -709,23 +709,12 @@ class RuleTrainer:
         )
         self.console.update_setup()
 
-        # Pre-compile all JAX kernels so train() starts warm
-        self._meta_optim_update = WarmCompile(self).run()
-
-        # Warm all remaining eager JAX ops that run outside vmapped_fn
-        _meta_params = self.meta_agent.get_params()
-        _dummy_grad = jax.tree.map(jnp.zeros_like, _meta_params)
-
-        _updates, _ = self._meta_optim_update(
-            _dummy_grad,
-            self.state.meta_opt_state,
-            _meta_params,
+        # Build shared meta-optim update fn
+        self._meta_optim_update = (
+            jax.jit(self.meta_optim.update)
+            if self.jit_compile
+            else self.meta_optim.update
         )
-        _ = optax.apply_updates(_meta_params, _updates)
-        _ = jax.tree.map(lambda g: g / self.num_trainers, _dummy_grad)
-        _ = optax.global_norm(_dummy_grad)
-
-        self.console.update_setup()
         jax.effects_barrier()
 
     def _build_batch_grad_fn(self) -> Callable:
@@ -1378,6 +1367,74 @@ class RuleTrainer:
 
         return accumulated_grad
 
+    def _meta_step(self) -> None:
+        """
+        One meta-training step.
+
+        Collects rollouts from all trainers via batched vmapped forward
+        passes, chunks the population for vmapped meta-gradient
+        computation, averages the per-trainer gradients, and applies the
+        result through the shared meta-optimizer. Logs scalar metrics,
+        ticks the dashboard, and saves a checkpoint if `config.freq`
+        elapsed.
+        """
+        stats = MetaStepStats(self.num_trainers)
+        meta_params = self.meta_agent.get_params()
+
+        accumulated_grad = jax.tree.map(jnp.zeros_like, meta_params)
+
+        self._get_rollouts()
+        jax.effects_barrier()  # flush async ops
+
+        # Process all chunks — uniform size via `_chunk_size`
+        for start in range(0, self.num_trainers, self._chunk_size):
+            end = start + self._chunk_size
+            chunk_envs = self.pool.env_names[start:end]
+
+            self.console.update_progress(
+                "Inner Updates",
+                chunk_size=end - start,
+                env_names=chunk_envs,
+            )
+
+            # Compute gradients for this chunk
+            accumulated_grad = self._process_chunk(
+                start,
+                end,
+                meta_params,
+                accumulated_grad,
+                stats,
+            )
+
+        # Apply average gradients through single shared optimizer
+        avg_grad = jax.tree.map(
+            lambda g: g / self.num_trainers,
+            accumulated_grad,
+        )
+        del accumulated_grad  # Free before meta update allocates
+        self._apply_meta_update(avg_grad)
+
+        # Log metrics
+        grad_norm = float(optax.global_norm(avg_grad))
+
+        metrics = {"meta/grad_norm": grad_norm}
+        self.logger.log("meta", self.state.meta_step, metrics)
+        self._compute_diagnostics()
+
+        self.console.update_stats(**stats.rewards_as_dict())
+        self.console.update_losses(
+            **stats.losses_as_dict(),
+            gradient_norm=grad_norm,
+        )
+
+        # Checkpoint periodically
+        self.save_checkpoint()
+        self.console.update_progress("Meta Steps")
+
+        # Cleanup
+        del avg_grad, stats
+        jax.effects_barrier()
+
     def train(self) -> None:
         """
         Performs meta-training loop to discover an RL update rule.
@@ -1398,7 +1455,7 @@ class RuleTrainer:
 
         2. Log metrics and checkpoints periodically
         """
-        # Setup - build trainers, warm networks, compile gradient functions
+        # Setup - build trainers, networks, gradient functions
         self._initial_setup(self.trainer_keys)
         self.console.finish_setup()
 
@@ -1406,63 +1463,7 @@ class RuleTrainer:
 
         try:
             for _ in range(self.state.meta_step, self.n_steps):
-                stats = MetaStepStats(self.num_trainers)
-                meta_params = self.meta_agent.get_params()
-
-                accumulated_grad = jax.tree.map(jnp.zeros_like, meta_params)
-
-                self._get_rollouts()
-                jax.effects_barrier()  # flush async ops
-
-                # Process all chunks — uniform size via `_chunk_size`
-                for start in range(0, self.num_trainers, self._chunk_size):
-                    end = start + self._chunk_size
-                    chunk_envs = self.pool.env_names[start:end]
-
-                    self.console.update_progress(
-                        "Inner Updates",
-                        chunk_size=end - start,
-                        env_names=chunk_envs,
-                    )
-
-                    # Compute gradients for this chunk
-                    accumulated_grad = self._process_chunk(
-                        start,
-                        end,
-                        meta_params,
-                        accumulated_grad,
-                        stats,
-                    )
-
-                # Apply average gradients through single shared optimizer
-                avg_grad = jax.tree.map(
-                    lambda g: g / self.num_trainers,
-                    accumulated_grad,
-                )
-                del accumulated_grad  # Free before meta update allocates
-                self._apply_meta_update(avg_grad)
-
-                # Log metrics
-                grad_norm = float(optax.global_norm(avg_grad))
-
-                metrics = {"meta/grad_norm": grad_norm}
-                self.logger.log("meta", self.state.meta_step, metrics)
-                self._compute_diagnostics()
-
-                self.console.update_stats(**stats.rewards_as_dict())
-                self.console.update_losses(
-                    **stats.losses_as_dict(),
-                    gradient_norm=grad_norm,
-                )
-
-                # Checkpoint periodically
-                self.save_checkpoint()
-                self.console.update_progress("Meta Steps")
-
-                # Cleanup
-                del avg_grad, stats
-                jax.effects_barrier()
-
+                self._meta_step()
         except (KeyboardInterrupt, SystemExit):
             exit()
         finally:
@@ -1653,9 +1654,7 @@ class RuleTrainer:
         batch_size = stacked_h.shape[1]
         x = jnp.zeros((P, batch_size, disco_in_features))
 
-        diag_stacked = jax.vmap(self.meta_agent._disco_net.diagnostics)(
-            x, stacked_h
-        )
+        diag_stacked = jax.vmap(self.meta_agent._disco_net.diagnostics)(x, stacked_h)
         averaged_tree = jax.tree.map(lambda v: jnp.mean(v), diag_stacked)
         averaged: Dict[str, float] = jax.device_get(averaged_tree)
 
