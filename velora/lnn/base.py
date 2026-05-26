@@ -38,7 +38,7 @@ class BaseCfC(nnx.Module):
     Designed to be used as a backbone for LNN model creation with method overrides.
 
     Required method overrides -
-        - `_build_wiring()` - set the network wiring with `N` output heads using the `NCPWiringBuilder` class
+        - `_build_wiring()` - set the network wiring with `N` output heads using `build_ncp_wiring()`
 
     Optional method overrides -
         - `_preprocess` - performs preprocessing techniques on network inputs
@@ -311,18 +311,13 @@ class BaseCfC(nnx.Module):
         Creating wiring with 1 output head:
         ```python
         def _build_wiring(self) -> NCPWiringSpec:
-            return (
-                NCPWiringBuilder(
-                    self.in_features,
-                    self.n_neurons,
-                    seed=self.seed,
-                    sparsity=self.sparsity,
-                )
-                .add_output_heads(
-                    SingleHeadSpec,
-                    out=self.out_features,
-                )
-                .build()
+            return build_ncp_wiring(
+                self.in_features,
+                self.n_neurons,
+                SingleHeadSpec,
+                seed=self.seed,
+                sparsity=self.sparsity,
+                out=self.out_features,
             )
         ```
         """

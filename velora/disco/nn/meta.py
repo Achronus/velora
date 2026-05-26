@@ -23,7 +23,7 @@ from velora.disco.config.spec import DiscoHeadSpec
 from velora.disco.outputs import DiscoPredictions
 from velora.lnn.base import BaseCfC
 from velora.lnn.spec import NCPWiringSpec
-from velora.lnn.wiring import NCPWiringBuilder
+from velora.lnn.wiring import build_ncp_wiring
 
 
 class DiscoNetwork(BaseCfC):
@@ -94,20 +94,15 @@ class DiscoNetwork(BaseCfC):
         )
 
     def _build_wiring(self) -> NCPWiringSpec:
-        return (
-            NCPWiringBuilder(
-                self.in_features,
-                self.n_neurons,
-                seed=self.seed,
-                sparsity=self.sparsity,
-            )
-            .add_output_heads(
-                DiscoHeadSpec,
-                pi=self.pred_size,
-                y=self.pred_size,
-                z=self.pred_size,
-            )
-            .build()
+        return build_ncp_wiring(
+            self.in_features,
+            self.n_neurons,
+            DiscoHeadSpec,
+            seed=self.seed,
+            sparsity=self.sparsity,
+            pi=self.pred_size,
+            y=self.pred_size,
+            z=self.pred_size,
         )
 
     def __call__(

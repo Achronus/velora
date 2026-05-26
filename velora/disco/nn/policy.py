@@ -23,7 +23,7 @@ from velora.disco.config.spec import ACMHeadSpec, OCMHeadSpec
 from velora.disco.outputs import ACMPredictions, OCMPredictions
 from velora.lnn.base import BaseCfC
 from velora.lnn.spec import NCPWiringSpec
-from velora.lnn.wiring import NCPWiringBuilder
+from velora.lnn.wiring import build_ncp_wiring
 
 
 
@@ -82,19 +82,14 @@ class OCM(BaseCfC):
         self.embedding_size = self.wiring.command.n_hidden
 
     def _build_wiring(self) -> NCPWiringSpec:
-        return (
-            NCPWiringBuilder(
-                self.in_features,
-                self.n_neurons,
-                seed=self.seed,
-                sparsity=self.sparsity,
-            )
-            .add_output_heads(
-                OCMHeadSpec,
-                pi=self.pi_hidden_dim,
-                y=self.y_dim,
-            )
-            .build()
+        return build_ncp_wiring(
+            self.in_features,
+            self.n_neurons,
+            OCMHeadSpec,
+            seed=self.seed,
+            sparsity=self.sparsity,
+            pi=self.pi_hidden_dim,
+            y=self.y_dim,
         )
 
     def __call__(
@@ -208,20 +203,15 @@ class ACM(BaseCfC):
         )
 
     def _build_wiring(self) -> NCPWiringSpec:
-        return (
-            NCPWiringBuilder(
-                self.in_features,
-                self.n_neurons,
-                seed=self.seed,
-                sparsity=self.sparsity,
-            )
-            .add_output_heads(
-                ACMHeadSpec,
-                z=self.z_dim,
-                aux_pi=self.aux_pi_dim,
-                q=self.q_dim,
-            )
-            .build()
+        return build_ncp_wiring(
+            self.in_features,
+            self.n_neurons,
+            ACMHeadSpec,
+            seed=self.seed,
+            sparsity=self.sparsity,
+            z=self.z_dim,
+            aux_pi=self.aux_pi_dim,
+            q=self.q_dim,
         )
 
     def __call__(

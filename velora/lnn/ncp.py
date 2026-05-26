@@ -23,7 +23,7 @@ from velora.lnn.base import BaseCfC
 from velora.lnn.cell import CellConfig
 from velora.lnn.constants import DEFAULT_HIDDEN_INIT
 from velora.lnn.spec import NCPWiringSpec, SingleHeadSpec
-from velora.lnn.wiring import NCPWiringBuilder
+from velora.lnn.wiring import build_ncp_wiring
 
 
 class LNN(BaseCfC):
@@ -106,18 +106,13 @@ class LNN(BaseCfC):
         )
 
     def _build_wiring(self) -> NCPWiringSpec:
-        return (
-            NCPWiringBuilder(
-                self.in_features,
-                self.n_neurons,
-                seed=self.seed,
-                sparsity=self.sparsity,
-            )
-            .add_output_heads(
-                SingleHeadSpec,
-                out=self.out_features,
-            )
-            .build()
+        return build_ncp_wiring(
+            self.in_features,
+            self.n_neurons,
+            SingleHeadSpec,
+            seed=self.seed,
+            sparsity=self.sparsity,
+            out=self.out_features,
         )
 
     def __call__(
