@@ -33,8 +33,6 @@ class RuleTrainerMetadata(CheckpointMetadata):
         Serialized `RuleTrainerSettings`
     agents_per_env : int
         Number of independent agent trainers per environment
-    max_group_size : int
-        Maximum trainers vmapped per chunk
     seed : int
         Random number generator seed
     env_names : List[str]
@@ -58,7 +56,6 @@ class RuleTrainerMetadata(CheckpointMetadata):
 
     config: Dict[str, Any]
     agents_per_env: int
-    max_group_size: int
     seed: int
     env_names: List[str]
     env_categories: Dict[str, int]

@@ -28,7 +28,7 @@ from velora.disco.rollouts import Rollout
 @partial(
     jax.jit,
     static_argnames=(
-        "chunk_size",
+        "num_trainers",
         "n_updates",
         "n_fresh_per_update",
         "n_replay_per_update",
@@ -41,8 +41,7 @@ def _sample_compiled(
     write_idx: jax.Array,
     valid_count: jax.Array,
     rng: chex.PRNGKey,
-    start: jax.Array,
-    chunk_size: int,
+    num_trainers: int,
     n_updates: int,
     n_fresh_per_update: int,
     n_replay_per_update: int,
@@ -52,25 +51,16 @@ def _sample_compiled(
     """
     JIT'd body of `MixedBuffer.sample`. Lifted to module scope so the
     function identity is stable across calls — JAX caches the compile
-    once instead of re-tracing every chunk.
+    once instead of re-tracing every meta-step.
 
-    `start` is a dynamic `int32` scalar so the same compiled program
-    handles every chunk start without re-compilation.
+    Vmaps over the full leading `num_trainers` axis in one program;
+    chunking was removed in the Phase 2 throughput refactor.
     """
-    chunk_storage = jax.tree.map(
-        lambda x: jax.lax.dynamic_slice_in_dim(x, start, chunk_size, axis=0),
-        storage,
-    )
-    chunk_valid_count = jax.lax.dynamic_slice_in_dim(
-        valid_count, start, chunk_size, axis=0
-    )
-
-    # Fresh indices — scalar write_idx, shared across all agents
     fresh_offsets = jnp.arange(n_fresh_per_meta)
     fresh_indices = (write_idx - n_fresh_per_meta + fresh_offsets) % capacity
     fresh_indices = fresh_indices.reshape(n_updates, n_fresh_per_update)
 
-    chunk_rngs = jax.random.split(rng, chunk_size)
+    rngs = jax.random.split(rng, num_trainers)
 
     def _sample_one(
         agent_storage: Rollout,
@@ -87,7 +77,7 @@ def _sample_compiled(
         all_indices = jnp.concatenate([fresh_indices, replay_indices], axis=1)
         return jax.tree.map(lambda x: x[all_indices], agent_storage)
 
-    return jax.vmap(_sample_one)(chunk_storage, chunk_valid_count, chunk_rngs)
+    return jax.vmap(_sample_one)(storage, valid_count, rngs)
 
 
 @struct.dataclass
@@ -102,7 +92,7 @@ class MixedBuffer:
 
     Shape symbols
     -------------
-    - `P` / `C` - total trainer count / chunk trainer count.
+    - `P` - total trainer count.
     - `capacity` - per-agent ring slots.
     - `T` - timesteps per trajectory.
 
@@ -243,22 +233,17 @@ class MixedBuffer:
     def sample(
         self,
         rng: chex.PRNGKey,
-        start: int,
-        end: int,
         n_updates: int,
         batch_size: int,
     ) -> Rollout:
         """
-        Build a `(C, n_updates, batch_size, T, *)` mixed batch chunk.
+        Build a `(P, n_updates, batch_size, T, *)` mixed batch covering
+        every agent in one vmapped pass.
 
         Parameters
         ----------
         rng : chex.PRNGKey
             JAX PRNG key — split per agent for independent replay draws.
-        start : int
-            First trainer index (inclusive).
-        end : int
-            Last trainer index (exclusive).
         n_updates : int
             Number of per-update batches to produce (`N`).
         batch_size : int
@@ -266,22 +251,21 @@ class MixedBuffer:
 
         Returns
         -------
-        chunk : Rollout
-            Sampled mixed batch, each leaf shaped
-            `(C, n_updates, batch_size, T, *)`.
+        batches : Rollout
+            Sampled mixed batches, each leaf shaped
+            `(P, n_updates, batch_size, T, *)`.
         """
         n_fresh_per_update = max(1, round(batch_size * (1.0 - self.replay_ratio)))
         n_fresh_per_meta = n_updates * n_fresh_per_update
         n_replay_per_update = batch_size - n_fresh_per_update
-        chunk_size = end - start
+        num_trainers = self.storage.actions.shape[0]
 
         return _sample_compiled(
             self.storage,
             self.write_idx,
             self.valid_count,
             rng,
-            jnp.asarray(start, dtype=jnp.int32),
-            chunk_size,
+            num_trainers,
             n_updates,
             n_fresh_per_update,
             n_replay_per_update,

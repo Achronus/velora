@@ -419,9 +419,11 @@ class TrainingProgressCard(ProgressComponent):
     Parameters
     ----------
     tasks : List[Tuple[str, int]]
-        A list of tuples containing `(description, total)`.
-        First task acts as a progress bar and additional tasks are sub-components
-        underneath it
+        A list of tuples containing `(description, total)`. The first
+        task always acts as the main progress bar. An optional second
+        task drives the inner chunk sub-component rendered beneath the
+        main bar (used by trainers that process trainers in chunks).
+        Trainers without chunked progress should pass a single-task list.
     total : int
         Total number of steps
     colour : str (optional)
@@ -451,7 +453,8 @@ class TrainingProgressCard(ProgressComponent):
         self._current_chunk_index: int = 0
         self._current_env_names: List[str] = []
 
-        self._inner_total: int = tasks[1][1]
+        self._has_inner: bool = len(tasks) > 1
+        self._inner_total: int = tasks[1][1] if self._has_inner else 0
         self._inner_count: int = 0
 
         super().__init__(colour=colour, complete_colour=complete_colour)
@@ -491,9 +494,10 @@ class TrainingProgressCard(ProgressComponent):
         if task_id is not None:
             # First task
             self.progress.update(task_id, advance=advance)
-            self.reset(self._tasks[1][0])
+            if self._has_inner:
+                self.reset(self._tasks[1][0])
 
-        elif description == self._tasks[1][0]:
+        elif self._has_inner and description == self._tasks[1][0]:
             # Second task
             self._inner_count = min(self._inner_count + advance, self._inner_total)
 
@@ -511,7 +515,7 @@ class TrainingProgressCard(ProgressComponent):
         description : str
             The task to update
         """
-        if description == self._tasks[1][0]:
+        if self._has_inner and description == self._tasks[1][0]:
             self._inner_count = 0
             self._current_chunk_size = None
             self._current_chunk_index = 0

@@ -492,13 +492,36 @@ class RuleTrainerSettings:
     replay_capacity: int = 1000
 
     @property
+    def n_fresh_per_update(self) -> int:
+        """
+        Fresh on-policy trajectories drawn from the most-recent slice of
+        the replay buffer per agent update (`1 - replay_ratio` share of
+        each batch, rounded, lower-bounded at 1).
+        """
+        return max(1, round(self.batch_size * (1.0 - self.replay_ratio)))
+
+    @property
+    def n_fresh_per_meta(self) -> int:
+        """
+        Fresh on-policy trajectories collected per agent per meta-step.
+
+        DiscoRL mixes each agent-update batch as `replay_ratio` replay +
+        `(1 - replay_ratio)` on-policy. Across `n_updates` inner updates,
+        this is `n_updates * n_fresh_per_update`. The training collect
+        must write exactly this many trajectories so the buffer's
+        "fresh" slice is genuinely on-policy.
+        """
+        return self.n_updates * self.n_fresh_per_update
+
+    @property
     def steps_per_meta(self) -> int:
         """
         Environment steps consumed per trainer per meta-step.
 
-        Formula: `N * T + 2T` (inner loop + validation rollout).
+        Formula: `n_fresh_per_meta * T + 2T` (on-policy collect +
+        validation rollout).
         """
-        return self.n_updates * self.seq_len + self.seq_len * 2
+        return self.n_fresh_per_meta * self.seq_len + self.seq_len * 2
 
     def n_meta_steps(self, num_trainers: int) -> int:
         """
@@ -566,7 +589,7 @@ class RuleTrainerSettings:
         self,
         envs: Dict[str, int],
         num_trainers: int,
-        n_chunks: int,
+        n_steps: int,
         params: DiscoParamsSettings,
         complete_path: str,
         jit_compile: bool,
@@ -581,8 +604,8 @@ class RuleTrainerSettings:
             Mapping of environment category names to counts
         num_trainers : int
             Number of agent trainers
-        n_chunks : int
-            Number of trainer chunks per meta-step
+        n_steps : int
+            Total meta-step iterations the training loop will run
         params : DiscoParamsSettings
             Parameter counts for each agent type
         complete_path : str
@@ -598,13 +621,12 @@ class RuleTrainerSettings:
             Configuration for `DiscoConsoleDashboard`
         """
         return DiscoDashboardSettings(
-            meta_steps=self.n_meta_steps(num_trainers),
+            meta_steps=n_steps,
             n_updates=self.n_updates,
             seq_len=self.seq_len,
             batch_size=self.batch_size,
             n_agents=num_trainers,
             total_steps=self.total_env_steps,
-            n_chunks=n_chunks,
             log_dir=str(self.run.log_dir),
             cp_dir=str(self.run.checkpoint_dir),
             env_categories=envs,

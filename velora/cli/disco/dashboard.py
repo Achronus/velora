@@ -54,10 +54,7 @@ class DiscoConsoleDashboard(ConsoleDashboard):
         title = TitleCard("DiscoRL: Rule Training")
         body = self._body()
         progress = TrainingProgressCard(
-            tasks=[
-                ("Meta Steps", config.meta_steps),
-                ("Inner Updates", config.n_chunks),
-            ],
+            tasks=[("Meta Steps", config.meta_steps)],
             total=config.meta_steps,
             complete_path=self.config.complete_path,
         )

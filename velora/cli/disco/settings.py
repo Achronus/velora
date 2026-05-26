@@ -110,8 +110,6 @@ class DiscoDashboardSettings:
         Number of agents in the population
     total_steps : int
         Total number of training steps
-    n_chunks : int
-        Number of trainer chunks per meta-step
     log_dir : str
         Directory path for Tensorboard logs
     cp_dir : str
@@ -134,7 +132,6 @@ class DiscoDashboardSettings:
     batch_size: int
     n_agents: int
     total_steps: int
-    n_chunks: int
 
     log_dir: str
     cp_dir: str

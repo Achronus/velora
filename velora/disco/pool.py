@@ -34,49 +34,6 @@ if TYPE_CHECKING:
     from velora.disco.train import AgentTrainer
 
 
-@partial(jax.jit, donate_argnums=(0, 1, 2, 3, 4, 5))
-def _scatter_chunk_to_pool(
-    p_params: chex.ArrayTree,
-    v_params: chex.ArrayTree,
-    t_params: chex.ArrayTree,
-    v_opt: chex.ArrayTree,
-    adv_ema: chex.ArrayTree,
-    td_ema: chex.ArrayTree,
-    chunk_p_params: chex.ArrayTree,
-    chunk_v_params: chex.ArrayTree,
-    chunk_v_opt: chex.ArrayTree,
-    chunk_adv_ema: chex.ArrayTree,
-    chunk_td_ema: chex.ArrayTree,
-    start: jax.Array,
-) -> Tuple[
-    chex.ArrayTree,
-    chex.ArrayTree,
-    chex.ArrayTree,
-    chex.ArrayTree,
-    chex.ArrayTree,
-    chex.ArrayTree,
-]:
-    """
-    Scatter a chunk's gradient outputs into the pool's stacked arrays.
-
-    Lifted to module scope + JIT so every leaf scatter fuses into one
-    XLA program per call (instead of ~250 eager dispatches per chunk).
-    `start` is a dynamic `int32` scalar — same compile services every
-    chunk start. Donates buffers so XLA can update in place.
-    """
-
-    def _set(dst: jax.Array, src: jax.Array) -> jax.Array:
-        return jax.lax.dynamic_update_slice_in_dim(dst, src, start, axis=0)
-
-    new_p = jax.tree.map(_set, p_params, chunk_p_params)
-    new_v = jax.tree.map(_set, v_params, chunk_v_params)
-    new_t = jax.tree.map(_set, t_params, chunk_p_params)
-    new_v_opt = jax.tree.map(_set, v_opt, chunk_v_opt)
-    new_adv = jax.tree.map(_set, adv_ema, chunk_adv_ema)
-    new_td = jax.tree.map(_set, td_ema, chunk_td_ema)
-    return new_p, new_v, new_t, new_v_opt, new_adv, new_td
-
-
 @struct.dataclass
 class CollectCarry:
     """
@@ -160,8 +117,6 @@ class TrainerPool:
         Pre-computed action dimension masks keyed by `action_dim`
     hidden_shapes : HiddenShapeCache
         Cached hidden state shapes for zero-initialization
-    n_updates : int
-        Number of training rollouts per collection phase
     seq_len : int
         Timesteps per rollout
     encoding_dim : int
@@ -187,7 +142,6 @@ class TrainerPool:
         max_action_dim: int,
         action_masks: Dict[int, jax.Array],
         hidden_shapes: HiddenShapeCache,
-        n_updates: int,
         seq_len: int,
         encoding_dim: int,
         prediction_dim: int,
@@ -290,6 +244,125 @@ class TrainerPool:
             dtype=jnp.float32,
         )
 
+        # Build the JIT-cached collect kernel
+        self._compiled_collect = self._build_collect_kernel()
+
+    def _build_collect_kernel(self) -> Callable:
+        """
+        Compile the collection scan once, return the cached kernel.
+
+        The kernel closes over `self` so it has access to `multi_env`,
+        `_pack_obs`, `_unpack_actions`, and `_env_keys` without making
+        them traced arguments. Static args (`batched_forward_fn`,
+        `total_steps`, `seq_len`) gate the JIT cache so the training
+        (`n_updates * seq_len`) and validation (`2 * seq_len`) variants
+        each compile to their own program once and are then reused.
+        """
+        multi_env = self.multi_env
+        pack_obs = self._pack_obs
+        unpack_actions = self._unpack_actions
+        env_keys = self._env_keys
+
+        @partial(
+            jax.jit,
+            static_argnames=("batched_forward_fn", "total_steps", "seq_len"),
+        )
+        def collect_kernel(
+            batched_forward_fn: Callable,
+            init_carry: CollectCarry,
+            total_steps: int,
+            seq_len: int,
+            slot_indices: jax.Array,
+            p_params: chex.ArrayTree,
+            t_params: chex.ArrayTree,
+            v_params: chex.ArrayTree,
+            action_masks: jax.Array,
+        ) -> Tuple[CollectCarry, jax.Array, jax.Array]:
+            def _step_body(
+                carry: CollectCarry, _
+            ) -> Tuple[CollectCarry, Tuple[jax.Array, jax.Array]]:
+                (
+                    preds,
+                    target_preds,
+                    values,
+                    new_p_ocm_h,
+                    new_p_acm_h,
+                    new_t_ocm_h,
+                    new_t_acm_h,
+                    new_v_h,
+                ) = batched_forward_fn(
+                    carry.obs,
+                    carry.prev_actions,
+                    p_params,
+                    t_params,
+                    v_params,
+                    carry.p_ocm_h,
+                    carry.p_acm_h,
+                    carry.t_ocm_h,
+                    carry.t_acm_h,
+                    carry.v_h,
+                    action_masks,
+                )
+
+                rng, noise_rng = jax.random.split(carry.rng)
+                mu = preds.mu
+                log_std = preds.log_std
+                std = jnp.exp(log_std)
+                noise = jax.random.normal(noise_rng, mu.shape)
+                actions = (mu + std * noise).astype(jnp.float32)
+
+                actions_per_group = unpack_actions(actions)
+                obs_dict, new_env_states, rewards_dict, dones_dict, _ = multi_env.step(
+                    carry.env_states, actions_per_group
+                )
+                new_obs = pack_obs(obs_dict)
+                rewards = jnp.stack([rewards_dict[k] for k in env_keys], axis=0)[
+                    ..., None
+                ]
+                dones = jnp.stack([dones_dict[k] for k in env_keys], axis=0)
+                discounts = jnp.where(dones[:, None], 0.0, 1.0)
+
+                rollout_idx = carry.write_idx // seq_len
+                step_idx = carry.write_idx % seq_len
+                slot_idx = slot_indices[rollout_idx]
+                new_buf = carry.buf.write_step(
+                    slot_idx,
+                    step_idx,
+                    squeeze_time(actions),
+                    rewards,
+                    discounts,
+                    squeeze_time(values),
+                    jax.tree.map(squeeze_time, preds),
+                    jax.tree.map(squeeze_time, target_preds),
+                )
+
+                mask = discounts[:, :, None]
+
+                new_carry = CollectCarry(
+                    obs=new_obs,
+                    env_states=new_env_states,
+                    prev_actions=actions * mask,
+                    p_ocm_h=new_p_ocm_h * mask,
+                    p_acm_h=new_p_acm_h * mask,
+                    t_ocm_h=new_t_ocm_h * mask,
+                    t_acm_h=new_t_acm_h * mask,
+                    v_h=new_v_h * mask,
+                    rng=rng,
+                    write_idx=carry.write_idx + 1,
+                    buf=new_buf,
+                )
+                return new_carry, (rewards.squeeze(-1), dones)
+
+            final_carry, (all_rewards, all_dones) = jax.lax.scan(
+                _step_body,
+                init_carry,
+                None,
+                length=total_steps,
+            )
+            return final_carry, all_rewards, all_dones
+
+        return collect_kernel
+
     def _init_hidden(self, trainers: List["AgentTrainer"]) -> None:
         """
         Stack collection hidden states from trainers, replacing `None`
@@ -342,144 +415,6 @@ class TrainerPool:
     def needs_reset(self, idx: int) -> bool:
         """Check if trainer at `idx` has exhausted its lifetime budget."""
         return self._env_steps[idx] >= self._step_budgets[idx]
-
-    def _compiled_collect(
-        self,
-        batched_forward_fn: Callable,
-        init_carry: CollectCarry,
-        total_steps: int,
-        seq_len: int,
-        slot_indices: jax.Array,
-        p_params: chex.ArrayTree,
-        t_params: chex.ArrayTree,
-        v_params: chex.ArrayTree,
-        action_masks: jax.Array,
-    ) -> Tuple[CollectCarry, jax.Array, jax.Array]:
-        """
-        Run the full collection phase as one `jax.lax.scan`.
-
-        Parameters
-        ----------
-        batched_forward_fn : Callable
-            JIT + vmap'd forward function — inlines into the scan body
-        init_carry : CollectCarry
-            Initial scan carry built from current pool state
-        total_steps : int
-            Total inner steps `n_rollouts * seq_len`
-        seq_len : int
-            Per-rollout timestep count
-        slot_indices : jax.Array
-            `int32` array of length `n_rollouts` mapping each rollout
-            index to a slot along the carry buf's slot axis.
-        p_params, t_params, v_params : chex.ArrayTree
-            Stacked policy / target / value params
-        action_masks : jax.Array
-            Stacked per-trainer action-dim masks
-
-        Returns
-        -------
-        final_carry : CollectCarry
-            Final pool state after `total_steps` inner steps
-        all_rewards : jax.Array
-            Per-step rewards `(total_steps, P)`
-        all_dones : jax.Array
-            Per-step dones `(total_steps, P)`
-        """
-        multi_env = self.multi_env
-        pack_obs = self._pack_obs
-        unpack_actions = self._unpack_actions
-        env_keys = self._env_keys
-
-        def _step_body(
-            carry: CollectCarry, _
-        ) -> Tuple[CollectCarry, Tuple[jax.Array, jax.Array]]:
-            # 1. Forward — JIT'd fn inlines into the scan HLO
-            (
-                preds,
-                target_preds,
-                values,
-                new_p_ocm_h,
-                new_p_acm_h,
-                new_t_ocm_h,
-                new_t_acm_h,
-                new_v_h,
-            ) = batched_forward_fn(
-                carry.obs,
-                carry.prev_actions,
-                p_params,
-                t_params,
-                v_params,
-                carry.p_ocm_h,
-                carry.p_acm_h,
-                carry.t_ocm_h,
-                carry.t_acm_h,
-                carry.v_h,
-                action_masks,
-            )
-
-            # 2. Gaussian reparameterised action sample — keeps (P, 1, A)
-            rng, noise_rng = jax.random.split(carry.rng)
-            mu = preds.mu
-            log_std = preds.log_std
-
-            std = jnp.exp(log_std)
-            noise = jax.random.normal(noise_rng, mu.shape)
-            actions = (mu + std * noise).astype(jnp.float32)
-
-            # 3. Env step — dict-keyed multi-step traces into one XLA boundary
-            actions_per_group = unpack_actions(actions)
-            obs_dict, new_env_states, rewards_dict, dones_dict, _ = multi_env.step(
-                carry.env_states, actions_per_group
-            )
-            new_obs = pack_obs(obs_dict)  # (P, 1, max_obs_dim)
-            rewards = jnp.stack([rewards_dict[k] for k in env_keys], axis=0)[
-                ..., None
-            ]  # (P, 1)
-            dones = jnp.stack([dones_dict[k] for k in env_keys], axis=0)  # (P,)
-            discounts = jnp.where(dones[:, None], 0.0, 1.0)  # (P, 1)
-
-            # 4. Buffer write — `slot_indices` maps each rollout index
-            # to a target slot along the buf's slot axis.
-            rollout_idx = carry.write_idx // seq_len
-            step_idx = carry.write_idx % seq_len
-            slot_idx = slot_indices[rollout_idx]
-            new_buf = carry.buf.write_step(
-                slot_idx,
-                step_idx,
-                squeeze_time(actions),
-                rewards,
-                discounts,
-                squeeze_time(values),
-                jax.tree.map(squeeze_time, preds),
-                jax.tree.map(squeeze_time, target_preds),
-            )
-
-            # 5. Mask hidden states + prev_actions on episode boundary.
-            # mask shape (P, 1, 1) broadcasts against (P, 1, H) and (P, 1, A).
-            mask = discounts[:, :, None]
-
-            new_carry = CollectCarry(
-                obs=new_obs,
-                env_states=new_env_states,
-                prev_actions=actions * mask,
-                p_ocm_h=new_p_ocm_h * mask,
-                p_acm_h=new_p_acm_h * mask,
-                t_ocm_h=new_t_ocm_h * mask,
-                t_acm_h=new_t_acm_h * mask,
-                v_h=new_v_h * mask,
-                rng=rng,
-                write_idx=carry.write_idx + 1,
-                buf=new_buf,
-            )
-            return new_carry, (rewards.squeeze(-1), dones)
-
-        final_carry, (all_rewards, all_dones) = jax.lax.scan(
-            _step_body,
-            init_carry,
-            None,
-            length=total_steps,
-        )
-        return final_carry, all_rewards, all_dones
 
     def collect(
         self,
@@ -600,19 +535,20 @@ class TrainerPool:
             self.t_params,
         )
 
-    def finalize_training(self, n_updates: int, seq_len: int) -> None:
+    def finalize_training(self, n_rollouts: int, seq_len: int) -> None:
         """
         Post-training-phase bookkeeping: update step budgets and
         collection step counters.
 
         Parameters
         ----------
-        n_updates : int
-            Number of rollouts collected
+        n_rollouts : int
+            Number of trajectories collected this meta-step (matches the
+            `n_rollouts` passed to the corresponding `collect` call).
         seq_len : int
             Timesteps per rollout
         """
-        steps = n_updates * seq_len
+        steps = n_rollouts * seq_len
 
         for i in range(self.num_trainers):
             self._env_steps[i] += steps
@@ -620,8 +556,6 @@ class TrainerPool:
 
     def get_grad_inputs(
         self,
-        start: int,
-        end: int,
         disco_h: jax.Array,
         meta_h: jax.Array,
         rng: chex.PRNGKey,
@@ -629,18 +563,14 @@ class TrainerPool:
         batch_size: int,
     ) -> GradChunkInputs:
         """
-        Slice stacked arrays for a gradient chunk — zero copy on accelerator.
+        Bundle the full-population gradient inputs — zero copy on accelerator.
 
         Parameters
         ----------
-        start : int
-            First trainer index (inclusive)
-        end : int
-            Last trainer index (exclusive)
         disco_h : jax.Array
-            Stacked disco hidden states for this chunk `(C, B, H)`
+            Stacked disco hidden states `(P, B, H)`
         meta_h : jax.Array
-            Stacked meta hidden states for this chunk `(C, B, H)`
+            Stacked meta hidden states `(P, B, H)`
         rng : chex.PRNGKey
             RNG used to draw replay samples from `train_buffer`.
         n_updates : int
@@ -652,74 +582,43 @@ class TrainerPool:
         -------
         inputs : GradChunkInputs
             All inputs needed for `_batch_grad_fn` (excluding
-            `meta_params` which is shared)
+            `meta_params` which is shared).
         """
-        s = slice(start, end)
-        _s = lambda x: jax.tree.map(lambda a: a[s], x)  # noqa: E731
-
-        # Validation: slice trainers + insert unit B=1 axis so the grad
-        # path's `to_time_first` swap (-3, -2) has a valid batch axis.
-        valid_chunk = jax.tree.map(
-            lambda a: jnp.expand_dims(a[s, 0], axis=-3),
-            self.valid_rollout,
-        )
-
         return GradChunkInputs(
-            p_params=_s(self.p_params),
-            v_params=_s(self.v_params),
+            p_params=self.p_params,
+            v_params=self.v_params,
             disco_h=disco_h,
             meta_h=meta_h,
-            p_opt=_s(self.p_opt),
-            v_opt=_s(self.v_opt),
-            adv_ema=_s(self.adv_ema),
-            td_ema=_s(self.td_ema),
-            train_rollout=self.train_buffer.sample(
-                rng, start, end, n_updates, batch_size
-            ),
-            valid_rollout=valid_chunk,
-            masks=self.action_masks[s],
+            p_opt=self.p_opt,
+            v_opt=self.v_opt,
+            adv_ema=self.adv_ema,  # type: ignore
+            td_ema=self.td_ema,  # type: ignore
+            train_rollout=self.train_buffer.sample(rng, n_updates, batch_size),
+            valid_rollout=self.valid_rollout,
+            masks=self.action_masks,
         )
 
-    def update_from_grad(
-        self,
-        start: int,
-        chunk_out: MetaGradOutput,
-    ) -> None:
+    def update_from_grad(self, chunk_out: MetaGradOutput) -> None:
         """
-        Scatter a chunk's gradient outputs back into the pool's stacked
-        arrays. Delegates to a module-level JIT'd helper that fuses every
-        per-leaf scatter into one XLA program per call. Chunk size is
-        inferred from the source shapes.
+        Replace the pool's stacked state with the gradient-fn outputs.
+
+        Direct attribute reassignment — no scatter kernel needed since
+        every leaf is full-`P`-shaped and replaces the prior tensor
+        outright. Target params hard-sync to the freshly-updated policy
+        params (existing behavior; the subsequent `soft_update_targets`
+        call lerps from there).
 
         Parameters
         ----------
-        start : int
-            First trainer index (inclusive)
         chunk_out : MetaGradOutput
-            Output from `_batch_grad_fn`
+            Output from `_batch_grad_fn`.
         """
-        start_idx = jnp.asarray(start, dtype=jnp.int32)
-        (
-            self.p_params,
-            self.v_params,
-            self.t_params,
-            self.v_opt,
-            self.adv_ema,
-            self.td_ema,
-        ) = _scatter_chunk_to_pool(
-            self.p_params,
-            self.v_params,
-            self.t_params,
-            self.v_opt,
-            self.adv_ema,
-            self.td_ema,
-            chunk_out.p_params,
-            chunk_out.v_params,
-            chunk_out.v_opt_state,
-            chunk_out.adv_ema,
-            chunk_out.td_ema,
-            start_idx,
-        )
+        self.p_params = chunk_out.p_params
+        self.v_params = chunk_out.v_params
+        self.t_params = chunk_out.p_params
+        self.v_opt = chunk_out.v_opt_state
+        self.adv_ema = chunk_out.adv_ema
+        self.td_ema = chunk_out.td_ema
 
     def reset_trainer(
         self,
