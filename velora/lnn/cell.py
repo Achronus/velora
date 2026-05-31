@@ -13,7 +13,7 @@
 # limitations under the License.
 # ==============================================================================
 
-from typing import Any, Dict, Tuple
+from typing import Any, Tuple
 
 import jax
 import jax.numpy as jnp
@@ -250,6 +250,8 @@ class NCPLiquidCell(nnx.Module):
         gate_out = self.sigmoid(fh_g * ts + fh_h)  # [1 - σ(-[f(x, I, θf)], t)]
         f_head = 1.0 - gate_out  # σ(-f(x, I, θf), t)
 
+        self.diagnostic_value("gate", gate_out)
+
         return g_head * f_head + gate_out * h_head
 
     def __call__(
@@ -286,40 +288,18 @@ class NCPLiquidCell(nnx.Module):
         new_hidden = self._new_hidden(x, g_out, h_out, timespans)
         return new_hidden, new_hidden
 
-    def diagnostics(
-        self, x: jax.Array, hidden: jax.Array, name: str = "cell"
-    ) -> Dict[str, float]:
+    def diagnostic_value(self, name: str, value: jax.Array) -> None:
         """
-        Extract mechanism-specific metrics for logging.
+        Stores a value as an intermediate for diagnostic extraction.
 
         Parameters
         ----------
-        x : jax.Array
-            Current input `(B, in_features)`
-        hidden : jax.Array
-            Current hidden state `(B, n_hidden)`
-        name : str (optional)
-            Layer/cell name for logging
-
-        Returns
-        -------
-        metrics : Dict[str, float]
-            Diagnostic scalars for logging
+        name : str
+            Name of the intermediate value
+        value : jax.Array
+            Diagnostic value to store
         """
-        x_cat = jnp.concat([x, hidden], axis=1)
-
-        fh_g = self.f_head_to_g(x_cat)
-        fh_h = self.f_head_to_h(x_cat)
-
-        # The uniform gate
-        gate = self.sigmoid(fh_g + fh_h)  # ts=1.0
-
-        return {
-            f"{name}/gate_mean": jnp.mean(gate),
-            f"{name}/gate_std": jnp.std(gate),
-            f"{name}/gate_min": jnp.min(gate),
-            f"{name}/gate_max": jnp.max(gate),
-        }
+        self.sow(nnx.Intermediate, name, value)
 
 
 class DecayLiquidCell(NCPLiquidCell):
@@ -425,26 +405,16 @@ class DecayLiquidCell(NCPLiquidCell):
         fh_h = self.f_head_to_h(x)
 
         # Per-channel decay rate in [0, 1]
-        alpha = self.sigmoid(self.alpha_up(self.tanh(self.alpha_down(x))))  # type: ignore
+        alpha = self.sigmoid(self.alpha_up(self.tanh(self.alpha_down(x))))
 
         # Modulate timespan per-channel before temporal gating
         gate_out = self.sigmoid(fh_g * (ts * alpha) + fh_h)
         f_head = 1.0 - gate_out
 
+        self.diagnostic_value("alpha", alpha)
+        self.diagnostic_value("gate", gate_out)
+
         return g_head * f_head + gate_out * h_head
-
-    def diagnostics(
-        self, x: jax.Array, hidden: jax.Array, name: str = "cell"
-    ) -> Dict[str, float]:
-        x_cat = jnp.concat([x, hidden], axis=1)
-        alpha = self.sigmoid(self.alpha_up(self.tanh(self.alpha_down(x_cat))))
-
-        return {
-            f"{name}/alpha_mean": jnp.mean(alpha),
-            f"{name}/alpha_std": jnp.std(alpha),
-            f"{name}/alpha_min": jnp.min(alpha),
-            f"{name}/alpha_max": jnp.max(alpha),
-        }
 
 
 class DeltaErasureLiquidCell(NCPLiquidCell):
@@ -529,23 +499,11 @@ class DeltaErasureLiquidCell(NCPLiquidCell):
         g_out = self.g_head(x)
         h_out = self.h_head(x)
 
+        self.diagnostic_value("beta", beta)
+        self.diagnostic_value("reconstruction_residual", expected - hidden)
+
         new_hidden = self._new_hidden(x, g_out, h_out, timespans)
         return new_hidden, new_hidden
-
-    def diagnostics(
-        self, x: jax.Array, hidden: jax.Array, name: str = "cell"
-    ) -> Dict[str, float]:
-        x_cat = jnp.concat([x, hidden], axis=1)
-
-        expected = self.tanh(self.reconstruct_head(x_cat))
-        beta = self.sigmoid(self.beta_head(x_cat))
-        recon_error = jnp.mean(jnp.abs(expected - hidden))
-
-        return {
-            f"{name}/beta_mean": jnp.mean(beta),
-            f"{name}/beta_std": jnp.std(beta),
-            f"{name}/reconstruction_error": recon_error,
-        }
 
 
 class AdaptiveLiquidCell(NCPLiquidCell):
@@ -652,11 +610,14 @@ class AdaptiveLiquidCell(NCPLiquidCell):
         fh_h = self.f_head_to_h(x)
 
         # Per-channel decay rate in [0, 1]
-        alpha = self.sigmoid(self.alpha_up(self.tanh(self.alpha_down(x))))  # type: ignore
+        alpha = self.sigmoid(self.alpha_up(self.tanh(self.alpha_down(x))))
 
         # Modulate timespan per-channel before temporal gating
         gate_out = self.sigmoid(fh_g * (ts * alpha) + fh_h)
         f_head = 1.0 - gate_out
+
+        self.diagnostic_value("alpha", alpha)
+        self.diagnostic_value("gate", gate_out)
 
         return g_head * f_head + gate_out * h_head
 
@@ -680,30 +641,8 @@ class AdaptiveLiquidCell(NCPLiquidCell):
         g_out = self.g_head(x)
         h_out = self.h_head(x)
 
+        self.diagnostic_value("beta", beta)
+        self.diagnostic_value("reconstruction_residual", expected - hidden)
+
         new_hidden = self._new_hidden(x, g_out, h_out, timespans)
         return new_hidden, new_hidden
-
-    def diagnostics(
-        self, x: jax.Array, hidden: jax.Array, name: str = "cell"
-    ) -> Dict[str, float]:
-        x_cat = jnp.concat([x, hidden], axis=1)
-
-        # Erasure metrics
-        expected = self.tanh(self.reconstruct_head(x_cat))
-        beta = self.sigmoid(self.beta_head(x_cat))
-        recon_error = jnp.mean(jnp.abs(expected - hidden))
-
-        # Alpha distribution
-        hidden_corrected = hidden + beta * (expected - hidden)
-        x_corrected = jnp.concat([x, hidden_corrected], axis=1)
-        alpha = self.sigmoid(self.alpha_up(self.tanh(self.alpha_down(x_corrected))))
-
-        return {
-            f"{name}/alpha_mean": jnp.mean(alpha),
-            f"{name}/alpha_std": jnp.std(alpha),
-            f"{name}/alpha_min": jnp.min(alpha),
-            f"{name}/alpha_max": jnp.max(alpha),
-            f"{name}/beta_mean": jnp.mean(beta),
-            f"{name}/beta_std": jnp.std(beta),
-            f"{name}/reconstruction_error": recon_error,
-        }
