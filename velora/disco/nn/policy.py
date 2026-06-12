@@ -26,7 +26,6 @@ from velora.lnn.spec import NCPWiringSpec
 from velora.lnn.wiring import build_ncp_wiring
 
 
-
 class OCM(BaseCfC):
     """
     An Observation-Conditional Model (OCM) used to encode observations and

@@ -20,7 +20,6 @@ import jax
 from velora.cli.base.component import (
     CardRow,
     Divider,
-    LiveMetricsCard,
     LiveMonitoringCard,
     Metric,
     MetricCard,
@@ -31,7 +30,7 @@ from velora.cli.base.component import (
 )
 from velora.cli.base.constant import Colour
 from velora.cli.base.dashboard import ConsoleDashboard
-from velora.cli.disco.settings import DiscoDashboardSettings, DiscoLosses, DiscoStats
+from velora.cli.disco.settings import DiscoDashboardSettings
 from velora.utils.format import number_to_short
 
 
@@ -58,10 +57,9 @@ class DiscoConsoleDashboard(ConsoleDashboard):
             total=config.meta_steps,
             complete_path=self.config.complete_path,
         )
-        live_metrics = LiveMetricsCard(DiscoLosses, DiscoStats)
         setup = SetupCard()
 
-        super().__init__(title, body, progress, live_metrics, setup)
+        super().__init__(title, body, progress, setup=setup)
 
     def _body(self) -> List:
         """
