@@ -13,13 +13,12 @@
 # limitations under the License.
 # ==============================================================================
 
-import json
-from dataclasses import fields
-from typing import Dict, Self
+from typing import Self
 
 from flax import struct
 
 from velora.cli.disco.settings import DiscoDashboardSettings, DiscoParamsSettings
+from velora.disco.config.metadata import RuleTrainerMetadata
 from velora.tracking.settings import RunSettings
 
 
@@ -75,32 +74,30 @@ class DiscoEncoderSettings:
     """
     Dataclass for `DiscoInputEncoder` settings.
 
-    Embedding dimensions can be set manually or computed dynamically based on
-    `prediction_size` using the `create()` method.
-
-    The encoder derives `n_actions` from input shapes at runtime, enabling
-    action-agnostic encoding that works across different action spaces.
+    Embedding dimensions are computed dynamically based on `prediction_size`
+    using the `create()` method.
 
     Parameters
     ----------
     prediction_size : int
         Size of the observation/action-conditioned prediction vectors `(y, z)`.
     obs_embed_dim : int (optional)
-        Embedding output dimension for observation-conditioned predictions `(y)`.
-        Default is `32`
+        Embedding output dimension for observation-conditioned predictions `(y)`
     action_embed_dim : int (optional)
-        Embedding output dimension for action-conditional inputs `(z, q, pi)`.
-        Default is `32`
+        Embedding output dimension for action-conditional inputs `(z, q, pi)`
     scalar_embed_dim : int (optional)
-        Embedding output dimension for scalar inputs `(rewards, discounts)`.
-        Default is `8`
+        Embedding output dimension for scalar inputs `(rewards, discounts)`
+    output_dim : int (optional)
+        Total output dimension of the encoder
     """
 
     prediction_size: int
 
-    obs_embed_dim: int = 32
-    action_embed_dim: int = 32
-    scalar_embed_dim: int = 16
+    obs_embed_dim: int
+    action_embed_dim: int
+    scalar_embed_dim: int
+
+    output_dim: int
 
     @classmethod
     def create(cls, prediction_size: int) -> Self:
@@ -115,32 +112,22 @@ class DiscoEncoderSettings:
         Parameters
         ----------
         prediction_size : int
-            Size of the observation/action-conditioned prediction vectors (y, z).
+            Size of the observation/action-conditioned prediction vectors `(y, z)`.
 
         Returns
         -------
         config : DiscoEncoderSettings
             New settings with computed embedding dimensions
         """
+        embed_dim = prediction_size // 2
+        scalar_embed_dim = max(prediction_size // 8, 4)
+
         return cls(
             prediction_size=prediction_size,
-            obs_embed_dim=prediction_size // 2,
-            action_embed_dim=prediction_size // 2,
-            scalar_embed_dim=max(prediction_size // 8, 4),  # Min of 4
-        )
-
-    @property
-    def output_dim(self) -> int:
-        """
-        Total output dimension of the encoder. Used as input to Disco network.
-
-        Returns
-        -------
-        dim : int
-            Flattened embedding dimension
-        """
-        return (
-            self.obs_embed_dim * 2 + self.action_embed_dim * 2 + self.scalar_embed_dim
+            obs_embed_dim=embed_dim,
+            action_embed_dim=embed_dim,
+            scalar_embed_dim=scalar_embed_dim,  # Min of 4
+            output_dim=embed_dim * 4 + scalar_embed_dim,
         )
 
 
@@ -166,35 +153,6 @@ class DiscoAgentSettings:
         Maximum gradient norm for gradient clipping. Default is `1.0`
     sparsity : float (optional)
         Network connection sparsity for LNNs. Default is `0.5`
-    dynamic_embed_dims : bool (optional)
-        Whether to dynamically compute encoder embedding dimensions based on
-        `prediction_size`. When `False`, uses manual values. Default is `True`
-
-        When `True` uses the following ratios:
-            - `obs_embed_dim` = `prediction_size // 2`
-            - `action_embed_dim` = `prediction_size // 2`
-            - `scalar_embed_dim` = `max(prediction_size // 8, 4)`
-
-    obs_embed_dim : int (optional)
-        Manual embedding dimension for state-conditional predictions `(y)`.
-        Only used when `dynamic_embed_dims=False`. Default is `64`
-    action_embed_dim : int (optional)
-        Manual embedding dimension for action-conditional inputs `(z, q, pi)`.
-        Only used when `dynamic_embed_dims=False`. Default is `64`
-    scalar_embed_dim : int (optional)
-        Manual embedding dimension for scalars `(rewards, discounts)`.
-        Only used when `dynamic_embed_dims=False`. Default is `16`
-    max_action_dim : int (optional)
-        Maximum continuous action dimensionality across all environments in
-        the training set. Determined at runtime by probing environment action
-        spaces — not a tunable hyperparameter.
-
-        Used by `DiscoNetwork` to size the policy target projections
-        `(μ̂, log σ̂)` and by `DiscoInputEncoder` to size the policy
-        and action-conditional encoder inputs. Serialized with the config so
-        that `load()` can reconstruct the correct network shapes.
-
-        Set to `0` for discrete action spaces (unused). Default is `0`
     """
 
     n_hidden: int = 128
@@ -204,68 +162,16 @@ class DiscoAgentSettings:
     max_grad_norm: float = 1.0
     sparsity: float = 0.5
 
-    dynamic_embed_dims: bool = True
-    obs_embed_dim: int = 64
-    action_embed_dim: int = 64
-    scalar_embed_dim: int = 16
-
-    max_action_dim: int = 0
-
-    def with_max_action_dim(self, max_action_dim: int) -> Self:
-        """
-        Return a copy with `max_action_dim` set.
-
-        Parameters
-        ----------
-        max_action_dim : int
-            Maximum continuous action dimensionality
-
-        Returns
-        -------
-        config : DiscoAgentSettings
-            Updated configuration
-        """
-        return self.__replace__(max_action_dim=max_action_dim)
-
     def encoder_config(self) -> DiscoEncoderSettings:
         """
         Extracts encoder configuration from agent settings.
-
-        When `dynamic_embed_dims=True`, computes embedding dimensions
-        automatically. Otherwise, uses manual values.
 
         Returns
         -------
         config : DiscoEncoderSettings
             Encoder configuration
         """
-        if self.dynamic_embed_dims:
-            return DiscoEncoderSettings.create(self.prediction_size)
-
-        return DiscoEncoderSettings(
-            prediction_size=self.prediction_size,
-            obs_embed_dim=self.obs_embed_dim,
-            action_embed_dim=self.action_embed_dim,
-            scalar_embed_dim=self.scalar_embed_dim,
-        )
-
-    def to_json(self, **extras) -> str:
-        """
-        Converts the object to a JSON string with `extras` added.
-
-        Parameters
-        ----------
-        extras : kwargs (optional)
-            Additional key-value arguments to merge into JSON string.
-            Default is `None`
-
-        Returns
-        -------
-        json : str
-            The object as a JSON serialized string
-        """
-        items = {f.name: getattr(self, f.name) for f in fields(self)}
-        return json.dumps(items | (extras or {}), indent=2)
+        return DiscoEncoderSettings.create(self.prediction_size)
 
 
 @struct.dataclass(frozen=True)
@@ -277,8 +183,8 @@ class DiscoValueSettings:
     ----------
     lr : float (optional)
         Learning rate. Default is `0.0003`
-    max_grad_clip : float (optional)
-        Maximum gradient clip value. Default is `1.0`
+    max_grad_norm : float (optional)
+        Maximum gradient norm for gradient clipping. Default is `1.0`
     gamma : float (optional)
         Discount factor for rewards. Default is `0.997`
     td_lambda : float (optional)
@@ -289,16 +195,12 @@ class DiscoValueSettings:
         - `λ=0.0` → Use only 1-step TD (immediate reward + bootstrap)
         - `λ=1.0` → Use full Monte Carlo return (entire episode)
         - `λ=0.95` → Blend of n-step returns (weighted toward longer horizons)
-
-    loss_weight : float (optional)
-        Weight for value loss contribution to total meta-loss. Default is `1.0`
     """
 
     lr: float = 3e-4
-    max_grad_clip: float = 1.0
+    max_grad_norm: float = 1.0
     gamma: float = 0.997
     td_lambda: float = 0.95
-    loss_weight: float = 1.0
 
 
 @struct.dataclass(frozen=True)
@@ -359,54 +261,6 @@ class EMASettings:
 
 
 @struct.dataclass(frozen=True)
-class AgentTrainerSettings:
-    """
-    Dataclass for `AgentTrainer` settings.
-
-    Parameters
-    ----------
-    agent : PolicyAgentSettings
-        Configuration for `PolicyAgent` architecture
-    value : DiscoValueSettings
-        Configuration for the Disco value function
-    ema : EMASettings
-        Configuration for Exponential Moving Averages (EMAs)
-    loss_cost : LossCostSettings
-        Loss component weights
-    tau : float
-        EMA coefficient for target network updates
-    seq_len : int
-        Number of timesteps per trajectory (rollout size; `T`)
-    n_updates : int
-        Number of agent updates to backpropagate through for meta-gradient
-        computation (sliding window size)
-    batch_size : int
-        Number of trajectories per agent update. Composed of
-        `(1 - replay_ratio)` fresh + `replay_ratio` replay trajectories
-        sampled from the `MixedBuffer`.
-    replay_ratio : float
-        Fraction of each per-update batch drawn from replay; the rest
-        is taken from the most-recently inserted fresh trajectories.
-        Must be in `[0.0, 1.0]`.
-    replay_capacity : int
-        Per-agent ring size (in trajectory slots) for the replay buffer.
-    """
-
-    agent: PolicyAgentSettings
-    value: DiscoValueSettings
-    ema: EMASettings
-    loss_costs: LossCostSettings
-
-    tau: float
-    seq_len: int
-    n_updates: int
-    batch_size: int
-
-    replay_ratio: float
-    replay_capacity: int
-
-
-@struct.dataclass(frozen=True)
 class RuleTrainerSettings:
     """
     Dataclass for `RuleTrainer` settings.
@@ -433,7 +287,7 @@ class RuleTrainerSettings:
         Default is `RunSettings()`
     meta_lr : float (optional)
         Learning rate for meta-network optimizer. Default is `0.001`
-    meta_grad_clip : float (optional)
+    meta_grad_norm : float (optional)
         Gradient clipping threshold for meta-updates. Default is `1.0`
     entropy_coef : float (optional)
         Coefficient for entropy regularization in the meta-loss. Encourages
@@ -476,7 +330,7 @@ class RuleTrainerSettings:
     run: RunSettings = struct.field(default_factory=RunSettings)
 
     meta_lr: float = 0.001
-    meta_grad_clip: float = 1.0
+    meta_grad_norm: float = 1.0
     entropy_coef: float = 1e-2
     reg_scale: float = 1e-3
     kl_reg: float = 1e-2
@@ -541,57 +395,10 @@ class RuleTrainerSettings:
         """
         return max(1, self.total_env_steps // (num_trainers * self.steps_per_meta))
 
-    def estimate_total_env_steps(self, n_steps: int, num_trainers: int) -> int:
-        """
-        Computes a total environment step count budget, given a population size.
-
-        Useful for estimating how much experience a run will consume before
-        committing to it:
-            `total_env_steps = n_steps * num_trainers * steps_per_meta`
-
-        Parameters
-        ----------
-        n_steps : int
-            Number of meta-steps
-        num_trainers : int
-            Total number of active trainer slots
-
-        Returns
-        -------
-        total_env_steps : int
-            Total environment steps that will be consumed
-        """
-        return n_steps * num_trainers * self.steps_per_meta
-
-    def agent_trainer_config(self) -> AgentTrainerSettings:
-        """
-        Sets the configuration for the `AgentTrainer`.
-
-        Returns
-        -------
-        config : AgentTrainerSettings
-            Configuration for the `AgentTrainer`
-        """
-        return AgentTrainerSettings(
-            agent=self.agent,
-            value=self.disco_value,
-            ema=self.ema,
-            loss_costs=self.loss_cost,
-            tau=self.tau,
-            seq_len=self.seq_len,
-            n_updates=self.n_updates,
-            batch_size=self.batch_size,
-            replay_ratio=self.replay_ratio,
-            replay_capacity=self.replay_capacity,
-        )
-
     def console_config(
         self,
-        envs: Dict[str, int],
-        num_trainers: int,
-        n_steps: int,
+        metadata: RuleTrainerMetadata,
         params: DiscoParamsSettings,
-        complete_path: str,
         jit_compile: bool,
         cache_status: str,
     ) -> DiscoDashboardSettings:
@@ -600,16 +407,10 @@ class RuleTrainerSettings:
 
         Parameters
         ----------
-        envs : Dict[str, int]
-            Mapping of environment category names to counts
-        num_trainers : int
-            Number of agent trainers
-        n_steps : int
-            Total meta-step iterations the training loop will run
+        metadata : RuleTrainerMetadata
+            Rule trainer metadata
         params : DiscoParamsSettings
             Parameter counts for each agent type
-        complete_path : str
-            Checkpoint completion path
         jit_compile : bool
             Whether JIT compilation is enabled
         cache_status : str
@@ -621,17 +422,17 @@ class RuleTrainerSettings:
             Configuration for `DiscoConsoleDashboard`
         """
         return DiscoDashboardSettings(
-            meta_steps=n_steps,
+            meta_steps=metadata.n_meta_steps,
             n_updates=self.n_updates,
             seq_len=self.seq_len,
             batch_size=self.batch_size,
-            n_agents=num_trainers,
+            n_agents=metadata.num_trainers,
             total_steps=self.total_env_steps,
             log_dir=str(self.run.log_dir),
             cp_dir=str(self.run.checkpoint_dir),
-            env_categories=envs,
+            env_categories=metadata.env_categories,
             params=params,
-            complete_path=complete_path,
+            complete_path=str(self.run.dirpath),
             jit_compile=jit_compile,
             cache_status=cache_status,
         )
