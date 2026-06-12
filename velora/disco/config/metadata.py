@@ -13,52 +13,88 @@
 # limitations under the License.
 # ==============================================================================
 
-from dataclasses import dataclass, field
-from typing import Any, Dict, List
-
-from velora.tracking.metadata import CheckpointMetadata
+from dataclasses import dataclass
+from typing import Any, Dict, List, Tuple
 
 
 @dataclass(frozen=True)
-class RuleTrainerMetadata(CheckpointMetadata):
+class RuleTrainerMetadata:
     """
-    Metadata persisted alongside `RuleTrainer` checkpoints.
-
-    Captures everything needed to reconstruct a `RuleTrainer` from a
-    checkpoint directory without access to the original script.
+    Metadata persisted alongside `RuleTrainer` runs.
 
     Parameters
     ----------
     config : Dict[str, Any]
         Serialized `RuleTrainerSettings`
+    num_envs : int
+        Number of unique environments trained on
+    num_trainers : int
+        Number of trainers used during training
     agents_per_env : int
         Number of independent agent trainers per environment
+    n_meta_steps : int
+        Number of meta-steps run during training
     seed : int
         Random number generator seed
     env_names : List[str]
-        Canonical envrax env names (e.g. `["mjx/hopper_hop-v0", ...]`).
-        Stored unique (before `agents_per_env` multiplication).
+        Unique canonical envrax env names (e.g. `"mjx/hopper_hop-v0"`)
     env_categories : Dict[str, int]
-        Mapping of suite category → environment count (e.g.
-        `{"MuJoCo Playground": 25}`). Used by `RuleTrainer.restore` to
-        reconstruct the dashboard's per-suite breakdown without
-        re-querying the envrax registry.
-    disco_key : List[int]
-        Serialized JAX RNG key for the DiscoAgent. Used by
-        `DiscoAgent.load()` to reconstruct the agent from a run directory
-    parent_run : str | None (optional)
-        Path to the parent run directory this training was extended from.
-        `None` for fresh runs. Default is `None`
-    parent_checkpoint_step : int | None (optional)
-        Checkpoint step restored from in the parent run.
-        `None` for fresh runs. Default is `None`
+        Mapping of environment suite category → environment count (e.g.
+        `{"MuJoCo Playground": 25}`)
     """
 
     config: Dict[str, Any]
+    num_envs: int
+    num_trainers: int
     agents_per_env: int
+    n_meta_steps: int
     seed: int
     env_names: List[str]
     env_categories: Dict[str, int]
-    disco_key: List[int]
-    parent_run: str | None = field(default=None)
-    parent_checkpoint_step: int | None = field(default=None)
+
+
+@dataclass(frozen=True)
+class SlotMetadata:
+    """
+    Per trainer host-side static metadata.
+
+    Parameters
+    ----------
+    env_key : str
+        Multi-env dictionary key
+    env_name : str
+        Human-readable environment name
+    obs_dim : int
+        Environment observation dimension (unpadded)
+    action_dim : int
+        Environment action dimension (unpadded)
+    """
+
+    env_key: str
+    env_name: str
+    obs_dim: int
+    action_dim: int
+
+
+@dataclass(frozen=True)
+class PoolMetadata:
+    """
+    Pool trainer static metadata.
+
+    Parameters
+    ----------
+    slots : Tuple[SlotMetadata]
+        Per trainer metadata
+    max_obs_dim : int
+        Maximum observation size
+    max_action_dim : int
+        Maximum action space size
+    """
+
+    slots: Tuple[SlotMetadata, ...]
+    max_obs_dim: int
+    max_action_dim: int
+
+    @property
+    def num_trainers(self) -> int:
+        return len(self.slots)

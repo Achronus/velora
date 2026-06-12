@@ -13,14 +13,18 @@
 # limitations under the License.
 # ==============================================================================
 
-from typing import Self, Tuple
+from typing import Dict, Self, Tuple
 
+import chex
+import envrax
 import jax
 import jax.numpy as jnp
 import optax
-from flax import struct
+from flax import nnx, struct
 
+from velora.disco.buffer import MixedBuffer
 from velora.disco.ema import EMAState
+from velora.disco.rollouts import Rollout
 
 HiddenState = jax.Array | None
 
@@ -505,3 +509,153 @@ class RuleTrainerState:
         return self.__replace__(
             hidden=self.hidden.update(trainer_idx, disco_h, meta_h),
         )
+
+
+@struct.dataclass
+class PolicySlot:
+    """
+    Policy agent trainer slot details.
+
+    Parameters
+    ----------
+    params : optax.Params
+        Policy agent trainable parameters
+    opt_state : optax.OptState
+        Optimizer state for parameters
+    ocm_h : jax.Array
+        Current OCM hidden state
+    acm_h : jax.Array
+        Current ACM hidden state
+    """
+
+    params: optax.Params
+    opt_state: optax.OptState
+    ocm_h: jax.Array
+    acm_h: jax.Array
+
+
+@struct.dataclass
+class TargetSlot:
+    """
+    Target agent trainer slot details.
+
+    Mirrors `PolicySlot` without the optimizer state.
+
+    Parameters
+    ----------
+    params : optax.Params
+        Target policy agent trainable parameters
+    ocm_h : jax.Array
+        Current OCM hidden state
+    acm_h : jax.Array
+        Current ACM hidden state
+    """
+
+    params: optax.Params
+    ocm_h: jax.Array
+    acm_h: jax.Array
+
+
+@struct.dataclass
+class ValueSlot:
+    """
+    Disco value agent slot details.
+
+    Parameters
+    ----------
+    params : optax.Params
+        Disco value agent trainable parameters
+    opt_state : optax.OptState
+        Optimizer state for parameters
+    hidden : jax.Array
+        Current disco value agent hidden state
+    """
+
+    params: optax.Params
+    opt_state: optax.OptState
+    hidden: jax.Array
+
+
+@struct.dataclass
+class AgentState:
+    """
+    A single agent trainer's state.
+
+    Parameters
+    ----------
+    encoder_params : nnx.State
+        Per-slot encoder parameters. Architecture shared via `specs.encoder`.
+    encoder_opt : optax.OptState
+        Optimizer state for the encoder.
+    policy : PolicySlot
+        Policy-head state.
+    target : TargetSlot
+        Target-head state (soft-updated from `policy.params`).
+    value : ValueSlot
+        Value-head state.
+    meta_opt_state : optax.OptState
+        Per-slot meta optimizer state.
+    adv_ema : EMAState
+        Running advantage EMA for normalization.
+    td_ema : EMAState
+        Running TD-error EMA for normalization.
+    action_mask : jax.Array
+        Boolean mask `(max_action_dim,)`.
+    env_steps : jax.Array
+        Scalar `int32` counting env steps consumed by this slot.
+    step_budget : jax.Array
+        Scalar `int32` lifetime budget. Triggers reset when `env_steps >= step_budget`.
+    collection_steps : jax.Array
+        Scalar `int32` counting collection phases run by this slot.
+    obs : jax.Array
+        Most recent observation `(1, max_obs_dim)`.
+    prev_action : jax.Array
+        Most recent action `(1, max_action_dim)` for ACM conditioning.
+    """
+
+    encoder_params: nnx.State
+    encoder_opt: optax.OptState
+
+    policy: PolicySlot
+    target: TargetSlot
+    value: ValueSlot
+
+    meta_opt_state: optax.OptState
+
+    adv_ema: EMAState
+    td_ema: EMAState
+
+    action_mask: jax.Array
+
+    env_steps: jax.Array
+    step_budget: jax.Array
+    collection_steps: jax.Array
+
+    obs: jax.Array
+    prev_action: jax.Array
+
+
+@struct.dataclass
+class PoolState:
+    """
+    A collection of agent trainer state.
+
+    Parameters
+    ----------
+    slots : AgentState
+        `(P, ...)` stacked agent trainer states
+    env_states : Dict[str, envrax.EnvState]
+        Key-paired environment states
+    train_buffer : MixedBuffer
+        Training buffer
+    valid_rollout : Rollout
+        Validation rollout
+    rng : chex.PRNGKey
+        Random number generator key
+    """
+
+    slots: AgentState
+    env_states: Dict[str, envrax.EnvState]
+    train_buffer: MixedBuffer
+    valid_rollout: Rollout
+    rng: chex.PRNGKey
