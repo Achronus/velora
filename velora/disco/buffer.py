@@ -277,11 +277,6 @@ class MixedBuffer:
         """
         Clear the replay state for a single agent.
 
-        Zeros that agent's storage slice and resets its `valid_count`
-        to `0`. The shared `write_idx` is left untouched — newly
-        collected trajectories will populate the reset agent's slots
-        in lockstep with all the others.
-
         Parameters
         ----------
         idx : int
