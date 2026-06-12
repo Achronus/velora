@@ -3,16 +3,11 @@
 ![Python Version](https://img.shields.io/pypi/pyversions/velora)
 ![License](https://img.shields.io/github/license/Achronus/velora)
 
-Found on:
-
-- [PyPi](https://pypi.org/project/velora)
-- [GitHub](https://github.com/Achronus/velora)
-
 # Velora
 
-**Velora** is a Liquid Reinforcement Learning (RL) Flax-based research framework for autonomous systems.
+**Velora** is a Reinforcement Learning (RL) research framework for building autonomous systems that are lightweight, adaptive, explainable, persist in memory and can continuous learn.
 
-At its core, Velora combines [Closed-form Continuous-time (CfC) Liquid Neural Networks](https://arxiv.org/abs/2106.13898) with **DiscoRL** (Discovery RL) — a meta-reinforcement learning algorithm that learns a *generalizable update rule* across a large suite of environments, rather than training a separate agent per task.
+It focuses on [Closed-form Continuous-time (CfC) Liquid Neural Networks](https://arxiv.org/abs/2106.13898) with **DiscoRL** (Discovery RL) — a meta-reinforcement learning algorithm that learns a *generalizable update rule* across a large suite of environments, rather than training a separate agent per task.
 
 Traditional RL algorithms — such as PPO, DQN, or A3C — are hand-crafted by researchers and trained independently per environment. Each design decision (update rule, loss function, hyperparameters) requires careful manual tuning, making cross-task generalization difficult. DiscoRL sidesteps this by using meta-learning to *automatically discover* the update rule itself, producing one that is general-purpose by construction and outperforms manually designed rules across challenging benchmarks.
 
