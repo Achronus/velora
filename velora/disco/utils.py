@@ -15,15 +15,142 @@
 
 from typing import TYPE_CHECKING, Tuple
 
+import chex
 import jax
+import jax.numpy as jnp
+from flax import nnx
 
 from velora.compute.loss import compute_gaussian_aux_policy_loss
-from velora.compute.rl_ops import compute_gaussian_kl
+from velora.compute.rl_ops import (
+    compute_gaussian_importance_weights,
+    compute_gaussian_kl,
+)
 from velora.compute.utils import categorical_kl_divergence
+from velora.compute.vtrace import compute_vtrace
+from velora.disco.ema import EMAState, MovingAverage
+from velora.disco.rollouts import Rollout
 
 if TYPE_CHECKING:
     from velora.disco.config.settings import LossCostSettings
-    from velora.disco.outputs import DiscoAgentOutput
+    from velora.disco.outputs import DiscoAgentOutput, ValueOutputs
+
+
+def sample_budget(key: chex.PRNGKey) -> jax.Array:
+    """
+    Sample a step budget from a lifetime distribution.
+
+    Budgets are drawn from `{5M, 10M, 20M, 50M}` environment steps,
+    weighted inversely proportional to their size so shorter lifetimes are
+    sampled more frequently.
+
+    Parameters
+    ----------
+    key : chex.PRNGKey
+        Random number generator key
+
+    Returns
+    -------
+    budget : jax.Array
+        Sampled step budget as a scalar `int32`
+    """
+    lifetime_budgets = jnp.array(
+        [5_000_000, 10_000_000, 20_000_000, 50_000_000],
+        dtype=jnp.int32,
+    )
+    _inv = 1.0 / lifetime_budgets.astype(jnp.float32)
+    lifetime_weights = _inv / _inv.sum()
+
+    return jax.random.choice(key, lifetime_budgets, p=lifetime_weights)
+
+
+def compute_value_outputs(
+    rollout: Rollout,
+    ema_utils: MovingAverage,
+    adv_state: EMAState,
+    td_state: EMAState,
+    gamma: float,
+    td_lambda: float,
+    action_dim_mask: jax.Array | None = None,
+) -> Tuple[ValueOutputs, EMAState, EMAState]:
+    """
+    Compute value function outputs from a trajectory of experience
+    using Gaussian importance weights for off-policy correction.
+
+    Parameters
+    ----------
+    rollout : Rollout
+        A trajectory of experience
+    ema_utils : MovingAverage
+        EMA utility methods for computation
+    adv_state : EMAState
+        EMA state for advantage normalization
+    td_state : EMAState
+        EMA state for TD normalization
+    gamma : float
+        Discount factor
+    td_lambda : float
+        TD lambda parameter
+    action_dim_mask : jax.Array (optional)
+        Boolean mask `(D,)` for valid action dimensions.
+        Default is `None`
+
+    Returns
+    -------
+    value_outs : ValueOutputs
+        Value function outputs
+    adv_ema : EMAState
+        Updated advantage EMA state
+    td_ema : EMAState
+        Updated TD EMA state
+    """
+
+    # Transpose to (T, B, ...) for V-trace
+    rollout = rollout.to_time_first()
+    rollout = rollout.squeeze()
+
+    discounts = rollout.discounts * gamma
+
+    # Importance weights from Gaussian policies
+    # [:-1] = Drop last timestep
+    rho = compute_gaussian_importance_weights(
+        rollout.preds.mu[:-1],
+        rollout.preds.log_std[:-1],
+        rollout.target_preds.mu[:-1],
+        rollout.target_preds.log_std[:-1],
+        rollout.actions[:-1],
+        action_dim_mask=action_dim_mask,
+    )
+
+    value_targets, advantages = compute_vtrace(
+        rollout.values,
+        rollout.rewards[:-1],
+        discounts[:-1],
+        td_lambda,
+        rho,
+    )
+
+    td = value_targets - rollout.values[:-1]
+
+    # Compute EMAs
+    norm_adv, adv_state = ema_utils.update_and_normalize(advantages, adv_state)
+    norm_td, td_state = ema_utils.update_and_normalize(
+        td,
+        td_state,
+        subtract_mean=False,
+    )
+
+    value_outs = ValueOutputs(
+        value=rollout.values,
+        value_targets=value_targets,
+        advantages=advantages,
+        normalized_advantages=norm_adv,
+        td=td,
+        normalized_td=norm_td,
+        rho=rho,
+    )
+
+    return value_outs, adv_state, td_state
+    return value_outs, adv_state, td_state
 
 
 def compute_policy_loss(
@@ -162,3 +289,32 @@ def compute_meta_reg_loss(
     l2_loss = reg_scale * (mu_reg + log_std_reg + y_reg + z_reg)
     kl_loss = kl_reg_coef * target_kl
     return l2_loss + kl_loss
+
+
+def soft_param_update(
+    tau: float, old_params: nnx.State, new_params: nnx.State
+) -> nnx.State:
+    """
+    Performs a soft parameter update on a set of network parameters.
+
+    Formula: `θ_target ← τ * θ_online + (1 - τ) * θ_target`
+
+    Parameters
+    ----------
+    tau : float
+        Soft update coefficient (`τ`)
+    old_params : nnx.State
+        Current network parameters (`θ_online`)
+    new_params : nnx.State
+        New parameters to use for updating (`θ_target`)
+
+    Returns
+    -------
+    params : nnx.State
+        An updated set of network parameters
+    """
+    return jax.tree.map(
+        lambda old, new: tau * old + (1.0 - tau) * new,
+        old_params,
+        new_params,
+    )
