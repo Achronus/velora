@@ -178,10 +178,17 @@ metrics.db-journal
 # Local dev
 demo*.py
 start*.py
+test*.py
 /runs*
 .dockerignore
 Dockerfile
+DiscoRL*.txt
+*.pdf
+refactor*.md
+velora/disco/old/
+velora/refactor_docs/
 
 # JAX persistent XLA compilation cache (envrax / velora)
 /.jax_cache*
 /.cache/jax
+
