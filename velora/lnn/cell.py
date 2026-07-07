@@ -1,4 +1,4 @@
-# Copyright 2025 Achronus
+# Copyright 2026 Achronus
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -13,85 +13,15 @@
 # limitations under the License.
 # ==============================================================================
 
-from typing import Any, Dict, Tuple
+from typing import Tuple
 
-import jax
-import jax.numpy as jnp
-from flax import nnx
-from flax.typing import Initializer
+import torch
+from torch import nn
 
-from velora.lnn.constants import DEFAULT_HIDDEN_INIT
-from velora.lnn.sparse import SparseLinear
+from velora.nn.sparse import SparseLinear
 
 
-class CellConfig:
-    """
-    Configuration for creating `NCPLiquidCell` variants.
-
-    Captures the cell class and any variant-specific keyword arguments.
-    Used by `BaseCfC` to construct cells at each layer.
-
-    Should not be instantiated directly — use `NCPLiquidCell.config()`
-    or a subclass's `.config()` class method instead.
-
-    Parameters
-    ----------
-    cell_type : type[NCPLiquidCell]
-        The cell class to use
-    **kwargs : Any
-        Variant-specific keyword arguments passed to the cell constructor.
-        E.g., `alpha_rank=8` for `AdaptiveLiquidCell`
-    """
-
-    def __init__(
-        self,
-        cell_type: type["NCPLiquidCell"],
-        **kwargs: Any,
-    ) -> None:
-        self.cell_type = cell_type
-        self.kwargs = kwargs
-
-    def build(
-        self,
-        in_features: int,
-        n_hidden: int,
-        mask: jax.Array,
-        *,
-        rngs: nnx.Rngs,
-        init_type: Initializer,
-    ) -> "NCPLiquidCell":
-        """
-        Construct a cell instance with the stored configuration.
-
-        Parameters
-        ----------
-        in_features : int
-            Number of input nodes
-        n_hidden : int
-            Number of hidden nodes
-        mask : jax.Array
-            A matrix of sparse connections
-        rngs : flax.nnx.Rngs
-            Random number generator key
-        init_type : flax.nnx.nn.initializers
-            Initializer function for the weight matrix
-
-        Returns
-        -------
-        cell : NCPLiquidCell
-            A configured cell instance
-        """
-        return self.cell_type(
-            in_features,
-            n_hidden,
-            mask,
-            rngs=rngs,
-            init_type=init_type,
-            **self.kwargs,
-        )
-
-
-class NCPLiquidCell(nnx.Module):
+class NCPLiquidCell(nn.Module):
     """
     A Liquid Time-Constant (LTC) cell using a Closed-form (CfC) approach.
 
@@ -112,81 +42,36 @@ class NCPLiquidCell(nnx.Module):
         Number of input nodes
     n_hidden : int
         Number of hidden nodes
-    mask : jax.Array
+    mask : torch.Tensor
         A matrix of sparse connections usually containing a combination
         of `[-1, 1, 0]` values
-    rngs : flax.nnx.Rngs (optional)
-        Random number generator key.
-        Must have a `params=[value]` attribute
-    init_type : flax.nnx.nn.initializers (optional)
-        Initializer function for the weight matrix.
-        Default is `lecun_uniform()`
     """
 
     def __init__(
         self,
         in_features: int,
         n_hidden: int,
-        mask: jax.Array,
-        *,
-        rngs: nnx.Rngs = nnx.Rngs(params=0),
-        init_type: Initializer = DEFAULT_HIDDEN_INIT,
+        mask: torch.Tensor,
     ) -> None:
+        super().__init__()
+
         self.in_features = in_features
         self.n_hidden = n_hidden
         self.head_size = n_hidden + in_features
-        self.init_type = init_type
-        self.rngs = rngs
 
-        # Absolute to maintain masking (-1 -> 1)
-        self.sparsity_mask = nnx.data(self._prep_mask(mask))
+        self.tanh = nn.Tanh()  # Bounded: [-1, 1]
+        self.sigmoid = nn.Sigmoid()  # Bounded: [0, 1]
 
-        self.tanh = nnx.tanh  # Bounded: [-1, 1]
-        self.sigmoid = nnx.sigmoid  # Bounded: [0, 1]
+        mask = self._prep_mask(mask)
 
-        self.g_head = self._make_layer()
-        self.h_head = self._make_layer()
+        self.g_head = SparseLinear(self.head_size, self.n_hidden, mask)
+        self.h_head = SparseLinear(self.head_size, self.n_hidden, mask)
 
         # LTC heads (f)
-        self.f_head_to_g = self._make_layer()
-        self.f_head_to_h = self._make_layer()
+        self.f_head_to_g = SparseLinear(self.head_size, self.n_hidden, mask)
+        self.f_head_to_h = SparseLinear(self.head_size, self.n_hidden, mask)
 
-    @classmethod
-    def config(cls) -> CellConfig:
-        """
-        Returns a `CellConfig` for this cell type.
-
-        Returns
-        -------
-        config : CellConfig
-            A cell configuration for constructing this cell variant
-        """
-        return CellConfig(cls)
-
-    def _make_layer(self) -> SparseLinear:
-        """
-        Helper method that creates a new `SparseLinear` layer.
-
-        The layer is configured with the following values:
-
-        - `in_features` - `self.n_hidden + self.in_features`
-        - `out_features` - `self.n_hidden`
-        - `mask` - `self.sparsity_mask`
-
-        Returns
-        -------
-        layer : SparseLinear
-            A `SparseLinear` layer
-        """
-        return SparseLinear(
-            self.head_size,
-            self.n_hidden,
-            self.sparsity_mask,
-            rngs=self.rngs,
-            hidden_init=self.init_type,
-        )
-
-    def _prep_mask(self, mask: jax.Array) -> jax.Array:
+    def _prep_mask(self, mask: torch.Tensor) -> torch.Tensor:
         """
         Utility method that preprocesses mask to match layer size.
 
@@ -196,130 +81,107 @@ class NCPLiquidCell(nnx.Module):
         Note -
             Performs two operations:
 
-            1. Adds a padded matrix of 1s to end of mask in shape
+            1. Adds a padded matrix of 1s as extra columns to the mask in shape
                `(n_hidden, n_hidden)` for dense recurrent connections
             2. Gets the absolute values of the mask to maintain weight stability,
                converting `-1` to `1`
 
         Parameters
         ----------
-        mask : jax.Array
-            Weight sparsity mask
+        mask : torch.Tensor
+            Weight sparsity mask of shape `(n_hidden, in_features)`
 
         Returns
         -------
-        mask : jax.Array
-            An updated mask
+        mask : torch.Tensor
+            An updated mask of shape `(n_hidden, head_size)`
         """
-        extra_nodes = jnp.ones((self.n_hidden, self.n_hidden))
-        mask = jnp.concat([mask, extra_nodes])
-        return jnp.abs(mask)
+        extra_nodes = torch.ones((self.n_hidden, self.n_hidden))
+        mask = torch.cat([mask, extra_nodes], dim=1)
+        return torch.abs(mask)
 
-    def _new_hidden(
-        self,
-        x: jax.Array,
-        g_out: jax.Array,
-        h_out: jax.Array,
-        ts: jax.Array,
-    ) -> jax.Array:
+    def _timescale(self, x: torch.Tensor, ts: torch.Tensor) -> torch.Tensor:
+        """
+        Overridable method. Modulates the timespan before temporal gating.
+
+        Returns `ts` unchanged. Subclasses can override this to apply
+        custom timescale dynamics (e.g., per-channel decay rates).
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            Combined input and hidden state values of shape `(B, head_size)`
+        ts : torch.Tensor
+            Time elapsed since previous timestep
+
+        Returns
+        -------
+        ts : torch.Tensor
+            The modulated timespan
+        """
+        return ts
+
+    def _new_hidden(self, x: torch.Tensor, ts: torch.Tensor) -> torch.Tensor:
         """
         Helper method that computes the new hidden state.
 
         Parameters
         ----------
-        x : jax.Array
-            Input values
-        g_out : jax.Array
-            g_head output
-        h_out : jax.Array
-            h_head output
-        ts : jax.Array
+        x : torch.Tensor
+            Combined input and hidden state values of shape `(B, head_size)`
+        ts : torch.Tensor
             Time elapsed since previous timestep
 
         Returns
         -------
-        hidden : jax.Array
-            A new hidden state
+        hidden : torch.Tensor
+            A new hidden state of shape `(B, n_hidden)`
         """
-        g_head = self.tanh(g_out)  # g(x, I, θ_g)
-        h_head = self.tanh(h_out)  # h(x, I, θ_h)
+        g_head = self.tanh(self.g_head(x))  # g(x, I, θ_g)
+        h_head = self.tanh(self.h_head(x))  # h(x, I, θ_h)
 
         fh_g = self.f_head_to_g(x)
         fh_h = self.f_head_to_h(x)
 
-        gate_out = self.sigmoid(fh_g * ts + fh_h)  # [1 - σ(-[f(x, I, θf)], t)]
+        # [1 - σ(-[f(x, I, θf)], t)]
+        gate_out = self.sigmoid(fh_g * self._timescale(x, ts) + fh_h)
         f_head = 1.0 - gate_out  # σ(-f(x, I, θf), t)
 
         return g_head * f_head + gate_out * h_head
 
-    def __call__(
-        self, x: jax.Array, hidden: jax.Array, timespans: jax.Array
-    ) -> Tuple[jax.Array, jax.Array]:
+    def forward(
+        self,
+        x: torch.Tensor,
+        hidden: torch.Tensor,
+        ts: torch.Tensor,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Performs a forward pass through the cell.
 
-        Uses `timespans` to control the temporal gating mechanism for
+        Uses `ts` to control the temporal gating mechanism for
         continuous-time dynamics between hidden states.
 
         Parameters
         ----------
-        x : jax.Array
-            Input values
-        hidden : jax.Array
-            Current hidden state
-        timespans : jax.Array
-            Time elapsed since previous timestep.
-            Shape should be `(T,)`
+        x : torch.Tensor
+            Input values of shape `(B, in_features)`
+        hidden : torch.Tensor
+            Current hidden state of shape `(B, n_hidden)`
+        ts : torch.Tensor
+            Time elapsed since previous timestep. A scalar, or a
+            per-sample tensor broadcastable to `(B, n_hidden)`
 
         Returns
         -------
-        y_pred : jax.Array
-            The cell prediction
-        h_state : jax.Array
-            The hidden state
+        y_pred : torch.Tensor
+            The cell prediction of shape `(B, n_hidden)`
+        h_state : torch.Tensor
+            The new hidden state of shape `(B, n_hidden)`
         """
-        x = jnp.concat([x, hidden], axis=1)
+        x = torch.cat([x, hidden], dim=1)
 
-        g_out = self.g_head(x)
-        h_out = self.h_head(x)
-
-        new_hidden = self._new_hidden(x, g_out, h_out, timespans)
+        new_hidden = self._new_hidden(x, ts)
         return new_hidden, new_hidden
-
-    def diagnostics(
-        self, x: jax.Array, hidden: jax.Array, name: str = "cell"
-    ) -> Dict[str, float]:
-        """
-        Extract mechanism-specific metrics for logging.
-
-        Parameters
-        ----------
-        x : jax.Array
-            Current input `(B, in_features)`
-        hidden : jax.Array
-            Current hidden state `(B, n_hidden)`
-        name : str (optional)
-            Layer/cell name for logging
-
-        Returns
-        -------
-        metrics : Dict[str, float]
-            Diagnostic scalars for logging
-        """
-        x_cat = jnp.concat([x, hidden], axis=1)
-
-        fh_g = self.f_head_to_g(x_cat)
-        fh_h = self.f_head_to_h(x_cat)
-
-        # The uniform gate
-        gate = self.sigmoid(fh_g + fh_h)  # ts=1.0
-
-        return {
-            f"{name}/gate_mean": float(jnp.mean(gate)),
-            f"{name}/gate_std": float(jnp.std(gate)),
-            f"{name}/gate_min": float(jnp.min(gate)),
-            f"{name}/gate_max": float(jnp.max(gate)),
-        }
 
 
 class DecayLiquidCell(NCPLiquidCell):
@@ -356,15 +218,9 @@ class DecayLiquidCell(NCPLiquidCell):
         Number of input nodes
     n_hidden : int
         Number of hidden nodes
-    mask : jax.Array
+    mask : torch.Tensor
         A matrix of sparse connections usually containing a combination
         of `[-1, 1, 0]` values
-    rngs : flax.nnx.Rngs (optional)
-        Random number generator key.
-        Must have a `params=[value]` attribute
-    init_type : flax.nnx.nn.initializers (optional)
-        Initializer function for the weight matrix.
-        Default is `lecun_uniform()`
     alpha_rank : int (optional)
         Rank of the low-rank α projection. Default is `min(n_hidden, 4)`
     """
@@ -373,78 +229,36 @@ class DecayLiquidCell(NCPLiquidCell):
         self,
         in_features: int,
         n_hidden: int,
-        mask: jax.Array,
+        mask: torch.Tensor,
         *,
-        rngs: nnx.Rngs = nnx.Rngs(params=0),
-        init_type: Initializer = DEFAULT_HIDDEN_INIT,
         alpha_rank: int | None = None,
     ) -> None:
-        super().__init__(
-            in_features,
-            n_hidden,
-            mask,
-            rngs=rngs,
-            init_type=init_type,
-        )
+        super().__init__(in_features, n_hidden, mask)
 
-        self.alpha_rank = alpha_rank or min(n_hidden, 4)
+        self.alpha_rank = min(n_hidden, 4) if alpha_rank is None else alpha_rank
 
         # Per-channel decay: low-rank projection (head_size → rank → n_hidden)
-        self.alpha_down = nnx.Linear(self.head_size, self.alpha_rank, rngs=rngs)
-        self.alpha_up = nnx.Linear(self.alpha_rank, self.n_hidden, rngs=rngs)
+        self.alpha_down = nn.Linear(self.head_size, self.alpha_rank)
+        self.alpha_up = nn.Linear(self.alpha_rank, self.n_hidden)
 
-    @classmethod
-    def config(cls, *, alpha_rank: int | None = None) -> CellConfig:
+    def _timescale(self, x: torch.Tensor, ts: torch.Tensor) -> torch.Tensor:
         """
-        Returns a `CellConfig` for this cell type.
+        Modulates the timespan with per-channel decay rates `α` in `[0, 1]`.
 
         Parameters
         ----------
-        alpha_rank : int (optional)
-            Rank of the low-rank α projection.
-            Default is `None` (uses `min(n_hidden, 4)`)
+        x : torch.Tensor
+            Combined input and hidden state values of shape `(B, head_size)`
+        ts : torch.Tensor
+            Time elapsed since previous timestep
 
         Returns
         -------
-        config : CellConfig
-            A cell configuration for constructing this cell variant
+        ts : torch.Tensor
+            The decayed timespan of shape `(B, n_hidden)`
         """
-        return CellConfig(cls, alpha_rank=alpha_rank)
-
-    def _new_hidden(
-        self,
-        x: jax.Array,
-        g_out: jax.Array,
-        h_out: jax.Array,
-        ts: jax.Array,
-    ) -> jax.Array:
-        g_head = self.tanh(g_out)  # g(x, I, θ_g)
-        h_head = self.tanh(h_out)  # h(x, I, θ_h)
-
-        fh_g = self.f_head_to_g(x)
-        fh_h = self.f_head_to_h(x)
-
-        # Per-channel decay rate in [0, 1]
-        alpha = self.sigmoid(self.alpha_up(self.tanh(self.alpha_down(x))))  # type: ignore
-
-        # Modulate timespan per-channel before temporal gating
-        gate_out = self.sigmoid(fh_g * (ts * alpha) + fh_h)
-        f_head = 1.0 - gate_out
-
-        return g_head * f_head + gate_out * h_head
-
-    def diagnostics(
-        self, x: jax.Array, hidden: jax.Array, name: str = "cell"
-    ) -> Dict[str, float]:
-        x_cat = jnp.concat([x, hidden], axis=1)
-        alpha = self.sigmoid(self.alpha_up(self.tanh(self.alpha_down(x_cat))))
-
-        return {
-            f"{name}/alpha_mean": float(jnp.mean(alpha)),
-            f"{name}/alpha_std": float(jnp.std(alpha)),
-            f"{name}/alpha_min": float(jnp.min(alpha)),
-            f"{name}/alpha_max": float(jnp.max(alpha)),
-        }
+        alpha = self.sigmoid(self.alpha_up(self.tanh(self.alpha_down(x))))
+        return ts * alpha
 
 
 class DeltaErasureLiquidCell(NCPLiquidCell):
@@ -477,42 +291,55 @@ class DeltaErasureLiquidCell(NCPLiquidCell):
         Number of input nodes
     n_hidden : int
         Number of hidden nodes
-    mask : jax.Array
+    mask : torch.Tensor
         A matrix of sparse connections usually containing a combination
         of `[-1, 1, 0]` values
-    rngs : flax.nnx.Rngs (optional)
-        Random number generator key.
-        Must have a `params=[value]` attribute
-    init_type : flax.nnx.nn.initializers (optional)
-        Initializer function for the weight matrix.
-        Default is `lecun_uniform()`
     """
 
     def __init__(
         self,
         in_features: int,
         n_hidden: int,
-        mask: jax.Array,
-        *,
-        rngs: nnx.Rngs = nnx.Rngs(params=0),
-        init_type: Initializer = DEFAULT_HIDDEN_INIT,
+        mask: torch.Tensor,
     ) -> None:
-        super().__init__(
-            in_features,
-            n_hidden,
-            mask,
-            rngs=rngs,
-            init_type=init_type,
-        )
+        super().__init__(in_features, n_hidden, mask)
+
+        mask = self._prep_mask(mask)
 
         # Delta-rule erasure heads
-        self.reconstruct_head = self._make_layer()
-        self.beta_head = self._make_layer()
+        self.reconstruct_head = SparseLinear(self.head_size, self.n_hidden, mask)
+        self.beta_head = SparseLinear(self.head_size, self.n_hidden, mask)
 
-    def __call__(
-        self, x: jax.Array, hidden: jax.Array, timespans: jax.Array
-    ) -> Tuple[jax.Array, jax.Array]:
-        x_cat = jnp.concat([x, hidden], axis=1)
+    def forward(
+        self,
+        x: torch.Tensor,
+        hidden: torch.Tensor,
+        ts: torch.Tensor,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Performs a forward pass through the cell.
+
+        Corrects the hidden state toward the input's expectation before
+        applying the CfC temporal gating.
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            Input values of shape `(B, in_features)`
+        hidden : torch.Tensor
+            Current hidden state of shape `(B, n_hidden)`
+        ts : torch.Tensor
+            Time elapsed since previous timestep. A scalar, or a
+            per-sample tensor broadcastable to `(B, n_hidden)`
+
+        Returns
+        -------
+        y_pred : torch.Tensor
+            The cell prediction of shape `(B, n_hidden)`
+        h_state : torch.Tensor
+            The new hidden state of shape `(B, n_hidden)`
+        """
+        x_cat = torch.cat([x, hidden], dim=1)
 
         # Get hidden expectation
         expected = self.tanh(self.reconstruct_head(x_cat))
@@ -524,31 +351,13 @@ class DeltaErasureLiquidCell(NCPLiquidCell):
         hidden_corrected = hidden + beta * (expected - hidden)
 
         # CfC with corrected hidden
-        x = jnp.concat([x, hidden_corrected], axis=1)
+        x = torch.cat([x, hidden_corrected], dim=1)
 
-        g_out = self.g_head(x)
-        h_out = self.h_head(x)
-
-        new_hidden = self._new_hidden(x, g_out, h_out, timespans)
+        new_hidden = self._new_hidden(x, ts)
         return new_hidden, new_hidden
 
-    def diagnostics(
-        self, x: jax.Array, hidden: jax.Array, name: str = "cell"
-    ) -> Dict[str, float]:
-        x_cat = jnp.concat([x, hidden], axis=1)
 
-        expected = self.tanh(self.reconstruct_head(x_cat))
-        beta = self.sigmoid(self.beta_head(x_cat))
-        recon_error = jnp.mean(jnp.abs(expected - hidden))
-
-        return {
-            f"{name}/beta_mean": float(jnp.mean(beta)),
-            f"{name}/beta_std": float(jnp.std(beta)),
-            f"{name}/reconstruction_error": float(recon_error),
-        }
-
-
-class AdaptiveLiquidCell(NCPLiquidCell):
+class AdaptiveLiquidCell(DecayLiquidCell, DeltaErasureLiquidCell):
     """
     An enhanced CfC-LTC that combines per-channel decay AND delta-rule
     erasure.
@@ -579,15 +388,9 @@ class AdaptiveLiquidCell(NCPLiquidCell):
         Number of input nodes
     n_hidden : int
         Number of hidden nodes
-    mask : jax.Array
+    mask : torch.Tensor
         A matrix of sparse connections usually containing a combination
         of `[-1, 1, 0]` values
-    rngs : flax.nnx.Rngs (optional)
-        Random number generator key.
-        Must have a `params=[value]` attribute
-    init_type : flax.nnx.nn.initializers (optional)
-        Initializer function for the weight matrix.
-        Default is `lecun_uniform()`
     alpha_rank : int (optional)
         Rank of the low-rank α projection. Default is `min(n_hidden, 4)`
     """
@@ -596,114 +399,8 @@ class AdaptiveLiquidCell(NCPLiquidCell):
         self,
         in_features: int,
         n_hidden: int,
-        mask: jax.Array,
+        mask: torch.Tensor,
         *,
-        rngs: nnx.Rngs = nnx.Rngs(params=0),
-        init_type: Initializer = DEFAULT_HIDDEN_INIT,
         alpha_rank: int | None = None,
     ) -> None:
-        super().__init__(
-            in_features,
-            n_hidden,
-            mask,
-            rngs=rngs,
-            init_type=init_type,
-        )
-
-        self.alpha_rank = alpha_rank or min(n_hidden, 4)
-
-        # Per-channel decay: low-rank projection (head_size → rank → n_hidden)
-        self.alpha_down = nnx.Linear(self.head_size, self.alpha_rank, rngs=rngs)
-        self.alpha_up = nnx.Linear(self.alpha_rank, self.n_hidden, rngs=rngs)
-
-        # Delta-rule erasure heads
-        self.reconstruct_head = self._make_layer()
-        self.beta_head = self._make_layer()
-
-    @classmethod
-    def config(cls, *, alpha_rank: int | None = None) -> CellConfig:
-        """
-        Returns a `CellConfig` for this cell type.
-
-        Parameters
-        ----------
-        alpha_rank : int (optional)
-            Rank of the low-rank α projection.
-            Default is `None` (uses `min(n_hidden, 4)`)
-
-        Returns
-        -------
-        config : CellConfig
-            A cell configuration for constructing this cell variant
-        """
-        return CellConfig(cls, alpha_rank=alpha_rank)
-
-    def _new_hidden(
-        self,
-        x: jax.Array,
-        g_out: jax.Array,
-        h_out: jax.Array,
-        ts: jax.Array,
-    ) -> jax.Array:
-        g_head = self.tanh(g_out)  # g(x, I, θ_g)
-        h_head = self.tanh(h_out)  # h(x, I, θ_h)
-
-        fh_g = self.f_head_to_g(x)
-        fh_h = self.f_head_to_h(x)
-
-        # Per-channel decay rate in [0, 1]
-        alpha = self.sigmoid(self.alpha_up(self.tanh(self.alpha_down(x))))  # type: ignore
-
-        # Modulate timespan per-channel before temporal gating
-        gate_out = self.sigmoid(fh_g * (ts * alpha) + fh_h)
-        f_head = 1.0 - gate_out
-
-        return g_head * f_head + gate_out * h_head
-
-    def __call__(
-        self, x: jax.Array, hidden: jax.Array, timespans: jax.Array
-    ) -> Tuple[jax.Array, jax.Array]:
-        x_cat = jnp.concat([x, hidden], axis=1)
-
-        # Get hidden expectation
-        expected = self.tanh(self.reconstruct_head(x_cat))
-
-        # Per-dimension correction strength
-        beta = self.sigmoid(self.beta_head(x_cat))
-
-        # Selective correction: β=0 keeps old, β=1 overwrites
-        hidden_corrected = hidden + beta * (expected - hidden)
-
-        # CfC with corrected hidden
-        x = jnp.concat([x, hidden_corrected], axis=1)
-
-        g_out = self.g_head(x)
-        h_out = self.h_head(x)
-
-        new_hidden = self._new_hidden(x, g_out, h_out, timespans)
-        return new_hidden, new_hidden
-
-    def diagnostics(
-        self, x: jax.Array, hidden: jax.Array, name: str = "cell"
-    ) -> Dict[str, float]:
-        x_cat = jnp.concat([x, hidden], axis=1)
-
-        # Erasure metrics
-        expected = self.tanh(self.reconstruct_head(x_cat))
-        beta = self.sigmoid(self.beta_head(x_cat))
-        recon_error = jnp.mean(jnp.abs(expected - hidden))
-
-        # Alpha distribution
-        hidden_corrected = hidden + beta * (expected - hidden)
-        x_corrected = jnp.concat([x, hidden_corrected], axis=1)
-        alpha = self.sigmoid(self.alpha_up(self.tanh(self.alpha_down(x_corrected))))
-
-        return {
-            f"{name}/alpha_mean": float(jnp.mean(alpha).item()),
-            f"{name}/alpha_std": float(jnp.std(alpha).item()),
-            f"{name}/alpha_min": float(jnp.min(alpha).item()),
-            f"{name}/alpha_max": float(jnp.max(alpha).item()),
-            f"{name}/beta_mean": float(jnp.mean(beta).item()),
-            f"{name}/beta_std": float(jnp.std(beta).item()),
-            f"{name}/reconstruction_error": float(recon_error.item()),
-        }
+        super().__init__(in_features, n_hidden, mask, alpha_rank=alpha_rank)
