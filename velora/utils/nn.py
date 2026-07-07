@@ -13,44 +13,41 @@
 # limitations under the License.
 # ==============================================================================
 
-import jax
-import numpy as np
-from flax import nnx
+import torch
+from torch import nn
 
 
-def total_parameters(model: nnx.Module) -> int:
+def total_parameters(model: nn.Module) -> int:
     """
-    Calculates the total number of parameters used in a Flax `nnx.Module`.
+    Calculates the total number of parameters used in a `nn.Module`.
 
     Parameters
     ----------
-    model : nnx.Module
-        A Flax module with parameters
+    model : nn.Module
+        A module with parameters
 
     Returns
     -------
     count : int
         The total number of parameters
     """
-    params = nnx.state(model, nnx.Param)
-    return np.sum([np.prod(p.shape) for p in jax.tree_util.tree_leaves(params)])
+    return sum(p.numel() for p in model.parameters())
 
 
-def active_parameters(model: nnx.Module) -> int:
+def active_parameters(model: nn.Module) -> int:
     """
-    Calculates the active number of parameters used in a Flax `nnx.Module`.
+    Calculates the active number of parameters used in a `nn.Module`.
 
     Filters out parameters that are `0`.
 
     Parameters
     ----------
-    model : nnx.Module
-        A Flax module with parameters
+    model : nn.Module
+        A module with parameters
 
     Returns
     -------
     count : int
         The total active number of parameters
     """
-    params = nnx.state(model, nnx.Param)
-    return np.sum([p[(p != 0)].shape for p in jax.tree_util.tree_leaves(params)])
+    return sum(int(torch.count_nonzero(p)) for p in model.parameters())
