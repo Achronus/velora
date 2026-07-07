@@ -1,4 +1,4 @@
-# Copyright 2025 Achronus
+# Copyright 2026 Achronus
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -13,14 +13,12 @@
 # limitations under the License.
 # ==============================================================================
 
-import jax
-from flax import nnx
-from flax.typing import Initializer
-
-from velora.lnn.constants import DEFAULT_BIAS_INIT, DEFAULT_HIDDEN_INIT
+import torch
+import torch.nn.functional as F
+from torch import nn
 
 
-class SparseLinear(nnx.Module):
+class SparseLinear(nn.Module):
     """
     A linear layer with sparsely weighted connections.
 
@@ -35,55 +33,46 @@ class SparseLinear(nnx.Module):
         Number of input features
     out_features : int
         Number of output features
-    mask : jax.Array
+    mask : torch.Tensor
         Sparsity mask (m) tensor of shape
         `(out_features, in_features)`
-    rngs : flax.nnx.Rngs (optional)
-        Random number generator key.
-        Must have a `params=[value]` attribute
-    hidden_init : flax.nnx.nn.initializers (optional)
-        Initializer function for the weight matrix.
-        Default is `lecun_uniform()`
-    bias_init : flax.nnx.nn.initializers (optional)
-        Initializer function for the bias.
-        Default is `zeros_init()`
     """
+
+    mask: torch.Tensor
 
     def __init__(
         self,
         in_features: int,
         out_features: int,
-        mask: jax.Array,
-        *,
-        rngs: nnx.Rngs = nnx.Rngs(params=0),
-        hidden_init: Initializer = DEFAULT_HIDDEN_INIT,
-        bias_init: Initializer = DEFAULT_BIAS_INIT,
+        mask: torch.Tensor,
     ) -> None:
+        super().__init__()
+
         self.in_features = in_features
         self.out_features = out_features
-        self.mask = nnx.Variable(mask)
-        self.kernel_init = hidden_init
-        self.bias_init = bias_init
 
-        weight_key = rngs.params()
-        weights = hidden_init(weight_key, (in_features, out_features))
-        self.weights = nnx.Param(weights * self.mask)
+        weights = torch.nn.init.kaiming_uniform_(
+            torch.empty((out_features, in_features)),
+            nonlinearity="linear",
+        )
 
-        bias_key = rngs.params()
-        self.bias = nnx.Param(bias_init(bias_key, (out_features,)))
+        self.register_buffer("mask", mask)
 
-    def __call__(self, x: jax.Array) -> jax.Array:
+        self.weights = nn.Parameter(weights * self.mask)
+        self.bias = nn.Parameter(torch.zeros((out_features,)))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         Applies a linear transformation to the inputs along the last dimension.
 
         Parameters
         ----------
-        x : jax.Array
+        x : torch.Tensor
             The array to transform with shape `(..., in_features)`
 
         Returns
         -------
-        y_pred : jax.Array
+        y_pred : torch.Tensor
             The layer prediction with sparsity applied. Has shape `(..., out_features)`
         """
-        return x @ (self.weights * self.mask) + self.bias
+        return F.linear(x, self.weights * self.mask, self.bias)

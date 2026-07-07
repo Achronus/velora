@@ -1,4 +1,5 @@
-# Copyright 2025 Achronus
+# Copyright 2026 Achronus
+# Copyright 2022 Garena Online Private Limited
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,170 +13,332 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
-
-import jax
-import jax.numpy as jnp
-import optax
-from flax import struct
+# The `Adan` optimizer is adapted from the official implementation at
+# https://github.com/sail-sg/Adan (Apache-2.0), with modifications.
 
 
-def scale_by_adam_no_denom(
-    b1: float = 0.9,
-    b2: float = 0.999,
-    eps: float = 1e-8,
-) -> optax.GradientTransformation:
+import math
+from typing import Any, Callable, Dict, Iterable, List, Tuple
+
+import torch
+from torch.optim import Optimizer
+
+ParamsT = (
+    Iterable[torch.Tensor]
+    | Iterable[dict[str, Any]]
+    | Iterable[tuple[str, torch.Tensor]]
+)
+
+
+class Adan(Optimizer):
     """
-    Adam grad rescaling; but denominator does not receive meta-gradients.
-
-    References -
-        - [Oh et al., 2025 (GitHub)](https://github.com/google-deepmind/disco_rl/)
-        - [Kingma et al, 2014](https://arxiv.org/abs/1412.6980)
+    Adan (Adaptive Nesterov Momentum Algorithm) optimizer from the paper:
+    [Adan: Adaptive Nesterov Momentum Algorithm for Faster Optimizing Deep Models](https://arxiv.org/abs/2208.06677).
 
     Parameters
     ----------
-    b1 : float (optional)
-        Decay rate for the exponentially weighted average of grads.
-        Default is `0.9`
-    b2 : float (optional)
-        Decay rate for the exponentially weighted average of squared grads.
-        Default is `0.999`
+    params : ParamsT
+        Iterable of parameters to optimize or
+        dicts defining parameter groups.
+    lr : float (optional)
+        Learning rate. Default is `1e-3`
+    betas : Tuple[float, float, float] (optional)
+        coefficients used for first- and second-order moments.
+        Default is `(0.98, 0.92, 0.99)`
     eps : float (optional)
-        Term added to the denominator to improve numerical stability.
-        Default is `1e-8`
-
-    Returns
-    -------
-    transform : optax.GradientTransformation
-        Returns a new object with an `init_fn` and `update_fn`
+        Term added to the denominator to improve
+        numerical stability. Default is `1e-8`
+    weight_decay : float (optional)
+        Decoupled weight decay (L2 penalty). Default is `0`
+    max_grad_norm : float (optional)
+        Value used to clip global grad norm. Default is `0.0` (no clip)
+    no_prox : bool (optional)
+        How to perform the decoupled weight decay. Default is `False`
     """
 
-    def init_fn(params):
-        mu = jax.tree.map(jnp.zeros_like, params)  # First moment.
-        nu = jax.tree.map(jnp.zeros_like, params)  # Second moment.
-        return optax.ScaleByAdamState(count=jnp.zeros([], jnp.int32), mu=mu, nu=nu)
+    def __init__(
+        self,
+        params: ParamsT,
+        lr: float = 1e-3,
+        betas: Tuple[float, float, float] = (0.98, 0.92, 0.99),
+        eps: float = 1e-8,
+        weight_decay: float = 0.0,
+        max_grad_norm: float = 0.0,
+        no_prox: bool = False,
+    ):
+        for name, value in (("lr", lr), ("eps", eps), ("max_grad_norm", max_grad_norm)):
+            if value < 0.0:
+                raise ValueError(f"'{name}' must be non-negative, got '{value}'")
 
-    def update_fn(updates, state, params=None):
-        del params
-        mu = optax.update_moment(updates, state.mu, b1, 1)
-        nu = optax.update_moment(updates, state.nu, b2, 2)
-        count_inc = optax.safe_int32_increment(state.count)
-        mu_hat = optax.bias_correction(mu, b1, count_inc)
-        nu_hat = optax.bias_correction(nu, b2, count_inc)
-        updates = jax.tree.map(
-            lambda m, v: m / (jnp.sqrt(v) + eps),
-            mu_hat,
-            jax.lax.stop_gradient(nu_hat),  # NOTE: stop_gradient on nu_hat here
+        for i, beta in enumerate(betas):
+            if not 0.0 <= beta < 1.0:
+                raise ValueError(f"'betas[{i}]' must be in '[0.0, 1.0)', got '{beta}'")
+
+        defaults = dict(
+            lr=lr,
+            betas=betas,
+            eps=eps,
+            weight_decay=weight_decay,
+            max_grad_norm=max_grad_norm,
+            no_prox=no_prox,
         )
-        return updates, optax.ScaleByAdamState(count=count_inc, mu=mu, nu=nu)  # type: ignore
+        super().__init__(params, defaults)
 
-    return optax.GradientTransformation(init_fn, update_fn)
+    def __setstate__(self, state: Dict[str, Any]) -> None:
+        """
+        Restore the optimizer from a pickled `state`.
+
+        Ensures parameter groups saved without the `no_prox` option
+        receive its default value.
+
+        Parameters
+        ----------
+        state : Dict[str, Any]
+            Unpickled optimizer state.
+        """
+
+        super(Adan, self).__setstate__(state)
+
+        for group in self.param_groups:
+            group.setdefault("no_prox", False)
+
+    @torch.no_grad()
+    def restart_opt(self) -> None:
+        """
+        Reset the optimizer to a freshly constructed state.
+
+        Zeroes the moment buffers (`exp_avg`, `exp_avg_sq`, `exp_avg_diff`)
+        and resets the step counter for every parameter group.
+        """
+
+        for group in self.param_groups:
+            group["step"] = 0
+            for p in group["params"]:
+                if p.requires_grad:
+                    state = self.state[p]
+
+                    # Exponential moving average of gradient values
+                    state["exp_avg"] = torch.zeros_like(p)
+                    # Exponential moving average of squared gradient values
+                    state["exp_avg_sq"] = torch.zeros_like(p)
+                    # Exponential moving average of gradient difference
+                    state["exp_avg_diff"] = torch.zeros_like(p)
+
+    @torch.no_grad()
+    def step(self, closure: Callable[[], float] | None = None) -> float | None:  # type: ignore
+        """
+        Perform a single optimization step to update the parameters.
+
+        Parameters
+        ----------
+        closure : Callable[[], float] (optional)
+            A closure that reevaluates the model and
+            returns the loss. Optional for most optimizers.
+
+        Returns
+        -------
+        loss : float | None
+            The loss returned by `closure`, or `None` when
+            no closure is given.
+        """
+
+        loss = None
+        if closure is not None:
+            with torch.enable_grad():
+                loss = closure()
+
+        if self.defaults["max_grad_norm"] > 0:
+            device = self.param_groups[0]["params"][0].device
+            global_grad_norm = torch.zeros(1, device=device)
+
+            max_grad_norm = torch.tensor(self.defaults["max_grad_norm"], device=device)
+            for group in self.param_groups:
+                for p in group["params"]:
+                    if p.grad is not None:
+                        grad = p.grad
+                        global_grad_norm.add_(grad.pow(2).sum())
+
+            global_grad_norm = torch.sqrt(global_grad_norm)
+
+            clip_global_grad_norm = torch.clamp(
+                max_grad_norm / (global_grad_norm + self.defaults["eps"]),
+                max=1.0,
+            ).item()
+        else:
+            clip_global_grad_norm = 1.0
+
+        for group in self.param_groups:
+            params_with_grad = []
+            grads = []
+            exp_avgs = []
+            exp_avg_sqs = []
+            exp_avg_diffs = []
+            neg_pre_grads = []
+
+            beta1, beta2, beta3 = group["betas"]
+            # assume same step across group now to simplify things
+            # per parameter step can be easily support
+            # by making it tensor, or pass list into kernel
+            if "step" in group:
+                group["step"] += 1
+            else:
+                group["step"] = 1
+
+            bias_correction1 = 1.0 - beta1 ** group["step"]
+            bias_correction2 = 1.0 - beta2 ** group["step"]
+            bias_correction3 = 1.0 - beta3 ** group["step"]
+
+            for p in group["params"]:
+                if p.grad is None:
+                    continue
+                params_with_grad.append(p)
+                grads.append(p.grad)
+
+                state = self.state[p]
+                if len(state) == 0:
+                    state["exp_avg"] = torch.zeros_like(p)
+                    state["exp_avg_sq"] = torch.zeros_like(p)
+                    state["exp_avg_diff"] = torch.zeros_like(p)
+
+                if "neg_pre_grad" not in state or group["step"] == 1:
+                    state["neg_pre_grad"] = p.grad.clone().mul_(-clip_global_grad_norm)
+
+                exp_avgs.append(state["exp_avg"])
+                exp_avg_sqs.append(state["exp_avg_sq"])
+                exp_avg_diffs.append(state["exp_avg_diff"])
+                neg_pre_grads.append(state["neg_pre_grad"])
+
+            if not params_with_grad:
+                continue
+
+            kwargs = dict(
+                params=params_with_grad,
+                grads=grads,
+                exp_avgs=exp_avgs,
+                exp_avg_sqs=exp_avg_sqs,
+                exp_avg_diffs=exp_avg_diffs,
+                neg_pre_grads=neg_pre_grads,
+                beta1=beta1,
+                beta2=beta2,
+                beta3=beta3,
+                bias_correction1=bias_correction1,
+                bias_correction2=bias_correction2,
+                bias_correction3_sqrt=math.sqrt(bias_correction3),
+                lr=group["lr"],
+                weight_decay=group["weight_decay"],
+                eps=group["eps"],
+                no_prox=group["no_prox"],
+                clip_global_grad_norm=clip_global_grad_norm,
+            )
+
+            _multi_tensor_adan(**kwargs)
+
+        return loss
 
 
-@struct.dataclass
-class ScaleByAdanState:
+def _multi_tensor_adan(
+    params: List[torch.Tensor],
+    grads: List[torch.Tensor],
+    exp_avgs: List[torch.Tensor],
+    exp_avg_sqs: List[torch.Tensor],
+    exp_avg_diffs: List[torch.Tensor],
+    neg_pre_grads: List[torch.Tensor],
+    *,
+    beta1: float,
+    beta2: float,
+    beta3: float,
+    bias_correction1: float,
+    bias_correction2: float,
+    bias_correction3_sqrt: float,
+    lr: float,
+    weight_decay: float,
+    eps: float,
+    no_prox: bool,
+    clip_global_grad_norm: float,
+) -> None:
     """
-    State for the Adan algorithm.
+    Apply the Adan update to a list of parameters using `torch._foreach_*` ops.
+
+    All buffers are updated in place. `neg_pre_grads` doubles as scratch
+    space during the update and holds the negated `grads` on exit, ready
+    for the next step.
 
     Parameters
     ----------
-    count : jax.Array
-        Number of update steps taken.
-    mu : optax.Updates
-        Exponentially weighted average of gradients (first moment).
-    nu : optax.Updates
-        Exponentially weighted average of gradient differences.
-    n : optax.Updates
-        Exponentially weighted average of squared NME gradients (second moment).
-    prev_grad : optax.Updates
-        Gradient from the previous step, used to compute gradient differences.
+    params : List[torch.Tensor]
+        Parameters to update.
+    grads : List[torch.Tensor]
+        Gradients for each parameter.
+    exp_avgs : List[torch.Tensor]
+        First moment buffers (`m_t`).
+    exp_avg_sqs : List[torch.Tensor]
+        Second moment buffers (`n_t`).
+    exp_avg_diffs : List[torch.Tensor]
+        Gradient difference moment buffers (`v_t`).
+    neg_pre_grads : List[torch.Tensor]
+        Negated gradients from the previous step.
+    beta1 : float
+        Decay rate for the first moment.
+    beta2 : float
+        Decay rate for the gradient difference moment.
+    beta3 : float
+        Decay rate for the second moment.
+    bias_correction1 : float
+        Bias correction term for `beta1`.
+    bias_correction2 : float
+        Bias correction term for `beta2`.
+    bias_correction3_sqrt : float
+        Square root of the bias correction term for `beta3`.
+    lr : float
+        Learning rate.
+    weight_decay : float
+        Decoupled weight decay coefficient.
+    eps : float
+        Numerical stability constant.
+    no_prox : bool
+        When `True`, applies weight decay multiplicatively before the
+        update instead of using the proximal form.
+    clip_global_grad_norm : float
+        Global gradient clipping scale applied to `grads`.
     """
 
-    count: jax.Array
-    mu: optax.Updates
-    nu: optax.Updates
-    n: optax.Updates
-    prev_grad: optax.Updates
+    if len(params) == 0:
+        return
 
+    torch._foreach_mul_(grads, clip_global_grad_norm)
 
-def scale_by_adan_no_denom(
-    b1: float = 0.98,
-    b2: float = 0.92,
-    b3: float = 0.99,
-    eps: float = 1e-8,
-) -> optax.GradientTransformation:
-    """
-    Adan grad rescaling; denominator does not receive meta-gradients.
+    # for memory saving, we use `neg_pre_grads`
+    # to get some temp variable in a inplace way
+    torch._foreach_add_(neg_pre_grads, grads)
 
-    References:
-        - [Xie et al., 2024](https://arxiv.org/abs/2208.06677)
+    torch._foreach_mul_(exp_avgs, beta1)
+    torch._foreach_add_(exp_avgs, grads, alpha=1 - beta1)  # m_t
 
-    Parameters
-    ----------
-    b1 : float (optional)
-        Decay rate for first moment. Default is `0.98`.
-    b2 : float (optional)
-        Decay rate for gradient difference moment. Default is `0.92`.
-    b3 : float (optional)
-        Decay rate for second moment. Default is `0.99`.
-    eps : float (optional)
-        Numerical stability constant. Default is `1e-8`.
+    torch._foreach_mul_(exp_avg_diffs, beta2)
+    torch._foreach_add_(exp_avg_diffs, neg_pre_grads, alpha=1 - beta2)  # diff_t
 
-    Returns
-    -------
-    transform : optax.GradientTransformation
-    """
+    torch._foreach_mul_(neg_pre_grads, beta2)
+    torch._foreach_add_(neg_pre_grads, grads)
+    torch._foreach_mul_(exp_avg_sqs, beta3)
+    torch._foreach_addcmul_(
+        exp_avg_sqs, neg_pre_grads, neg_pre_grads, value=1 - beta3
+    )  # n_t
 
-    def init_fn(params: optax.Params) -> ScaleByAdanState:
-        return ScaleByAdanState(
-            count=jnp.zeros([], jnp.int32),
-            mu=jax.tree.map(jnp.zeros_like, params),
-            nu=jax.tree.map(jnp.zeros_like, params),
-            n=jax.tree.map(jnp.zeros_like, params),
-            prev_grad=jax.tree.map(jnp.zeros_like, params),
-        )
+    denom = torch._foreach_sqrt(exp_avg_sqs)
+    torch._foreach_div_(denom, bias_correction3_sqrt)
+    torch._foreach_add_(denom, eps)
 
-    def update_fn(
-        updates: optax.Updates,
-        state: ScaleByAdanState,
-        params: optax.Params | None = None,
-    ) -> tuple[optax.Updates, ScaleByAdanState]:
-        del params
-        count_inc = optax.safe_int32_increment(state.count)
+    step_size_diff = lr * beta2 / bias_correction2
+    step_size = lr / bias_correction1
 
-        # Gradient difference: (g_k - g_{k-1})
-        grad_diff = jax.tree.map(lambda g, gp: g - gp, updates, state.prev_grad)
+    if no_prox:
+        torch._foreach_mul_(params, 1 - lr * weight_decay)
+        torch._foreach_addcdiv_(params, exp_avgs, denom, value=-step_size)
+        torch._foreach_addcdiv_(params, exp_avg_diffs, denom, value=-step_size_diff)
+    else:
+        torch._foreach_addcdiv_(params, exp_avgs, denom, value=-step_size)
+        torch._foreach_addcdiv_(params, exp_avg_diffs, denom, value=-step_size_diff)
+        torch._foreach_div_(params, 1 + lr * weight_decay)
 
-        # First moment: m_k
-        mu = optax.update_moment(updates, state.mu, b1, 1)
-
-        # Gradient difference moment: v_k
-        nu = optax.update_moment(grad_diff, state.nu, b2, 1)
-
-        # NME gradient: g'_k = g_k + (1 - b2) * (g_k - g_{k-1})
-        nme_grad = jax.tree.map(lambda g, gd: g + (1.0 - b2) * gd, updates, grad_diff)
-
-        # Second moment: n_k using NME gradient
-        n = optax.update_moment(nme_grad, state.n, b3, 2)
-
-        # Bias correction
-        mu_hat = optax.bias_correction(mu, b1, count_inc)
-        nu_hat = optax.bias_correction(nu, b2, count_inc)
-        n_hat = optax.bias_correction(n, b3, count_inc)
-
-        # Update: (m + (1-b2)*v) / (sqrt(n) + eps)
-        new_updates = jax.tree.map(
-            lambda m, v, n_val: (m + (1.0 - b2) * v) / (jnp.sqrt(n_val) + eps),
-            mu_hat,
-            nu_hat,
-            jax.lax.stop_gradient(n_hat),
-        )
-
-        return new_updates, ScaleByAdanState(
-            count=count_inc,  # type: ignore
-            mu=mu,
-            nu=nu,
-            n=n,
-            prev_grad=updates,
-        )
-
-    return optax.GradientTransformation(init_fn, update_fn)  # type: ignore
+    torch._foreach_zero_(neg_pre_grads)
+    torch._foreach_add_(neg_pre_grads, grads, alpha=-1.0)
