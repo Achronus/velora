@@ -133,6 +133,18 @@ class CfCBackbone(nn.Module):
         self._active_params = active_parameters(self)
 
     @property
+    def command_size(self) -> int:
+        """
+        Gets the command layer's neuron count (the `embedding` width).
+
+        Returns
+        -------
+        count : int
+            The number of command neurons
+        """
+        return self.hidden_sizes[1]
+
+    @property
     def total_params(self) -> int:
         """
         Gets the network's total parameter count.
