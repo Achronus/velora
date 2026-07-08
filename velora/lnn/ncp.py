@@ -13,7 +13,7 @@
 # limitations under the License.
 # ==============================================================================
 
-from typing import Dict, List, Tuple
+from typing import Tuple
 
 import torch
 from torch import nn
@@ -25,13 +25,12 @@ from velora.utils.nn import active_parameters, total_parameters
 
 class LNN(nn.Module):
     """
-    A CfC Liquid Neural Circuit Policy (NCP) Network with two core layers and
-    dynamic output heads.
+    A CfC Liquid Neural Circuit Policy (NCP) Network with three layers.
 
     Layers -
         1. Inter (input) - a `AdaptiveLiquidCell` layer
         2. Command (hidden) - a `AdaptiveLiquidCell` layer
-        3. Motor (output) - one  `AdaptiveLiquidCell` layer per `heads` entry
+        3. Motor (output) - a `AdaptiveLiquidCell` layer
 
     ??? note "Decision nodes"
 
@@ -54,9 +53,8 @@ class LNN(nn.Module):
         Number of inputs (sensory nodes)
     n_neurons : int
         Number of decision nodes (inter + command nodes)
-    heads : Dict[str, int]
-        Motor head output sizes keyed by head name,
-        e.g. `{"pi": 64, "y": 8}`
+    out_features : int
+        Number of output features
     seed : int (optional)
         Random number generator seed. Default is `28`
     sparsity : float (optional)
@@ -74,8 +72,8 @@ class LNN(nn.Module):
         self,
         in_features: int,
         n_neurons: int,
+        out_features: int,
         *,
-        heads: Dict[str, int],
         seed: int = 28,
         sparsity: float = 0.5,
         alpha_rank: int | None = None,
@@ -84,12 +82,13 @@ class LNN(nn.Module):
 
         self.in_features = in_features
         self.n_neurons = n_neurons
+        self.out_features = out_features
         self.sparsity = sparsity
 
         wiring = build_wiring(
             in_features,
             n_neurons,
-            heads,
+            heads={"out": out_features},
             seed=seed,
             sparsity=sparsity,
         )  # masks = (out, in)
@@ -111,22 +110,17 @@ class LNN(nn.Module):
         )
 
         # Motor heads: command -> motors (outputs)
-        self.motor = nn.ModuleDict(
-            {
-                name: AdaptiveLiquidCell(
-                    wiring.command.shape[0],
-                    mask.shape[0],
-                    mask,
-                    alpha_rank=alpha_rank,
-                )
-                for name, mask in wiring.heads.items()
-            }
+        self.motor = AdaptiveLiquidCell(
+            wiring.command.shape[0],
+            wiring.heads["out"].shape[0],
+            wiring.heads["out"],
+            alpha_rank=alpha_rank,
         )
 
         self.hidden_sizes = [
             wiring.inter.shape[0],
             wiring.command.shape[0],
-            *[m.shape[0] for m in wiring.heads.values()],
+            wiring.heads["out"].shape[0],
         ]
         self.hidden_size = sum(self.hidden_sizes)
 
@@ -220,8 +214,7 @@ class LNN(nn.Module):
         x: torch.Tensor,
         h: torch.Tensor | None = None,
         ts: torch.Tensor | None = None,
-        reverse: bool = False,
-    ) -> Tuple[Dict[str, torch.Tensor], torch.Tensor]:
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Performs a forward pass through the network, one timestep at a time.
 
@@ -249,56 +242,30 @@ class LNN(nn.Module):
             Time elapsed since previous timestep.
             For fixed intervals set to `None`. For varying timesteps
             shape should be `(T,)`
-        reverse : bool (optional)
-            A flag that processes the sequence back-to-front for
-            bootstrapping. Predictions are returned in forward order.
-            Default is `False`
 
         Returns
         -------
-        preds : Dict[str, torch.Tensor]
-            Network predictions of shape `(B, T, F_out)`, keyed by motor
-            head name, plus the command layer output under the reserved
-            key `embedding`. E.g., `{embedding, out}`
+        preds : torch.Tensor
+            Network predictions of shape `(B, T, F_out)`
         h_state : torch.Tensor
             The final hidden state of shape `(B, H)`
         """
         x, h, ts = self._preprocess(x, h, ts)
 
-        if reverse:
-            x = x.flip(1)
-            ts = ts.flip(0)
-
         # Split hidden for each layer
-        h_inter, h_command, *h_heads = h.split(self.hidden_sizes, dim=1)
-
-        embeds = []
-        outputs: Dict[str, List] = {name: [] for name in self.motor}
+        h_inter, h_command, h_motor = h.split(self.hidden_sizes, dim=1)
 
         # Iterate over T dim
+        y_preds = []
         for t in range(x.shape[1]):
             x_t, ts_t = x[:, t], ts[t]
 
             x_t, h_inter = self.inter(x_t, h_inter, ts_t)
             embed_t, h_command = self.command(x_t, h_command, ts_t)
+            y_t, h_motor = self.motor(embed_t, h_motor, ts_t)
+            y_preds.append(y_t)
 
-            new_h_heads = []
+        h_state = torch.cat([h_inter, h_command, h_motor], dim=1)
+        y_preds = torch.stack(y_preds, dim=1)
 
-            # Iterate through each motor head
-            for (name, head), h_head in zip(self.motor.items(), h_heads):
-                out_t, h_head = head(embed_t, h_head, ts_t)
-                outputs[name].append(out_t)
-                new_h_heads.append(h_head)
-
-            h_heads = new_h_heads
-            embeds.append(embed_t)
-
-        # Stack results back into an output dictionary
-        preds = {name: torch.stack(outs, dim=1) for name, outs in outputs.items()}
-        preds["embedding"] = torch.stack(embeds, dim=1)
-
-        if reverse:
-            preds = {name: p.flip(1) for name, p in preds.items()}
-
-        h_state = torch.cat([h_inter, h_command, *h_heads], dim=1)
-        return preds, h_state
+        return y_preds, h_state
