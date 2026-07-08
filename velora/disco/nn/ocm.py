@@ -18,7 +18,7 @@ from typing import NamedTuple, Tuple
 import torch
 from torch import nn
 
-from velora.lnn.backbone import CfCBackbone
+from velora.lnn.ncp import LNN
 
 
 class OCMPredictions(NamedTuple):
@@ -103,7 +103,7 @@ class OCM(nn.Module):
         self.pi_hidden_dim = prediction_size
         self.sparsity = sparsity
 
-        self.backbone = CfCBackbone(
+        self.lnn = LNN(
             obs_dim,
             n_neurons,
             heads={"pi": self.pi_hidden_dim, "y": self.y_dim},
@@ -112,7 +112,7 @@ class OCM(nn.Module):
             alpha_rank=alpha_rank,
         )
 
-        self.embedding_size = self.backbone.command_size
+        self.embedding_size = self.lnn.command_size
 
     def forward(
         self,
@@ -151,5 +151,5 @@ class OCM(nn.Module):
         h : torch.Tensor
             Final hidden state with shape `(B, H)`
         """
-        preds, h_state = self.backbone(obs, h=h, ts=ts)
+        preds, h_state = self.lnn(obs, h=h, ts=ts)
         return OCMPredictions(preds["embedding"], preds["pi"], preds["y"]), h_state

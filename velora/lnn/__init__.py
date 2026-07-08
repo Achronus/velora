@@ -1,4 +1,3 @@
-from velora.lnn.backbone import CfCBackbone
 from velora.lnn.cell import (
     AdaptiveLiquidCell,
     DecayLiquidCell,
@@ -14,6 +13,5 @@ __all__ = [
     "DeltaErasureLiquidCell",
     "LNN",
     "NCPLiquidCell",
-    "CfCBackbone",
     "build_wiring",
 ]
