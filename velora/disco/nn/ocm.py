@@ -18,7 +18,10 @@ from typing import NamedTuple, Tuple
 import torch
 from torch import nn
 
-from velora.lnn.ncp import LNN
+from velora.disco.nn.cfc import CfCCore, prepare_inputs, scan_head
+from velora.lnn.cell import AdaptiveLiquidCell
+from velora.lnn.wiring import build_wiring
+from velora.utils.nn import active_parameters, total_parameters
 
 
 class OCMPredictions(NamedTuple):
@@ -57,11 +60,13 @@ class OCM(nn.Module):
     An Observation-Conditional Model (OCM) used to encode observations and
     capture state-level information that is usable by the meta-network.
 
-    Uses a Liquid Neural Network (LNN) architecture with 2 output heads:
+    Uses a CfC-LNN core with 2 output heads:
 
         1. Policy: π(s, a) - policy logits for action probabilities.
         2. Observation-conditioned prediction: y(s) - state-level
            features with discovered semantics.
+
+    Hidden state layout: `[core (inter, command), pi, y]`.
 
     Parameters
     ----------
@@ -103,16 +108,36 @@ class OCM(nn.Module):
         self.pi_hidden_dim = prediction_size
         self.sparsity = sparsity
 
-        self.lnn = LNN(
+        wiring = build_wiring(
             obs_dim,
             n_neurons,
-            heads={"pi": self.pi_hidden_dim, "y": self.y_dim},
+            {"pi": self.pi_hidden_dim, "y": self.y_dim},
             seed=seed,
             sparsity=sparsity,
+        )  # masks = (out, in)
+
+        self.core = CfCCore(wiring.inter, wiring.command, alpha_rank=alpha_rank)
+
+        self.pi_head = AdaptiveLiquidCell(
+            self.core.command_size,
+            self.pi_hidden_dim,
+            wiring.heads["pi"],
+            alpha_rank=alpha_rank,
+        )
+        self.y_head = AdaptiveLiquidCell(
+            self.core.command_size,
+            self.y_dim,
+            wiring.heads["y"],
             alpha_rank=alpha_rank,
         )
 
-        self.embedding_size = self.lnn.command_size
+        self.embedding_size = self.core.command_size
+
+        self.hidden_sizes = [self.core.hidden_size, self.pi_hidden_dim, self.y_dim]
+        self.hidden_size = sum(self.hidden_sizes)
+
+        self.total_params = total_parameters(self)
+        self.active_params = active_parameters(self)
 
     def forward(
         self,
@@ -148,8 +173,16 @@ class OCM(nn.Module):
         ocm_preds : OCMPredictions
             Network predictions for the command layer (`embedding`)
             and each head `(pi, y)`
-        h : torch.Tensor
+        h_state : torch.Tensor
             Final hidden state with shape `(B, H)`
         """
-        preds, h_state = self.lnn(obs, h=h, ts=ts)
-        return OCMPredictions(preds["embedding"], preds["pi"], preds["y"]), h_state
+        obs, h, ts = prepare_inputs(obs, h, ts, self.hidden_size)
+        h_core, h_pi, h_y = h.split(self.hidden_sizes, dim=1)
+
+        embedding, h_core = self.core(obs, h_core, ts)
+
+        pi, h_pi = scan_head(self.pi_head, embedding, h_pi, ts)
+        y, h_y = scan_head(self.y_head, embedding, h_y, ts)
+
+        h_state = torch.cat([h_core, h_pi, h_y], dim=1)
+        return OCMPredictions(embedding=embedding, pi=pi, y=y), h_state
