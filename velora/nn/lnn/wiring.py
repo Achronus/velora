@@ -118,6 +118,71 @@ def _make_mask(
     return torch.asarray(mask).T
 
 
+def build_layer_mask(
+    in_features: int,
+    out_features: int,
+    *,
+    seed: int = 28,
+    sparsity: float = 0.5,
+    rng: np.random.Generator | None = None,
+) -> torch.Tensor:
+    """
+    Build an NCP sparsity mask for a single layer.
+
+    A standalone variant of `build_wiring` for wiring one layer in
+    isolation.
+
+    Parameters
+    ----------
+    in_features : int
+        Number of input nodes
+    out_features : int
+        Number of output nodes
+    seed : int (optional)
+        Random number generator seed. Default is `28`
+    sparsity : float (optional)
+        Controls the connection sparsity between neurons.
+        Must be a value between `[0.1, 0.9]`:
+
+        - Where `0.1` neurons are very dense
+        - Where `0.9` neurons are very sparse
+
+        Default is `0.5`
+    rng : np.random.Generator (optional)
+        An existing NumPy random number generator to use instead of
+        creating one from `seed`. Useful for wiring multiple layers
+        from a single generator. Default is `None`
+
+    Returns
+    -------
+    mask : torch.Tensor
+        The populated sparsity mask with connection polarities `(-1, 0, 1)`,
+        in the PyTorch layout `(out_features, in_features)`
+
+    Raises
+    ------
+    invalid_sparsity : ValueError
+        When `sparsity` is outside `[0.1, 0.9]`
+
+    Examples
+    --------
+    ```python
+    mask = build_layer_mask(4, 16)
+    mask.shape  # (16, 4)
+    ```
+    """
+    if not 0.1 <= sparsity <= 0.9:
+        raise ValueError(f"'{sparsity=}' must be between '[0.1, 0.9]'.")
+
+    density = 1.0 - sparsity
+    rng = np.random.default_rng(seed) if rng is None else rng
+    return _make_mask(
+        (in_features, out_features),
+        _synapse_count(out_features, density),
+        rng,
+    )
+
+
 def build_wiring(
     in_features: int,
     n_neurons: int,
@@ -194,16 +259,8 @@ def build_wiring(
     n_inter = n_neurons - n_command
     rng = np.random.default_rng(seed)
 
-    inter = _make_mask(
-        (in_features, n_inter),
-        _synapse_count(n_inter, density),
-        rng,
-    )
-    command = _make_mask(
-        (n_inter, n_command),
-        _synapse_count(n_command, density),
-        rng,
-    )
+    inter = build_layer_mask(in_features, n_inter, sparsity=sparsity, rng=rng)
+    command = build_layer_mask(n_inter, n_command, sparsity=sparsity, rng=rng)
 
     motor_count = _synapse_count(n_command, density, scale=2)
     head_masks = {
