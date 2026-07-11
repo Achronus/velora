@@ -1,14 +1,4 @@
-from velora import base, cli, compute, disco, gym, lnn, nn, tracking, utils
-from velora.disco import (
-    DiscoAgent,
-    DiscoAgentSettings,
-    DiscoValueSettings,
-    EMASettings,
-    LossCostSettings,
-    PolicyAgentSettings,
-    RuleTrainer,
-    RuleTrainerSettings,
-)
+from velora import cli, compute, gym, nn, tracking, utils
 from velora.gym import (
     BOX2D_5,
     CONTINUOUS_41,
@@ -32,14 +22,6 @@ from velora.gym import (
 from velora.tracking import RunSettings
 
 __all__ = [
-    "RuleTrainer",
-    "RuleTrainerSettings",
-    "DiscoAgent",
-    "PolicyAgentSettings",
-    "DiscoAgentSettings",
-    "DiscoValueSettings",
-    "EMASettings",
-    "LossCostSettings",
     "RunSettings",
     "BOX2D_5",
     "CONTINUOUS_41",

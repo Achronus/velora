@@ -18,8 +18,8 @@ from typing import Tuple
 import torch
 from torch import nn
 
-from velora.lnn.cell import AdaptiveLiquidCell
-from velora.lnn.wiring import build_wiring
+from velora.nn.lnn.cell import AdaptiveLiquidCell
+from velora.nn.lnn.wiring import build_wiring
 from velora.utils.nn import active_parameters, total_parameters
 
 

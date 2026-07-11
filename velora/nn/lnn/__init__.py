@@ -1,11 +1,11 @@
-from velora.lnn.cell import (
+from velora.nn.lnn.cell import (
     AdaptiveLiquidCell,
     DecayLiquidCell,
     DeltaErasureLiquidCell,
     NCPLiquidCell,
 )
-from velora.lnn.ncp import LNN
-from velora.lnn.wiring import build_wiring
+from velora.nn.lnn.ncp import LNN
+from velora.nn.lnn.wiring import build_wiring
 
 __all__ = [
     "AdaptiveLiquidCell",
