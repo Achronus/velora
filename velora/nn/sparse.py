@@ -36,6 +36,10 @@ class SparseLinear(nn.Module):
     mask : torch.Tensor
         Sparsity mask (m) tensor of shape
         `(out_features, in_features)`
+    init_std : float (optional)
+        Gain for orthogonal weight initialization (e.g., `np.sqrt(2)`).
+        When `None`, uses Kaiming uniform initialization instead (PyTorch default).
+        Default is `None`
     """
 
     mask: torch.Tensor
@@ -45,16 +49,24 @@ class SparseLinear(nn.Module):
         in_features: int,
         out_features: int,
         mask: torch.Tensor,
+        *,
+        init_std: float | None = None,
     ) -> None:
         super().__init__()
 
         self.in_features = in_features
         self.out_features = out_features
 
-        weights = torch.nn.init.kaiming_uniform_(
-            torch.empty((out_features, in_features)),
-            nonlinearity="linear",
-        )
+        if init_std is not None:
+            weights = torch.nn.init.orthogonal_(
+                torch.empty((out_features, in_features)),
+                init_std,
+            )
+        else:
+            weights = torch.nn.init.kaiming_uniform_(
+                torch.empty((out_features, in_features)),
+                nonlinearity="linear",
+            )
 
         self.register_buffer("mask", mask)
 

@@ -66,6 +66,10 @@ class LNN(nn.Module):
         - Where `0.9` neurons are very sparse
     alpha_rank : int (optional)
         Rank of the low-rank α projection. Default is `min(n_hidden, 4)`
+    init_std : float (optional)
+        Gain for orthogonal weight initialization (e.g., `np.sqrt(2)`).
+        When `None`, uses Kaiming uniform initialization instead (PyTorch default).
+        Default is `None`
     """
 
     def __init__(
@@ -77,6 +81,7 @@ class LNN(nn.Module):
         seed: int = 28,
         sparsity: float = 0.5,
         alpha_rank: int | None = None,
+        init_std: float | None = None,
     ) -> None:
         super().__init__()
 
@@ -99,6 +104,7 @@ class LNN(nn.Module):
             wiring.inter.shape[0],
             wiring.inter,
             alpha_rank=alpha_rank,
+            init_std=init_std,
         )
 
         # Command layer: inter -> command
@@ -107,6 +113,7 @@ class LNN(nn.Module):
             wiring.command.shape[0],
             wiring.command,
             alpha_rank=alpha_rank,
+            init_std=init_std,
         )
 
         # Motor heads: command -> motors (outputs)
@@ -115,6 +122,7 @@ class LNN(nn.Module):
             wiring.heads["out"].shape[0],
             wiring.heads["out"],
             alpha_rank=alpha_rank,
+            init_std=init_std,
         )
 
         self.hidden_sizes = [

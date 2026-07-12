@@ -45,6 +45,10 @@ class NCPLiquidCell(nn.Module):
     mask : torch.Tensor
         A matrix of sparse connections usually containing a combination
         of `[-1, 1, 0]` values
+    init_std : float (optional)
+        Gain for orthogonal weight initialization (e.g., `np.sqrt(2)`).
+        When `None`, uses Kaiming uniform initialization instead (PyTorch default).
+        Default is `None`
     """
 
     def __init__(
@@ -52,24 +56,47 @@ class NCPLiquidCell(nn.Module):
         in_features: int,
         n_hidden: int,
         mask: torch.Tensor,
+        *,
+        init_std: float | None = None,
     ) -> None:
         super().__init__()
 
         self.in_features = in_features
         self.n_hidden = n_hidden
         self.head_size = n_hidden + in_features
+        self.init_std = init_std
 
         self.tanh = nn.Tanh()  # Bounded: [-1, 1]
         self.sigmoid = nn.Sigmoid()  # Bounded: [0, 1]
 
         mask = self._prep_mask(mask)
 
-        self.g_head = SparseLinear(self.head_size, self.n_hidden, mask)
-        self.h_head = SparseLinear(self.head_size, self.n_hidden, mask)
+        self.g_head = SparseLinear(
+            self.head_size,
+            self.n_hidden,
+            mask,
+            init_std=init_std,
+        )
+        self.h_head = SparseLinear(
+            self.head_size,
+            self.n_hidden,
+            mask,
+            init_std=init_std,
+        )
 
         # LTC heads (f)
-        self.f_head_to_g = SparseLinear(self.head_size, self.n_hidden, mask)
-        self.f_head_to_h = SparseLinear(self.head_size, self.n_hidden, mask)
+        self.f_head_to_g = SparseLinear(
+            self.head_size,
+            self.n_hidden,
+            mask,
+            init_std=init_std,
+        )
+        self.f_head_to_h = SparseLinear(
+            self.head_size,
+            self.n_hidden,
+            mask,
+            init_std=init_std,
+        )
 
     def _prep_mask(self, mask: torch.Tensor) -> torch.Tensor:
         """
@@ -223,6 +250,10 @@ class DecayLiquidCell(NCPLiquidCell):
         of `[-1, 1, 0]` values
     alpha_rank : int (optional)
         Rank of the low-rank α projection. Default is `min(n_hidden, 4)`
+    init_std : float (optional)
+        Gain for orthogonal weight initialization (e.g., `np.sqrt(2)`).
+        When `None`, uses Kaiming uniform initialization instead (PyTorch default).
+        Default is `None`
     """
 
     def __init__(
@@ -232,14 +263,20 @@ class DecayLiquidCell(NCPLiquidCell):
         mask: torch.Tensor,
         *,
         alpha_rank: int | None = None,
+        init_std: float | None = None,
     ) -> None:
-        super().__init__(in_features, n_hidden, mask)
+        super().__init__(in_features, n_hidden, mask, init_std=init_std)
 
         self.alpha_rank = min(n_hidden, 4) if alpha_rank is None else alpha_rank
 
         # Per-channel decay: low-rank projection (head_size → rank → n_hidden)
         self.alpha_down = nn.Linear(self.head_size, self.alpha_rank)
         self.alpha_up = nn.Linear(self.alpha_rank, self.n_hidden)
+
+        if init_std is not None:
+            for layer in (self.alpha_down, self.alpha_up):
+                nn.init.orthogonal_(layer.weight, init_std)
+                nn.init.constant_(layer.bias, 0.0)
 
     def _timescale(self, x: torch.Tensor, ts: torch.Tensor) -> torch.Tensor:
         """
@@ -294,6 +331,10 @@ class DeltaErasureLiquidCell(NCPLiquidCell):
     mask : torch.Tensor
         A matrix of sparse connections usually containing a combination
         of `[-1, 1, 0]` values
+    init_std : float (optional)
+        Gain for orthogonal weight initialization (e.g., `np.sqrt(2)`).
+        When `None`, uses Kaiming uniform initialization instead (PyTorch default).
+        Default is `None`
     """
 
     def __init__(
@@ -301,14 +342,26 @@ class DeltaErasureLiquidCell(NCPLiquidCell):
         in_features: int,
         n_hidden: int,
         mask: torch.Tensor,
+        *,
+        init_std: float | None = None,
     ) -> None:
-        super().__init__(in_features, n_hidden, mask)
+        super().__init__(in_features, n_hidden, mask, init_std=init_std)
 
         mask = self._prep_mask(mask)
 
         # Delta-rule erasure heads
-        self.reconstruct_head = SparseLinear(self.head_size, self.n_hidden, mask)
-        self.beta_head = SparseLinear(self.head_size, self.n_hidden, mask)
+        self.reconstruct_head = SparseLinear(
+            self.head_size,
+            self.n_hidden,
+            mask,
+            init_std=init_std,
+        )
+        self.beta_head = SparseLinear(
+            self.head_size,
+            self.n_hidden,
+            mask,
+            init_std=init_std,
+        )
 
     def forward(
         self,
@@ -393,6 +446,10 @@ class AdaptiveLiquidCell(DecayLiquidCell, DeltaErasureLiquidCell):
         of `[-1, 1, 0]` values
     alpha_rank : int (optional)
         Rank of the low-rank α projection. Default is `min(n_hidden, 4)`
+    init_std : float (optional)
+        Gain for orthogonal weight initialization (e.g., `np.sqrt(2)`).
+        When `None`, uses Kaiming uniform initialization instead (PyTorch default).
+        Default is `None`
     """
 
     def __init__(
@@ -402,5 +459,12 @@ class AdaptiveLiquidCell(DecayLiquidCell, DeltaErasureLiquidCell):
         mask: torch.Tensor,
         *,
         alpha_rank: int | None = None,
+        init_std: float | None = None,
     ) -> None:
-        super().__init__(in_features, n_hidden, mask, alpha_rank=alpha_rank)
+        super().__init__(
+            in_features,
+            n_hidden,
+            mask,
+            alpha_rank=alpha_rank,
+            init_std=init_std,
+        )

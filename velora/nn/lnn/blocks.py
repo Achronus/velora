@@ -50,6 +50,10 @@ class SparseGatedBlock(nn.Module):
 
         - Where `0.1` neurons are very dense
         - Where `0.9` neurons are very sparse
+    init_std : float (optional)
+        Gain for orthogonal weight initialization (e.g., `np.sqrt(2)`).
+        When `None`, uses Kaiming uniform initialization instead (PyTorch default).
+        Default is `None`
     """
 
     def __init__(
@@ -59,6 +63,7 @@ class SparseGatedBlock(nn.Module):
         *,
         seed: int = 28,
         sparsity: float = 0.5,
+        init_std: float | None = None,
     ) -> None:
         super().__init__()
 
@@ -74,9 +79,24 @@ class SparseGatedBlock(nn.Module):
             )
         )
 
-        self.g_head = SparseLinear(self.in_features, self.out_features, mask)
-        self.h_head = SparseLinear(self.in_features, self.out_features, mask)
-        self.f_head = SparseLinear(self.in_features, self.out_features, mask)
+        self.g_head = SparseLinear(
+            self.in_features,
+            self.out_features,
+            mask,
+            init_std=init_std,
+        )
+        self.h_head = SparseLinear(
+            self.in_features,
+            self.out_features,
+            mask,
+            init_std=init_std,
+        )
+        self.f_head = SparseLinear(
+            self.in_features,
+            self.out_features,
+            mask,
+            init_std=init_std,
+        )
 
         self.tanh = nn.Tanh()
         self.sigmoid = nn.Sigmoid()
