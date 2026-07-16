@@ -14,7 +14,9 @@
 # ==============================================================================
 
 
+import gymnasium as gym
 import torch
+from gymnasium.wrappers.vector import NumpyToTorch
 
 
 def squeeze_time(x: torch.Tensor) -> torch.Tensor:
@@ -38,3 +40,36 @@ def squeeze_time(x: torch.Tensor) -> torch.Tensor:
         return torch.squeeze(x, dim=1)
 
     return x
+
+
+def to_torch_env(
+    envs: gym.vector.VectorEnv,
+    device: torch.device,
+) -> gym.vector.VectorEnv:
+    """
+    Ensures a vectorized environment returns PyTorch tensors.
+
+    Checks whether `NumpyToTorch` is already present in the environment's
+    wrapper stack and applies it when missing.
+
+    Parameters
+    ----------
+    envs : gym.vector.VectorEnv
+        A set of vectorized Gymnasium environments
+    device : torch.device
+        Device to load tensors onto
+
+    Returns
+    -------
+    envs : gym.vector.VectorEnv
+        The environments, guaranteed to be `NumpyToTorch` wrapped
+    """
+    env = envs
+
+    while isinstance(env, gym.vector.VectorWrapper):
+        if isinstance(env, NumpyToTorch):
+            return envs
+
+        env = env.env
+
+    return NumpyToTorch(envs, device=device)

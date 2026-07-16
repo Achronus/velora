@@ -48,6 +48,26 @@ class RolloutBatch:
     dones: torch.Tensor
     values: torch.Tensor
 
+    def flatten(self) -> "RolloutBatch":
+        """
+        Merges the batch's time and environment dimensions, converting
+        each tensor from `(capacity, n_envs, *shape)` to
+        `(capacity * n_envs, *shape)` ready for mini-batch sampling.
+
+        Returns
+        -------
+        rollout : RolloutBatch
+            A new flattened batch of the same data
+        """
+        return RolloutBatch(
+            obs=self.obs.flatten(0, 1),
+            actions=self.actions.flatten(0, 1),
+            log_probs=self.log_probs.flatten(0, 1),
+            rewards=self.rewards.flatten(0, 1),
+            dones=self.dones.flatten(0, 1),
+            values=self.values.flatten(0, 1),
+        )
+
 
 class RolloutBuffer:
     """
@@ -168,3 +188,63 @@ class RolloutBuffer:
         self.values.zero_()
 
         self._position = 0
+
+    @torch.no_grad()
+    def compute_returns_and_advantage(
+        self,
+        last_value: torch.Tensor,
+        *,
+        gamma: float,
+        gae_lambda: float,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Computes the advantages and returns for the stored rollout using
+        Generalized Advantage Estimation (GAE), bootstrapping the final
+        step from `last_value`.
+
+        Parameters
+        ----------
+        last_value : torch.Tensor
+            The critic's state-value estimates for the observation
+            following the rollout's final step `(n_envs, 1)` or `(n_envs,)`
+        gamma : float
+            The discount factor
+        gae_lambda : float
+            The lambda for the GAE
+
+        Returns
+        -------
+        advantages : torch.Tensor
+            The GAE advantage estimates `(capacity, n_envs)`
+        returns : torch.Tensor
+            The discounted returns, `advantages + values`
+            `(capacity, n_envs)`
+
+        Raises
+        ------
+        buffer_error : ValueError
+            Buffer must be filled with `add()` first
+        """
+        if self._position < self.capacity:
+            raise ValueError("Buffer must be full first.")
+
+        last_value = last_value.flatten()
+        advantages = torch.zeros_like(self.rewards)
+        last_gae_lambda = 0.0
+
+        for t in reversed(range(self.capacity)):
+            next_non_terminal = 1.0 - self.dones[t]
+            next_values = last_value if t == self.capacity - 1 else self.values[t + 1]
+
+            delta = (
+                self.rewards[t]
+                + gamma * next_values * next_non_terminal
+                - self.values[t]
+            )
+            last_gae_lambda = (
+                delta + gamma * gae_lambda * next_non_terminal * last_gae_lambda
+            )
+            advantages[t] = last_gae_lambda
+
+        returns = advantages + self.values
+        return advantages, returns

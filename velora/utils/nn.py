@@ -51,3 +51,15 @@ def active_parameters(model: nn.Module) -> int:
         The total active number of parameters
     """
     return sum(int(torch.count_nonzero(p)) for p in model.parameters())
+
+
+def set_torch_device() -> torch.device:
+    """
+    Gets the device to load tensors onto.
+
+    Returns
+    -------
+    device : torch.device
+        CUDA or CPU device
+    """
+    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
