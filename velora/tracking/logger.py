@@ -16,12 +16,11 @@
 import logging
 import os
 import sys
-from concurrent.futures import ThreadPoolExecutor
 from io import TextIOWrapper
 from pathlib import Path
 from typing import Dict, List
 
-from tensorboardX import SummaryWriter
+import wandb
 
 
 class _TeeWriter:
@@ -134,158 +133,113 @@ class RuntimeLogger:
 
 class MetricsLogger:
     """
-    Asynchronous TensorBoard metrics logger.
+    A Weights & Biases (wandb) metrics logger.
 
-    Writes metrics to TensorBoard in a background thread to avoid blocking
-    the training loop. Uses a single-worker thread pool to ensure writes
-    are sequential and non-blocking.
+    Logs metrics to a [W&B](https://wandb.ai) run under `[name]/[key]`
+    tags (e.g., `losses/policy`) with `step` as the run's step counter.
+
+    Requires a W&B API key (via `wandb login` or the `WANDB_API_KEY`
+    environment variable) when running online. Set `WANDB_MODE=offline`
+    to log locally instead; the run is saved in `log_dir` and can be
+    uploaded later with `wandb sync`.
 
     Example root directory format: `runs/trainer_250126_174222/logs/`.
 
     Parameters
     ----------
     log_dir : Path | str
-        Root directory for TensorBoard log writers
+        Root directory for run output files
+    project : str (optional)
+        The project name for grouping runs. Default is `velora`
+    run_name : str (optional)
+        Name of the run. When `None`, wandb generates one automatically.
+        Default is `None`
+    group : str (optional)
+        Group name shared by related runs (e.g., seeds of the same
+        experiment). Grouped runs overlay as a mean line with a spread
+        band on the dashboard. Default is `None`
+    config : Dict (optional)
+        Hyperparameter configuration stored with the run.
+        Default is `None`
 
     Examples
     --------
     >>> logger = MetricsLogger("runs/my_run/logs")
-    >>> logger.add_writer("meta")
-    >>> logger.add_writer("envs/Pong")
-    >>> logger.add_writer("envs/Breakout")
-    >>> logger.log("meta", step=100, metrics={"loss": 0.5})
-    >>> logger.log("envs/Pong", step=100, metrics={"reward": 10.0})
+    >>> logger.log("losses", step=100, metrics={"policy": 0.5})
+    >>> logger.log("charts", step=100, metrics={"episodic_return": 10.0})
     >>> logger.close()
     """
 
-    def __init__(self, log_dir: Path | str) -> None:
+    def __init__(
+        self,
+        log_dir: Path | str,
+        *,
+        project: str = "velora",
+        run_name: str | None = None,
+        group: str | None = None,
+        config: Dict | None = None,
+    ) -> None:
         self.root_dir = Path(log_dir)
         self.root_dir.mkdir(parents=True, exist_ok=True)
 
-        self.writers: Dict[str, SummaryWriter] = {}
-        self.executor = ThreadPoolExecutor(max_workers=1)
+        self._run = wandb.init(
+            project=project,
+            name=run_name,
+            group=group,
+            dir=self.root_dir,
+            config=config,
+        )
 
-    def add_writer(self, name: str) -> None:
+    def log(self, name: str, step: int, metrics: dict) -> None:
         """
-        Add a new TensorBoard writer for a specific component.
+        Log a set of metrics under a shared name.
 
-        Creates a subdirectory under the root log directory and
-        initializes a `SummaryWriter` for it.
+        Each metric is logged as `[name]/[key]`, grouping them into a
+        single section on the run dashboard.
 
         Parameters
         ----------
         name : str
-            Writer name, used as subdirectory (e.g., `meta`, `envs/Pong`)
-        """
-        if name in self.writers:
-            return
-
-        writer_dir = self.root_dir / name
-        writer_dir.mkdir(parents=True, exist_ok=True)
-        self.writers[name] = SummaryWriter(str(writer_dir))
-
-    def add_writer_group(self, prefix: str, names: List[str]) -> None:
-        """
-        Add a group of related TensorBoard writers under a shared prefix.
-
-        Each writer is created as `prefix/name`, enabling TensorBoard to
-        overlay metrics with the same tag across writers on a single chart.
-
-        Parameters
-        ----------
-        prefix : str
-            Shared prefix for the group (e.g., `disco`)
-        names : List[str]
-            Writer names within the group (e.g., `["inter", "command", "network"]`)
-        """
-        for name in names:
-            self.add_writer(f"{prefix}/{name}")
-
-    def log_group(self, prefix: str, step: int, metrics: Dict[str, float]) -> None:
-        """
-        Log metrics to per-layer writers under a shared prefix.
-
-        Splits `"layer/metric"` keyed metrics by layer and logs each to
-        its corresponding `prefix/layer` writer with the tag `prefix/metric`.
-        TensorBoard overlays same-tagged metrics from different writers
-        as separate lines on a single chart.
-
-        Parameters
-        ----------
-        prefix : str
-            Shared prefix matching writers created via `add_writer_group`
-        step : int
-            Training step number
-        metrics : Dict[str, float]
-            Mapping of `"layer/metric"` keys to scalar values
-        """
-        for key, value in metrics.items():
-            layer, metric = key.split("/", 1)
-            self.log(f"{prefix}/{layer}", step, {f"{prefix}/{metric}": value})
-
-    def log(self, writer_name: str, step: int, metrics: dict) -> None:
-        """
-        Log metrics asynchronously to a specific writer.
-
-        Submits metrics to be written in a background thread. Returns
-        immediately without waiting for the write to complete.
-
-        Parameters
-        ----------
-        writer_name : str
-            Name of writer to use (must be added via `add_writer` first)
-        step : int
-            Training step number
-        metrics : dict
-            Mapping of metric names to scalar values
-
-        Raises
-        ------
-        KeyError
-            If writer_name hasn't been added
-        """
-        if writer_name not in self.writers:
-            raise KeyError(
-                f"Writer '{writer_name}' not found. Call 'add_writer()' first."
-            )
-
-        self.executor.submit(self._write, writer_name, step, metrics)
-
-    def _write(self, writer_name: str, step: int, metrics: dict) -> None:
-        """
-        Write metrics to TensorBoard.
-
-        Called in background thread by the executor.
-
-        Parameters
-        ----------
-        writer_name : str
-            Name of writer to use
+            Shared name for the metrics (e.g., `losses`, `episode`)
         step : int
             Training step number
         metrics : dict
             Mapping of metric names to scalar values
         """
-        writer = self.writers[writer_name]
+        self._run.log(
+            {f"{name}/{k}": float(v) for k, v in metrics.items()},
+            step=step,
+        )
 
-        for k, v in metrics.items():
-            writer.add_scalar(k, float(v), step)
+    def log_video(
+        self,
+        name: str,
+        step: int,
+        paths: Path | str | List[Path | str],
+    ) -> None:
+        """
+        Log one or more video files to the run's media panel.
 
-        self.flush()
+        Multiple videos logged under the same name render as a gallery.
+
+        Parameters
+        ----------
+        name : str
+            Media panel name for the videos (e.g., `videos/episodes`)
+        step : int
+            Training step number
+        paths : Path | str | List[Path | str]
+            Path(s) to the video file(s) (e.g., an `mp4`)
+        """
+        video_paths = paths if isinstance(paths, list) else [paths]
+        videos = [wandb.Video(str(path), format="mp4") for path in video_paths]
+        self._run.log({name: videos}, step=step)
 
     def close(self) -> None:
         """
-        Shutdown logger and flush pending writes.
+        Shutdown the logger.
 
-        Waits for all queued metrics to be written before closing
-        all TensorBoard writers. Should be called before program exit.
+        Finishes the wandb run, flushing any pending data. Should be
+        called before program exit.
         """
-        self.executor.shutdown(wait=True)
-
-        for writer in self.writers.values():
-            writer.close()
-
-    def flush(self) -> None:
-        """Flush all writers to disk for live TensorBoard monitoring."""
-        for writer in self.writers.values():
-            writer.flush()
+        self._run.finish()

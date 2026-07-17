@@ -14,8 +14,10 @@
 # ==============================================================================
 
 import random
-from dataclasses import dataclass
-from typing import Tuple
+import time
+from dataclasses import asdict, dataclass
+from pathlib import Path
+from typing import Dict, Tuple
 
 import gymnasium as gym
 import numpy as np
@@ -23,8 +25,10 @@ import torch
 from gymnasium.spaces.utils import flatdim
 from torch import nn, optim
 from torch.distributions import Normal
+from tqdm import tqdm
 
 from velora.nn.buffer import RolloutBatch, RolloutBuffer
+from velora.tracking.logger import MetricsLogger
 from velora.utils.nn import set_torch_device
 from velora.utils.transforms import to_torch_env
 
@@ -63,7 +67,7 @@ def make_env(
     num_envs: int = 1,
     *,
     gamma: float = 0.99,
-    capture_video: bool = False,
+    capture_video: bool = True,
     run_name: str = "",
 ) -> gym.vector.SyncVectorEnv:
     """
@@ -94,7 +98,7 @@ def make_env(
         def _make() -> gym.Env:
             if capture_video and idx == 0:
                 env = gym.make(env_id, render_mode="rgb_array")
-                env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
+                env = gym.wrappers.RecordVideo(env, f"runs/videos/{run_name}")
             else:
                 env = gym.make(env_id)
 
@@ -284,27 +288,44 @@ class PPO:
     ----------
     env_id : str
         The Gymnasium environment ID (e.g., `HalfCheetah-v4`)
-    config : PPOConfig
-        The algorithm's hyperparameter configuration
     num_envs : int (optional)
         The number of parallel environments. Default is `1`
     seed : int (optional)
         Random number generator seed. Default is `28`
+    config : PPOConfig (optional)
+        The algorithm's hyperparameter configuration. When `None` uses
+        `PPOConfig()` default values. Default is `None`
     device : torch.device (optional)
         Device to load tensors onto. When `None`, sets device to CUDA
         or CPU automatically. Default is `None`
+    project_name : str (optional)
+        The project name for wandb metric logging. Default is `velora`
+    exp_name : str (optional)
+        The experiment name, shared by all seed runs of the same
+        algorithm variant. Used for run grouping and benchmark tooling.
+        Default is `ppo`
     """
 
     def __init__(
         self,
         env_id: str,
-        config: PPOConfig,
         *,
         num_envs: int = 1,
         seed: int = 28,
+        config: PPOConfig | None = None,
         device: torch.device | None = None,
+        project_name: str = "velora",
+        exp_name: str = "cleanrl_ppo",
     ) -> None:
-        envs = make_env(env_id, num_envs, gamma=config.gamma)
+        config = config if config is not None else PPOConfig()
+        self.exp_name = exp_name
+        self.run_name = f"{env_id}_{exp_name}_{seed}_{int(time.time())}"
+        envs = make_env(
+            env_id,
+            num_envs,
+            gamma=config.gamma,
+            run_name=self.run_name,
+        )
 
         if not isinstance(envs.single_action_space, gym.spaces.Box):
             raise ValueError(
@@ -343,6 +364,21 @@ class PPO:
             self.envs.single_observation_space.shape,  # type: ignore
             self.envs.single_action_space.shape,  # type: ignore
             device=self.device,
+        )
+
+        # Setup logging
+        self.logger = MetricsLogger(
+            "runs/cleanrl_ppo",
+            project=project_name,
+            run_name=self.run_name,
+            group=f"{env_id}_{exp_name}",
+            config={
+                "env_id": env_id,
+                "exp_name": exp_name,
+                "num_envs": num_envs,
+                "seed": seed,
+                **asdict(config),
+            },
         )
 
     def _set_anneal_lr(self, iteration: int) -> None:
@@ -384,8 +420,25 @@ class PPO:
                 actions, log_probs, _, values = self.agent.get_action_and_value(obs)
                 values = values.flatten()
 
-            next_obs, rewards, terminations, truncations, _ = self.envs.step(actions)
+            next_obs, rewards, terminations, truncations, info = self.envs.step(
+                actions.cpu()
+            )
             dones = torch.logical_or(terminations, truncations)
+
+            # Log completed episode stats
+            if "episode" in info:
+                episode = info["episode"]
+                mask = torch.as_tensor(info["_episode"])
+
+                for idx in mask.nonzero().flatten().tolist():
+                    self.logger.log(
+                        "charts",
+                        self.global_step,
+                        {
+                            "episodic_return": float(episode["r"][idx]),
+                            "episodic_length": float(episode["l"][idx]),
+                        },
+                    )
 
             # Store in buffer
             self.buffer.add(obs, actions, log_probs, rewards.view(-1), dones, values)
@@ -461,10 +514,97 @@ class PPO:
 
         return 0.5 * ((new_values - returns) ** 2).mean()
 
+    def _update_minibatch(
+        self,
+        rollout: RolloutBatch,
+        advantages: torch.Tensor,
+        returns: torch.Tensor,
+        indices: np.ndarray,
+    ) -> Dict[str, float]:
+        """
+        Performs a single gradient update on a mini-batch of experience.
+
+        Parameters
+        ----------
+        rollout : RolloutBatch
+            Flattened batch of rollout experience `(batch_size, ...)`
+        advantages : torch.Tensor
+            The GAE advantage estimates `(batch_size,)`
+        returns : torch.Tensor
+            The discounted returns `(batch_size,)`
+        indices : np.ndarray
+            The mini-batch sample indices `(minibatch_size,)`
+
+        Returns
+        -------
+        stats : Dict[str, float]
+            The mini-batch's loss metric keys:
+            [`value`, `policy`, `entropy`,
+            `total`, `old_approx_kl`, `approx_kl`, `clip_frac`]
+        """
+        _, new_log_probs, entropy, new_values = self.agent.get_action_and_value(
+            rollout.obs[indices],
+            rollout.actions[indices],
+        )
+        log_ratio = new_log_probs - rollout.log_probs[indices]
+        ratio = log_ratio.exp()
+
+        with torch.no_grad():
+            old_approx_kl = (-log_ratio).mean()
+            approx_kl = ((ratio - 1) - log_ratio).mean()
+            clip_frac = (
+                ((ratio - 1.0).abs() > self.config.clip_coef).float().mean().item()
+            )
+
+        # Normalize advantages
+        minibatch_advantages = advantages[indices]
+
+        if self.config.norm_adv:
+            minibatch_advantages = (
+                minibatch_advantages - minibatch_advantages.mean()
+            ) / (minibatch_advantages.std() + 1e-8)
+
+        # Compute losses
+        pg_loss = self._compute_policy_loss(minibatch_advantages, ratio)
+        v_loss = self._compute_value_loss(
+            new_values,
+            returns[indices],
+            rollout.values[indices],
+        )
+        entropy_loss = entropy.mean()
+        loss = (
+            pg_loss - self.config.ent_coef * entropy_loss + v_loss * self.config.vf_coef
+        )
+
+        # Backpropagate
+        self.optimizer.zero_grad()
+        loss.backward()
+        nn.utils.clip_grad_norm_(
+            self.agent.parameters(),
+            self.config.max_grad_norm,
+        )
+        self.optimizer.step()
+
+        return {
+            "value": v_loss.item(),
+            "policy": pg_loss.item(),
+            "entropy": entropy_loss.item(),
+            "total": loss.item(),
+            "old_approx_kl": old_approx_kl.item(),
+            "approx_kl": approx_kl.item(),
+            "clip_frac": clip_frac,
+        }
+
     def train(self) -> None:
         """Trains the agent."""
         obs, _ = self.envs.reset(seed=self.seed)
         obs: torch.Tensor = obs.float()
+
+        progress = tqdm(
+            total=self.num_iterations * self.batch_size,
+            desc="Training",
+            unit="step",
+        )
 
         for iteration in range(1, self.num_iterations + 1):
             if self.config.anneal_lr:
@@ -483,72 +623,69 @@ class PPO:
 
             # Optimize the agent networks
             batch_indices = np.arange(self.batch_size)
-            approx_kl = torch.zeros((1,), device=self.device)
+            stats: Dict[str, float] = {}
+            clip_fracs = []
 
             # Flatten for mini-batching
             rollout = rollout.flatten()
             advantages = advantages.flatten(0, 1)
             returns = returns.flatten(0, 1)
 
+            # Start policy update epochs
             for _ in range(self.config.update_epochs):
                 np.random.shuffle(batch_indices)
 
+                # Start mini-batch iterations
                 for start in range(0, self.batch_size, self.minibatch_size):
                     end = start + self.minibatch_size
-                    minibatch_indices = batch_indices[start:end]
-
-                    _, new_log_probs, entropy, new_values = (
-                        self.agent.get_action_and_value(
-                            rollout.obs[minibatch_indices],
-                            rollout.actions[minibatch_indices],
-                        )
+                    stats = self._update_minibatch(
+                        rollout,
+                        advantages,
+                        returns,
+                        batch_indices[start:end],
                     )
-                    log_ratio = new_log_probs - rollout.log_probs[minibatch_indices]
-                    ratio = log_ratio.exp()
-
-                    with torch.no_grad():
-                        approx_kl = ((ratio - 1) - log_ratio).mean()
-
-                    # Normalize advantages
-                    minibatch_advantages = advantages[minibatch_indices]
-
-                    if self.config.norm_adv:
-                        minibatch_advantages = (
-                            minibatch_advantages - minibatch_advantages.mean()
-                        ) / (minibatch_advantages.std() + 1e-8)
-
-                    # Compute losses
-                    pg_loss = self._compute_policy_loss(minibatch_advantages, ratio)
-
-                    # Value loss
-                    v_loss = self._compute_value_loss(
-                        new_values,
-                        returns[minibatch_indices],
-                        rollout.values[minibatch_indices],
-                    )
-
-                    # Entropy and total loss
-                    entropy_loss = entropy.mean()
-                    loss = (
-                        pg_loss
-                        - self.config.ent_coef * entropy_loss
-                        + v_loss * self.config.vf_coef
-                    )
-
-                    self.optimizer.zero_grad()
-                    loss.backward()
-                    nn.utils.clip_grad_norm_(
-                        self.agent.parameters(),
-                        self.config.max_grad_norm,
-                    )
-                    self.optimizer.step()
+                    clip_fracs.append(stats["clip_frac"])
 
                 # Target exceeded, next iteration
                 if (
                     self.config.target_kl is not None
-                    and approx_kl > self.config.target_kl
+                    and stats["approx_kl"] > self.config.target_kl
                 ):
                     break
 
+            # Compute variance for logging
+            y_pred, y_true = rollout.values, returns
+            var_y = torch.var(y_true)
+            explained_var = float(
+                torch.nan if var_y == 0 else 1 - torch.var(y_true - y_pred) / var_y
+            )
+
+            self.logger.log(
+                "losses",
+                self.global_step,
+                {
+                    **stats,
+                    "clip_frac": np.mean(clip_fracs).item(),
+                    "explained_variance": explained_var,
+                },
+            )
+
+            # Update progress bar
+            progress.update(self.batch_size)
+            progress.set_postfix(
+                loss=f"{stats['total']:.3f}",
+                approx_kl=f"{stats['approx_kl']:.4f}",
+            )
+
         # End of training
+        progress.close()
         self.envs.close()
+
+        # Upload recorded videos
+        video_dir = Path("runs", "videos") / self.run_name
+        videos = sorted(video_dir.glob("*.mp4"))
+
+        if videos:
+            self.logger.log_video("runs/videos/episodes", self.global_step, videos)  # type: ignore
+
+        self.logger.close()
