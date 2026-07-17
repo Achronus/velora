@@ -8,8 +8,10 @@ from velora.utils.format import (
 )
 from velora.utils.nn import active_parameters, total_parameters
 from velora.utils.transforms import squeeze_time
+from velora.utils.wrappers import NumpyToTorchRawInfo
 
 __all__ = [
+    "NumpyToTorchRawInfo",
     "create_directory",
     "field_to_title",
     "format_duration",

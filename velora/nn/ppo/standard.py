@@ -426,9 +426,9 @@ class PPO:
             dones = torch.logical_or(terminations, truncations)
 
             # Log completed episode stats
-            if "episode" in info:
-                episode = info["episode"]
-                mask = torch.as_tensor(info["_episode"])
+            if "final_info" in info:
+                episode = info["final_info"]["episode"]
+                mask = torch.as_tensor(info["final_info"]["_episode"])
 
                 for idx in mask.nonzero().flatten().tolist():
                     self.logger.log(

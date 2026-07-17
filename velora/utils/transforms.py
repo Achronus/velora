@@ -18,6 +18,8 @@ import gymnasium as gym
 import torch
 from gymnasium.wrappers.vector import NumpyToTorch
 
+from velora.utils.wrappers import NumpyToTorchRawInfo
+
 
 def squeeze_time(x: torch.Tensor) -> torch.Tensor:
     """
@@ -72,4 +74,4 @@ def to_torch_env(
 
         env = env.env
 
-    return NumpyToTorch(envs, device=device)
+    return NumpyToTorchRawInfo(envs, device=device)
