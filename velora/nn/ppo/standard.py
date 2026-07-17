@@ -120,7 +120,10 @@ def make_env(
 
         return _make
 
-    return gym.vector.SyncVectorEnv([thunk(i) for i in range(num_envs)])
+    return gym.vector.SyncVectorEnv(
+        [thunk(i) for i in range(num_envs)],
+        autoreset_mode=gym.vector.AutoresetMode.SAME_STEP,
+    )
 
 
 @dataclass
