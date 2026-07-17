@@ -1,4 +1,4 @@
-from velora import cli, compute, gym, nn, tracking, utils
+from velora import cli, gym, nn, tracking, utils
 from velora.gym import (
     BOX2D_5,
     CONTINUOUS_41,
@@ -19,10 +19,8 @@ from velora.gym import (
     register,
     register_suite,
 )
-from velora.tracking import RunSettings
 
 __all__ = [
-    "RunSettings",
     "BOX2D_5",
     "CONTINUOUS_41",
     "DMC_25",

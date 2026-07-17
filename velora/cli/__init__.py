@@ -1,1 +1,1 @@
-from velora.cli import base, disco
+from velora.cli import base
