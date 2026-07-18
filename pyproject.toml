@@ -28,6 +28,7 @@ classifiers = [
 dependencies = [
     "array-api-compat>=1.15.0",
     "isaaclab[all,isaacsim]==3.0.0b2.post1",
+    "shimmy[dm-control]>=2.0.1",
     "torch==2.11.0",
     "torchvision==0.26.0",
     "wandb>=0.26.1",

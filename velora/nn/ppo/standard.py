@@ -94,6 +94,11 @@ def make_env(
         The vectorized environments
     """
 
+    if env_id.startswith("dm_control/"):
+        import shimmy
+
+        gym.register_envs(shimmy)
+
     def thunk(idx: int):
         def _make() -> gym.Env:
             if capture_video and idx == 0:
