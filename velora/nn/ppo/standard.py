@@ -17,7 +17,7 @@ import random
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Dict, Tuple
+from typing import Dict, Literal, Tuple
 
 import gymnasium as gym
 import numpy as np
@@ -166,6 +166,14 @@ class PPOConfig:
         The value function coefficient. Default is `0.5`
     max_grad_norm : float (optional)
         The maximum norm for gradient clipping. Default is `0.5`
+    rpo_alpha : float (optional)
+        The perturbation bound for Robust Policy Optimization (RPO).
+        During policy updates, noise `z ~ Uniform(-rpo_alpha, rpo_alpha)`
+        is added to the action mean before recomputing log probabilities,
+        keeping the policy distribution wide to prevent premature
+        entropy collapse. Higher values increase robustness at the cost
+        of slower convergence. Only used when `method` is `rpo`.
+        Default is `0.5`
     target_kl : float (optional)
         The target KL divergence threshold. Default is `None`
     """
@@ -184,6 +192,7 @@ class PPOConfig:
     ent_coef: float = 0.0
     vf_coef: float = 0.5
     max_grad_norm: float = 0.5
+    rpo_alpha: float = 0.5
     target_kl: float | None = None
 
 
@@ -198,10 +207,32 @@ class MLPActorCritic(nn.Module):
         Number of input features
     out_features : int
         Number of output features
+    method : Literal["ppo", "rpo"] (optional)
+        The type of PPO to run. When `ppo` uses the standard
+        [PPO](https://arxiv.org/abs/1707.06347) implementation.
+        When `rpo` applies
+        [Robust Policy Optimization](https://arxiv.org/abs/2212.07536).
+        Default is `ppo`
+    rpo_alpha : float (optional)
+        The RPO perturbation bound. When `method` is `rpo`, noise
+        `z ~ Uniform(-rpo_alpha, rpo_alpha)` is added to the action mean
+        when evaluating given actions (during policy updates), so the
+        updated policy stays robust to shifts in the action distribution.
+        Unused when `method` is `ppo`. Default is `0.5`
     """
 
-    def __init__(self, in_features: int, out_features: int) -> None:
+    def __init__(
+        self,
+        in_features: int,
+        out_features: int,
+        *,
+        method: Literal["ppo", "rpo"] = "ppo",
+        rpo_alpha: float = 0.5,
+    ) -> None:
         super().__init__()
+
+        self.method = method
+        self.rpo_alpha = rpo_alpha
 
         self.critic = nn.Sequential(
             layer_init(nn.Linear(in_features, 64)),
@@ -265,13 +296,22 @@ class MLPActorCritic(nn.Module):
         value : torch.Tensor
             The critic's state-value estimates `(batch_size, 1)`
         """
-        action_mean = self.actor_mean(x)
+        action_mean: torch.Tensor = self.actor_mean(x)
         action_logstd = self.actor_logstd.expand_as(action_mean)
         action_std = torch.exp(action_logstd)
         probs = Normal(action_mean, action_std)
 
         if action is None:
             action = probs.sample()
+        else:
+            if self.method == "rpo":
+                # sample again to add stochasticity, for the policy update
+                z = torch.empty_like(action_mean).uniform_(
+                    -self.rpo_alpha,
+                    self.rpo_alpha,
+                )
+                action_mean = action_mean + z
+                probs = Normal(action_mean, action_std)
 
         return (
             action,
@@ -291,6 +331,12 @@ class PPO:
     ----------
     env_id : str
         The Gymnasium environment ID (e.g., `HalfCheetah-v4`)
+    method : Literal["ppo", "rpo"] (optional)
+        The type of PPO to run. When `ppo` uses the standard
+        [PPO](https://arxiv.org/abs/1707.06347) implementation.
+        When `rpo` applies
+        [Robust Policy Optimization](https://arxiv.org/abs/2212.07536).
+        Default is `ppo`
     num_envs : int (optional)
         The number of parallel environments. Default is `1`
     seed : int (optional)
@@ -313,6 +359,7 @@ class PPO:
         self,
         env_id: str,
         *,
+        method: Literal["ppo", "rpo"] = "ppo",
         num_envs: int = 1,
         seed: int = 28,
         config: PPOConfig | None = None,
@@ -321,6 +368,7 @@ class PPO:
         exp_name: str = "cleanrl_ppo",
     ) -> None:
         config = config if config is not None else PPOConfig()
+        self.method = method
         self.exp_name = exp_name
         self.run_name = f"{env_id}_{exp_name}_{seed}_{int(time.time())}"
         envs = make_env(
@@ -357,7 +405,10 @@ class PPO:
         self.agent = MLPActorCritic(
             flatdim(envs.single_observation_space),
             flatdim(envs.single_action_space),
+            method=self.method,
+            rpo_alpha=self.config.rpo_alpha,
         ).to(self.device)
+        self.agent.compile()
 
         self.optimizer = optim.Adam(self.agent.parameters(), lr=config.lr, eps=1e-5)
 
