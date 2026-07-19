@@ -27,12 +27,17 @@ classifiers = [
 ]
 dependencies = [
     "array-api-compat>=1.15.0",
-    "isaaclab[all,isaacsim]==3.0.0b2.post1",
-    "shimmy[dm-control]>=2.0.1",
+    "jax[cuda12]>=0.11.0 ; sys_platform == 'linux'",
+    "playground>=0.2.0",
+    "rsl-rl-lib>=5.0.1",
+    "tensordict>=0.13.0",
     "torch==2.11.0",
     "torchvision==0.26.0",
     "wandb>=0.26.1",
 ]
+
+[project.optional-dependencies]
+isaac = ["isaaclab[all,isaacsim]==3.0.0b2.post1"]
 
 [project.urls]
 repository = "https://github.com/Achronus/velora"
@@ -44,6 +49,9 @@ docs = ["mkdocs>=1.6.1", "mkdocs-material==9.7.6", "mkdocstrings-python==2.0.5"]
 
 [tool.setuptools.packages.find]
 include = ["velora*"]
+
+[tool.uv]
+override-dependencies = ["coverage>=7.5"]
 
 [[tool.uv.index]]
 name = "pytorch-cuda"
