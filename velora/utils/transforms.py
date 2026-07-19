@@ -66,6 +66,9 @@ def to_torch_env(
     envs : gym.vector.VectorEnv
         The environments, guaranteed to be `NumpyToTorch` wrapped
     """
+    if getattr(envs, "_torch_native", False):
+        return envs
+
     env = envs
 
     while isinstance(env, gym.vector.VectorWrapper):

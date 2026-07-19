@@ -69,7 +69,7 @@ def make_env(
     gamma: float = 0.99,
     capture_video: bool = True,
     run_name: str = "",
-) -> gym.vector.SyncVectorEnv:
+) -> gym.vector.VectorEnv:
     """
     Creates a set of vectorized environments with the standard PPO
     preprocessing wrappers applied to each one.
@@ -77,22 +77,33 @@ def make_env(
     Parameters
     ----------
     env_id : str
-        The Gymnasium environment ID (e.g., `HalfCheetah-v4`)
+        The Gymnasium environment ID (e.g., `HalfCheetah-v4`) or a
+        MuJoCo Playground ID (e.g., `playground/humanoid-walk-v0`)
     num_envs : int (optional)
         The number of parallel environments. Default is `1`
     gamma : float (optional)
         The discount factor for reward normalization. Default is `0.99`
     capture_video : bool (optional)
-        Whether to record videos of the first environment.
-        Default is `False`
+        Whether to record videos of the first environment. Not
+        supported by `playground/` environments. Default is `False`
     run_name : str (optional)
         The run name used for the video folder. Default is `""`
 
     Returns
     -------
-    envs : gym.vector.SyncVectorEnv
+    envs : gym.vector.VectorEnv
         The vectorized environments
     """
+    if env_id.startswith("playground/"):
+        from velora.envs import make_playground_env
+
+        return make_playground_env(
+            env_id,
+            num_envs,
+            gamma=gamma,
+            capture_video=capture_video,
+            run_name=run_name,
+        )
 
     if env_id.startswith("dm_control/"):
         import shimmy
