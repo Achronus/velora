@@ -18,7 +18,7 @@ import os
 import sys
 from io import TextIOWrapper
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Literal
 
 import wandb
 
@@ -161,6 +161,12 @@ class MetricsLogger:
     config : Dict (optional)
         Hyperparameter configuration stored with the run.
         Default is `None`
+    mode : Literal["online", "offline", "disabled"] (optional)
+        The wandb logging mode. `online` uploads metrics live,
+        `offline` stores them locally for a later `wandb sync`, and
+        `disabled` makes all logging a no-op (useful for tests and
+        smoke runs). When `None`, defers to the `WANDB_MODE`
+        environment variable. Default is `None`
 
     Examples
     --------
@@ -178,6 +184,7 @@ class MetricsLogger:
         run_name: str | None = None,
         group: str | None = None,
         config: Dict | None = None,
+        mode: Literal["online", "offline", "disabled"] | None = None,
     ) -> None:
         self.root_dir = Path(log_dir)
         self.root_dir.mkdir(parents=True, exist_ok=True)
@@ -188,9 +195,10 @@ class MetricsLogger:
             group=group,
             dir=self.root_dir,
             config=config,
+            mode=mode,
         )
 
-    def log(self, name: str, step: int, metrics: dict) -> None:
+    def log(self, name: str, step: int, metrics: Dict[str, float | int]) -> None:
         """
         Log a set of metrics under a shared name.
 
@@ -203,7 +211,7 @@ class MetricsLogger:
             Shared name for the metrics (e.g., `losses`, `episode`)
         step : int
             Training step number
-        metrics : dict
+        metrics : Dict[str, float | int]
             Mapping of metric names to scalar values
         """
         self._run.log(
