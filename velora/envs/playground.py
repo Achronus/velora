@@ -112,7 +112,9 @@ class PlaygroundVectorEnv(gym.vector.VectorEnv):
     capture_video : bool (optional)
         Whether to record videos of the first environment on the
         `capped_cubic_video_schedule`, written to
-        `runs/videos/{run_name}`. Default is `True`
+        `runs/videos/{run_name}`. The last episode is always
+        recorded, written when the environment is closed.
+        Default is `True`
     run_name : str (optional)
         The run name used for the video folder. When `None`, uses
         `{env_name}_{timestamp}`. Default is `None`
@@ -268,7 +270,7 @@ class PlaygroundVectorEnv(gym.vector.VectorEnv):
         if self._record:
             self._episode_id = 0
             self._recording = capped_cubic_video_schedule(0)
-            self._states = [self._env0_state()] if self._recording else []
+            self._states = [self._env0_state()]
 
         return self._normalize_obs(obs.to(self.device).float()), {}
 
@@ -348,6 +350,19 @@ class PlaygroundVectorEnv(gym.vector.VectorEnv):
 
         return self._normalize_obs(obs), rewards, terminations, truncations, info
 
+    def close(self) -> None:
+        """
+        Closes the environments.
+
+        When video recording is enabled, writes the buffered states of
+        the last (possibly unfinished) episode as a final video before
+        closing.
+        """
+        if not self.closed and self._record and len(self._states) > 1:
+            self._write_video()
+
+        super().close()
+
     def _force_reset(self, bad: torch.Tensor) -> None:
         import jax.numpy as jnp
 
@@ -363,17 +378,16 @@ class PlaygroundVectorEnv(gym.vector.VectorEnv):
         return jax.tree_util.tree_map(lambda x: x[0], self._wrapped.env_state)
 
     def _record_step(self, done: bool) -> None:
-        if self._recording and not done:
+        if not done:
             self._states.append(self._env0_state())
             return
 
-        if done:
-            if self._recording:
-                self._write_video()
+        if self._recording:
+            self._write_video()
 
-            self._episode_id += 1
-            self._recording = capped_cubic_video_schedule(self._episode_id)
-            self._states = [self._env0_state()] if self._recording else []
+        self._episode_id += 1
+        self._recording = capped_cubic_video_schedule(self._episode_id)
+        self._states = [self._env0_state()]
 
     def _write_video(self) -> None:
         import mediapy
