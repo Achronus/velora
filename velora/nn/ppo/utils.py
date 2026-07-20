@@ -73,9 +73,9 @@ def make_env(
         The discount factor for reward normalization. Default is `0.99`
     capture_video : bool (optional)
         Whether to record videos of the first environment. For
-        `playground/` environments the last episode is always
-        recorded, written when the environment is closed.
-        Default is `True`
+        `playground/` environments the run's final episode can also be
+        captured by scheduling it with `record_last_episode`, written
+        when the environment is closed. Default is `True`
     run_name : str (optional)
         The run name used for the video folder. Default is `""`
 

@@ -112,9 +112,9 @@ class PlaygroundVectorEnv(gym.vector.VectorEnv):
     capture_video : bool (optional)
         Whether to record videos of the first environment on the
         `capped_cubic_video_schedule`, written to
-        `runs/videos/{run_name}`. The last episode is always
-        recorded, written when the environment is closed.
-        Default is `True`
+        `runs/videos/{run_name}`. The run's final episode can also be
+        captured by scheduling it with `record_last_episode`, written
+        when the environment is closed. Default is `True`
     run_name : str (optional)
         The run name used for the video folder. When `None`, uses
         `{env_name}_{timestamp}`. Default is `None`
@@ -146,10 +146,10 @@ class PlaygroundVectorEnv(gym.vector.VectorEnv):
 
         episode_length = (
             episode_length if episode_length is not None else config.episode_length
-        )
+        )  # type: ignore
         action_repeat = (
             action_repeat if action_repeat is not None else config.action_repeat
-        )
+        )  # type: ignore
 
         self._wrapped = RSLRLBraxWrapper(
             raw_env,
@@ -197,10 +197,13 @@ class PlaygroundVectorEnv(gym.vector.VectorEnv):
             run_name = f"{env_name}_{int(time.time())}"
 
         self._video_dir = Path("runs", "videos") / run_name
-        self._fps = int(round(1.0 / (float(config.ctrl_dt) * action_repeat)))
+        self._fps = int(round(1.0 / (float(config.ctrl_dt) * action_repeat)))  # type: ignore
+        self._episode_length = int(episode_length)  # type: ignore
         self._episode_id = 0
         self._recording = False
         self._states: List[Any] = []
+        self._step_count = 0
+        self._final_start: int | None = None
 
         if self._record and sys.platform == "linux":
             os.environ.setdefault("MUJOCO_GL", "egl")
@@ -210,9 +213,7 @@ class PlaygroundVectorEnv(gym.vector.VectorEnv):
             return obs
 
         self._obs_stats.update(obs)
-        obs = (obs - self._obs_stats.mean) / torch.sqrt(
-            self._obs_stats.var + self.eps
-        )
+        obs = (obs - self._obs_stats.mean) / torch.sqrt(self._obs_stats.var + self.eps)
         return obs.clamp(-self.clip, self.clip)
 
     def _normalize_reward(
@@ -267,10 +268,12 @@ class PlaygroundVectorEnv(gym.vector.VectorEnv):
         self._ep_returns.zero_()
         self._ep_lengths.zero_()
 
+        self._step_count = 0
+
         if self._record:
             self._episode_id = 0
             self._recording = capped_cubic_video_schedule(0)
-            self._states = [self._env0_state()]
+            self._states = [self._env0_state()] if self._should_buffer() else []
 
         return self._normalize_obs(obs.to(self.device).float()), {}
 
@@ -329,6 +332,7 @@ class PlaygroundVectorEnv(gym.vector.VectorEnv):
 
         self._ep_returns += rewards
         self._ep_lengths += 1
+        self._step_count += 1
 
         info: Dict = {}
 
@@ -350,13 +354,31 @@ class PlaygroundVectorEnv(gym.vector.VectorEnv):
 
         return self._normalize_obs(obs), rewards, terminations, truncations, info
 
-    def close(self) -> None:
+    def record_last_episode(self, total_steps: int) -> None:
+        """
+        Schedules recording of the run's final episode.
+
+        Buffers env `0` states only during the last `episode_length`
+        `step` calls before `total_steps`. Episodes cannot exceed
+        `episode_length` steps, so the final episode always starts
+        inside this window and is fully captured. The video is written
+        when the environment is closed.
+
+        Parameters
+        ----------
+        total_steps : int
+            The total number of `step` calls the run will make
+        """
+        self._final_start = max(total_steps - self._episode_length, 0)
+
+    def close(self) -> None:  # type: ignore
         """
         Closes the environments.
 
-        When video recording is enabled, writes the buffered states of
-        the last (possibly unfinished) episode as a final video before
-        closing.
+        When video recording is enabled and last-episode buffering was
+        scheduled with `record_last_episode`, writes the buffered
+        states of the final (possibly unfinished) episode as a video
+        before closing.
         """
         if not self.closed and self._record and len(self._states) > 1:
             self._write_video()
@@ -370,16 +392,20 @@ class PlaygroundVectorEnv(gym.vector.VectorEnv):
 
         bad_jax = _torch_to_jax(bad.to(self._env_device).float())
         state = self._wrapped.env_state
-        self._wrapped.env_state = state.replace(
-            done=jnp.maximum(state.done, bad_jax)
-        )
+        self._wrapped.env_state = state.replace(done=jnp.maximum(state.done, bad_jax))  # type: ignore
 
     def _env0_state(self) -> Any:
         return jax.tree_util.tree_map(lambda x: x[0], self._wrapped.env_state)
 
+    def _should_buffer(self) -> bool:
+        return self._recording or (
+            self._final_start is not None and self._step_count >= self._final_start
+        )
+
     def _record_step(self, done: bool) -> None:
         if not done:
-            self._states.append(self._env0_state())
+            if self._should_buffer():
+                self._states.append(self._env0_state())
             return
 
         if self._recording:
@@ -387,7 +413,7 @@ class PlaygroundVectorEnv(gym.vector.VectorEnv):
 
         self._episode_id += 1
         self._recording = capped_cubic_video_schedule(self._episode_id)
-        self._states = [self._env0_state()]
+        self._states = [self._env0_state()] if self._should_buffer() else []
 
     def _write_video(self) -> None:
         import mediapy
