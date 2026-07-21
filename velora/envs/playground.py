@@ -17,6 +17,7 @@
 import os
 import sys
 import time
+from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Tuple
 
@@ -112,7 +113,8 @@ class PlaygroundVectorEnv(gym.vector.VectorEnv):
     capture_video : bool (optional)
         Whether to record videos of the first environment on the
         `capped_cubic_video_schedule`, written to
-        `runs/videos/{run_name}`. The run's final episode can also be
+        `runs/videos/{run_name}`. Videos are rendered and written on
+        a background thread. The run's final episode can also be
         captured by scheduling it with `record_last_episode`, written
         when the environment is closed. Default is `True`
     run_name : str (optional)
@@ -204,6 +206,11 @@ class PlaygroundVectorEnv(gym.vector.VectorEnv):
         self._states: List[Any] = []
         self._step_count = 0
         self._final_start: int | None = None
+        self._video_executor = ThreadPoolExecutor(
+            max_workers=1,
+            thread_name_prefix="velora-video",
+        )
+        self._video_future: Future | None = None
 
         if self._record and sys.platform == "linux":
             os.environ.setdefault("MUJOCO_GL", "egl")
@@ -383,6 +390,8 @@ class PlaygroundVectorEnv(gym.vector.VectorEnv):
         if not self.closed and self._record and len(self._states) > 1:
             self._write_video()
 
+        self._await_video()
+        self._video_executor.shutdown(wait=True)
         super().close()
 
     def _force_reset(self, bad: torch.Tensor) -> None:
@@ -415,13 +424,30 @@ class PlaygroundVectorEnv(gym.vector.VectorEnv):
         self._recording = capped_cubic_video_schedule(self._episode_id)
         self._states = [self._env0_state()] if self._should_buffer() else []
 
+    def _await_video(self) -> None:
+        if self._video_future is not None:
+            self._video_future.result()
+            self._video_future = None
+
     def _write_video(self) -> None:
+        self._await_video()
+
+        if not self._record:
+            return
+
+        self._video_future = self._video_executor.submit(
+            self._render_and_write,
+            self._states,
+            self._episode_id,
+        )
+
+    def _render_and_write(self, states: List[Any], episode_id: int) -> None:
         import mediapy
 
         try:
-            frames = self._raw_env.render(self._states)
+            frames = self._raw_env.render(states)
             self._video_dir.mkdir(parents=True, exist_ok=True)
-            path = self._video_dir / f"rl-video-episode-{self._episode_id}.mp4"
+            path = self._video_dir / f"rl-video-episode-{episode_id}.mp4"
             mediapy.write_video(str(path), frames, fps=self._fps)
         except Exception as e:
             self._record = False
