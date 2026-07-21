@@ -186,3 +186,25 @@ def compute_gae(
 
     returns = advantages + values
     return advantages, returns
+
+
+def normalize_advantages(advantages: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
+    """
+    Standardizes a batch of advantages to zero mean and unit standard
+    deviation, stabilizing the policy gradient scale.
+
+    Parameters
+    ----------
+    advantages : torch.Tensor
+        A batch of advantages `(batch_size,)`
+    eps : float (optional)
+        A small constant added to the standard deviation to prevent
+        division by zero when all advantages are equal.
+        Default is `1e-8`
+
+    Returns
+    -------
+    advantages : torch.Tensor
+        The normalized advantages `(batch_size,)`
+    """
+    return (advantages - advantages.mean()) / (advantages.std() + eps)
