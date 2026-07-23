@@ -14,8 +14,6 @@
 # ==============================================================================
 
 
-from typing import Tuple
-
 import torch
 
 
@@ -162,40 +160,3 @@ class PPOLoss:
             Total training loss
         """
         return policy_loss - self.ent_coef * entropy_loss + value_loss * self.vf_coef
-
-    @torch.no_grad()
-    def diagnostics(
-        self,
-        log_ratio: torch.Tensor,
-        ratio: torch.Tensor,
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """
-        Computes gradient-free diagnostics of the clipped surrogate
-        objective for a mini-batch.
-
-        Parameters
-        ----------
-        log_ratio : torch.Tensor
-            The log probability ratios between the updated and rollout
-            policies, `new_log_probs - old_log_probs`
-            `(minibatch_size,)`
-        ratio : torch.Tensor
-            The probability ratios, `log_ratio.exp()`
-            `(minibatch_size,)`
-
-        Returns
-        -------
-        old_approx_kl : torch.Tensor
-            The naive KL divergence estimate, `mean(-log_ratio)`
-        approx_kl : torch.Tensor
-            The lower-variance KL divergence estimate,
-            `mean((ratio - 1) - log_ratio)`, from
-            [Approximating KL Divergence](http://joschu.net/blog/kl-approx.html)
-        clip_frac : torch.Tensor
-            The fraction of the mini-batch clipped by the surrogate
-            objective, where `|ratio - 1| > clip_coef`
-        """
-        old_approx_kl = (-log_ratio).mean()
-        approx_kl = ((ratio - 1) - log_ratio).mean()
-        clip_frac = ((ratio - 1.0).abs() > self.clip_coef).float().mean()
-        return old_approx_kl, approx_kl, clip_frac
