@@ -248,3 +248,6 @@ class RolloutBuffer:
 
         returns = advantages + self.values
         return advantages, returns
+
+    def __len__(self) -> int:
+        return self._position
