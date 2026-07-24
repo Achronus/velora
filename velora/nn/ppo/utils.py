@@ -14,11 +14,42 @@
 # ==============================================================================
 
 import os
+import sys
 
 import gymnasium as gym
 import numpy as np
 import torch
 from torch import nn
+
+
+def _quiet_moviepy_import() -> None:
+    """
+    Imports `moviepy.config` with `stderr` suppressed at the file
+    descriptor level.
+
+    On Windows, `moviepy` probes for ImageMagick with `dir` shell
+    commands during its config import. When ImageMagick is not
+    installed, the child process leaks a `File Not Found` message to
+    the console that `subprocess` does not capture. Velora never uses
+    ImageMagick (`ffmpeg` renders the videos), so the probe's console
+    noise is suppressed by importing the config here, before any
+    video wrapper triggers it.
+    """
+    if "moviepy.config" in sys.modules:
+        return
+
+    devnull = os.open(os.devnull, os.O_WRONLY)
+    stderr_fd = os.dup(2)
+    os.dup2(devnull, 2)
+
+    try:
+        import moviepy.config  # noqa: F401
+    except ImportError:
+        pass
+    finally:
+        os.dup2(stderr_fd, 2)
+        os.close(stderr_fd)
+        os.close(devnull)
 
 
 def layer_init(
@@ -84,6 +115,9 @@ def make_env(
     envs : gym.vector.VectorEnv
         The vectorized environments
     """
+    if capture_video:
+        _quiet_moviepy_import()
+
     if env_id.startswith("playground/"):
         from velora.envs import make_playground_env
 
