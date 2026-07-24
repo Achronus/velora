@@ -16,9 +16,8 @@
 import time
 from dataclasses import dataclass
 from functools import cached_property
-from pathlib import Path
 from types import TracebackType
-from typing import Any, Literal
+from typing import Any, Literal, Self
 
 import torch
 from tqdm import tqdm
@@ -104,7 +103,6 @@ class RunTracker:
 
         self.global_step = 0
         self.run_dir = f"runs/{self.config.exp_name}"
-        self.video_dir = Path("runs", "videos", self.config.run_name)
 
         self.progress = tqdm(
             total=total_steps,
@@ -121,7 +119,9 @@ class RunTracker:
             mode=mode,
         )
 
-    def __enter__(self) -> "RunTracker":
+        self.video_dir = self.logger.run_dir / "videos"
+
+    def __enter__(self) -> Self:
         """Enters the run context."""
         return self
 

@@ -15,6 +15,7 @@
 
 
 import re
+from pathlib import Path
 
 from velora.envs.normalize import RunningMeanStd
 from velora.envs.playground import PlaygroundVectorEnv
@@ -79,7 +80,7 @@ def make_playground_env(
     *,
     gamma: float = 0.99,
     capture_video: bool = True,
-    run_name: str | None = None,
+    video_dir: Path | str | None = None,
     **env_kwargs,
 ) -> PlaygroundVectorEnv:
     """
@@ -99,9 +100,11 @@ def make_playground_env(
         final episode can also be captured by scheduling it with
         `record_last_episode`, written when the environment is closed.
         Default is `True`
-    run_name : str (optional)
-        The run name used for the video folder. When `None`, uses
-        `{env_name}_{timestamp}`. Default is `None`
+    video_dir : Path | str (optional)
+        Directory to write recorded videos into (e.g., the run's
+        wandb directory `runs/{exp_name}/wandb/run-{id}/videos`).
+        When `None`, uses `runs/videos/{env_name}_{timestamp}`.
+        Default is `None`
     **env_kwargs
         Additional `PlaygroundVectorEnv` arguments (e.g., `impl`,
         `device_rank`, `normalize_obs`)
@@ -116,7 +119,7 @@ def make_playground_env(
         num_envs,
         gamma=gamma,
         capture_video=capture_video,
-        run_name=run_name,
+        video_dir=video_dir,
         **env_kwargs,
     )
 

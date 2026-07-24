@@ -111,7 +111,7 @@ class PPO:
             env_id,
             num_envs,
             gamma=config.gamma,
-            run_name=self.tracker.config.run_name,
+            video_dir=self.tracker.video_dir,
         )
 
         if not isinstance(envs.single_action_space, gym.spaces.Box):

@@ -15,6 +15,7 @@
 
 import os
 import sys
+from pathlib import Path
 
 import gymnasium as gym
 import numpy as np
@@ -87,7 +88,7 @@ def make_env(
     *,
     gamma: float = 0.99,
     capture_video: bool = True,
-    run_name: str = "",
+    video_dir: Path | str | None = None,
 ) -> gym.vector.VectorEnv:
     """
     Creates a set of vectorized environments with the standard PPO
@@ -107,8 +108,10 @@ def make_env(
         `playground/` environments the run's final episode can also be
         captured by scheduling it with `record_last_episode`, written
         when the environment is closed. Default is `True`
-    run_name : str (optional)
-        The run name used for the video folder. Default is `""`
+    video_dir : Path | str (optional)
+        Directory to write recorded videos into (e.g., the run's
+        wandb directory `runs/{exp_name}/wandb/run-{id}/videos`).
+        When `None`, uses `runs/videos`. Default is `None`
 
     Returns
     -------
@@ -126,14 +129,17 @@ def make_env(
             num_envs,
             gamma=gamma,
             capture_video=capture_video,
-            run_name=run_name,
+            video_dir=video_dir,
         )
+
+    if video_dir is None:
+        video_dir = Path("runs", "videos")
 
     def thunk(idx: int):
         def _make() -> gym.Env:
             if capture_video and idx == 0:
                 env = gym.make(env_id, render_mode="rgb_array")
-                env = gym.wrappers.RecordVideo(env, f"runs/videos/{run_name}")
+                env = gym.wrappers.RecordVideo(env, str(video_dir))
             else:
                 env = gym.make(env_id)
 

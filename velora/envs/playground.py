@@ -112,14 +112,16 @@ class PlaygroundVectorEnv(gym.vector.VectorEnv):
         Default is `10.0`
     capture_video : bool (optional)
         Whether to record videos of the first environment on the
-        `capped_cubic_video_schedule`, written to
-        `runs/videos/{run_name}`. Videos are rendered and written on
-        a background thread. The run's final episode can also be
-        captured by scheduling it with `record_last_episode`, written
-        when the environment is closed. Default is `True`
-    run_name : str (optional)
-        The run name used for the video folder. When `None`, uses
-        `{env_name}_{timestamp}`. Default is `None`
+        `capped_cubic_video_schedule`, written to `video_dir`. Videos
+        are rendered and written on a background thread. The run's
+        final episode can also be captured by scheduling it with
+        `record_last_episode`, written when the environment is closed.
+        Default is `True`
+    video_dir : Path | str (optional)
+        Directory to write recorded videos into (e.g., the run's
+        wandb directory `runs/{exp_name}/wandb/run-{id}/videos`).
+        When `None`, uses `runs/videos/{env_name}_{timestamp}`.
+        Default is `None`
     """
 
     _torch_native = True
@@ -138,7 +140,7 @@ class PlaygroundVectorEnv(gym.vector.VectorEnv):
         normalize_reward: bool = True,
         clip: float = 10.0,
         capture_video: bool = True,
-        run_name: str | None = None,
+        video_dir: Path | str | None = None,
     ) -> None:
         config = registry.get_default_config(env_name)
 
@@ -195,10 +197,10 @@ class PlaygroundVectorEnv(gym.vector.VectorEnv):
         self._raw_env = raw_env
         self._record = capture_video
 
-        if not run_name:
-            run_name = f"{env_name}_{int(time.time())}"
+        if video_dir is None:
+            video_dir = Path("runs", "videos", f"{env_name}_{int(time.time())}")
 
-        self._video_dir = Path("runs", "videos") / run_name
+        self._video_dir = Path(video_dir)
         self._fps = int(round(1.0 / (float(config.ctrl_dt) * action_repeat)))  # type: ignore
         self._episode_length = int(episode_length)  # type: ignore
         self._episode_id = 0

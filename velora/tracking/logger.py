@@ -198,6 +198,20 @@ class MetricsLogger:
             mode=mode,
         )
 
+    @property
+    def run_dir(self) -> Path:
+        """
+        Path to the wandb run directory (e.g.,
+        `runs/{exp_name}/wandb/run-20260724_091234-1cpfh96w`).
+
+        Falls back to `root_dir` when the run is disabled, where wandb
+        does not create a real run directory.
+        """
+        if self._run.disabled:
+            return self.root_dir
+
+        return Path(self._run.dir).parent
+
     def log(self, name: str, step: int, metrics: dict[str, float | int]) -> None:
         """
         Log a set of metrics under a shared name.
