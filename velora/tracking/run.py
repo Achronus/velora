@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from functools import cached_property
 from pathlib import Path
 from types import TracebackType
-from typing import Any, Dict, Literal
+from typing import Any, Literal
 
 import torch
 from tqdm import tqdm
@@ -81,7 +81,7 @@ class RunTracker:
         Provided to the progress bar for step tracking
     config : RunTrackerConfig
         The run's identity configuration
-    metadata : Dict[str, Any] (optional)
+    metadata : dict[str, Any] (optional)
         Hyperparameter configuration stored with the run (e.g., the
         agent name and algorithm settings). Default is `None`
     mode : Literal["online", "offline", "disabled"] (optional)
@@ -97,7 +97,7 @@ class RunTracker:
         total_steps: int,
         config: RunTrackerConfig,
         *,
-        metadata: Dict[str, Any] | None = None,
+        metadata: dict[str, Any] | None = None,
         mode: Literal["online", "offline", "disabled"] | None = None,
     ) -> None:
         self.config = config
@@ -145,8 +145,8 @@ class RunTracker:
         self,
         name: str,
         *,
-        metrics: Dict[str, float | int],
-        bar_details: Dict[str, object],
+        metrics: dict[str, float | int],
+        bar_details: dict[str, object],
     ) -> None:
         """
         Logs a set of metrics for a training iteration and updates the
@@ -159,16 +159,16 @@ class RunTracker:
         ----------
         name : str
             Shared section name for the metrics (e.g., `losses`)
-        metrics : Dict[str, float | int]
+        metrics : dict[str, float | int]
             Mapping of metric names to scalar values that are logged
-        bar_details : Dict[str, object]
+        bar_details : dict[str, object]
             Mapping of stats displayed as the progress bar's postfix
             (e.g., `loss`, `approx_kl`)
         """
         self.logger.log(name, self.global_step, metrics)
         self.progress.set_postfix(bar_details)
 
-    def log_episodic(self, info: Dict) -> None:
+    def log_episodic(self, info: dict) -> None:
         """
         Logs completed episode statistics from a vectorized
         environment step.
@@ -183,7 +183,7 @@ class RunTracker:
 
         Parameters
         ----------
-        info : Dict
+        info : dict
             The `info` mapping returned by `envs.step`. Episodes are
             detected via the `_episode` mask when `final_info` is
             present; steps without completed episodes are a no-op

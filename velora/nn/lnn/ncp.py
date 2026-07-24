@@ -13,7 +13,6 @@
 # limitations under the License.
 # ==============================================================================
 
-from typing import Tuple
 
 import torch
 from torch import nn
@@ -176,7 +175,7 @@ class LNN(nn.Module):
         x: torch.Tensor,
         h: torch.Tensor | None = None,
         ts: torch.Tensor | None = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Utility method that prepares `forward` inputs.
 
@@ -222,7 +221,7 @@ class LNN(nn.Module):
         x: torch.Tensor,
         h: torch.Tensor | None = None,
         ts: torch.Tensor | None = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Performs a forward pass through the network, one timestep at a time.
 

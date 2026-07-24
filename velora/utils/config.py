@@ -15,10 +15,10 @@
 
 from dataclasses import fields
 from pathlib import Path
-from typing import Any, Dict, Type
+from typing import Any
 
 
-def dump_config(config: Any) -> Dict[str, Any]:
+def dump_config(config: Any) -> dict[str, Any]:
     """
     Recursively serialize a `struct.dataclass` to a JSON-compatible dict.
 
@@ -33,7 +33,7 @@ def dump_config(config: Any) -> Dict[str, Any]:
 
     Returns
     -------
-    data : Dict[str, Any]
+    data : dict[str, Any]
         JSON-compatible dictionary representation
     """
     result = {}
@@ -50,7 +50,7 @@ def dump_config(config: Any) -> Dict[str, Any]:
     return result
 
 
-def load_config(cls: Type, data: Dict[str, Any]) -> Any:
+def load_config(cls: type, data: dict[str, Any]) -> Any:
     """
     Recursively reconstruct a `struct.dataclass` from a serialized dict.
 
@@ -60,9 +60,9 @@ def load_config(cls: Type, data: Dict[str, Any]) -> Any:
 
     Parameters
     ----------
-    cls : Type
+    cls : type
         The dataclass class to reconstruct
-    data : Dict[str, Any]
+    data : dict[str, Any]
         Dictionary produced by `dump_config`
 
     Returns

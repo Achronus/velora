@@ -15,7 +15,8 @@
 
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Iterator, Tuple
+from collections.abc import Iterator
+from typing import TYPE_CHECKING
 
 import torch
 
@@ -80,9 +81,9 @@ class MiniBatchData:
 
 
 @dataclass
-class RecurrentMiniBatchData(MiniBatchData):
+class LSTMMiniBatchData(MiniBatchData):
     """
-    A batch of update-ready experience for `RecurrentPPO` policy
+    A batch of update-ready experience for `LSTMPPO` policy
     updates.
 
     Parameters
@@ -101,13 +102,13 @@ class RecurrentMiniBatchData(MiniBatchData):
         The discounted returns `(n_samples,)`
     dones : torch.Tensor
         The completion flags entering each timestep `(n_samples,)`
-    initial_state : Tuple[torch.Tensor, torch.Tensor]
+    initial_state : tuple[torch.Tensor, torch.Tensor]
         The `(hidden, cell)` recurrent state entering the rollout
         `(num_layers, envs_per_batch, hidden_size)`
     """
 
     dones: torch.Tensor
-    initial_state: Tuple[torch.Tensor, torch.Tensor]
+    initial_state: tuple[torch.Tensor, torch.Tensor]
 
 
 class MiniBatchLoader:
@@ -208,10 +209,10 @@ class MiniBatchLoader:
         return self.batch_size if self.data is not None else 0
 
 
-class RecurrentMiniBatchLoader(MiniBatchLoader):
+class LSTMMiniBatchLoader(MiniBatchLoader):
     """
     An iterable over mini-batches of rollout experience for
-    `RecurrentPPO`.
+    `LSTMPPO`.
 
     Shuffles environments (not timesteps) so each mini-batch holds
     whole trajectories, keeping timesteps in order for the recurrent
@@ -247,37 +248,26 @@ class RecurrentMiniBatchLoader(MiniBatchLoader):
         super().__init__(num_steps * num_envs, num_steps * self.envs_per_batch)
 
         self._dones: torch.Tensor | None = None
-        self._initial_state: Tuple[torch.Tensor, torch.Tensor] | None = None
+        self._initial_state: tuple[torch.Tensor, torch.Tensor] | None = None
 
-    def load(  # type: ignore[override]
+    def set_rollout_state(
         self,
-        rollout: "RolloutBatch",
-        advantages: torch.Tensor,
-        returns: torch.Tensor,
+        initial_state: tuple[torch.Tensor, torch.Tensor],
         dones: torch.Tensor,
-        initial_state: Tuple[torch.Tensor, torch.Tensor],
     ) -> None:
         """
-        Loads a rollout as the batch to serve mini-batches from,
-        replacing any previously loaded batch.
+        Stores the recurrent state and completion flags entering the
+        rollout, required before each `load()`.
 
         Parameters
         ----------
-        rollout : RolloutBatch
-            Flattened batch of rollout experience `(batch_size, ...)`
-        advantages : torch.Tensor
-            The GAE advantage estimates `(batch_size,)`
-        returns : torch.Tensor
-            The discounted returns `(batch_size,)`
+        initial_state : tuple[torch.Tensor, torch.Tensor]
+            The `(hidden, cell)` recurrent state entering the rollout
+            `(num_layers, num_envs, hidden_size)`
         dones : torch.Tensor
             The flattened completion flags entering each timestep
             `(batch_size,)`
-        initial_state : Tuple[torch.Tensor, torch.Tensor]
-            The `(hidden, cell)` recurrent state entering the rollout
-            `(num_layers, num_envs, hidden_size)`
         """
-        super().load(rollout, advantages, returns)
-
         if dones.shape != (self.batch_size,):
             raise ValueError(
                 f"Shape mismatch. Got 'dones' '{tuple(dones.shape)}', "
@@ -293,17 +283,45 @@ class RecurrentMiniBatchLoader(MiniBatchLoader):
                 f"expected '{self.num_envs}' environments at dim 1."
             )
 
-        self._dones = dones
         self._initial_state = initial_state
+        self._dones = dones
 
-    def __iter__(self) -> Iterator[RecurrentMiniBatchData]:
+    def load(
+        self,
+        rollout: "RolloutBatch",
+        advantages: torch.Tensor,
+        returns: torch.Tensor,
+    ) -> None:
+        """
+        Loads a rollout as the batch to serve mini-batches from,
+        replacing any previously loaded batch. Requires
+        `set_rollout_state()` to have stored the rollout's recurrent
+        state first.
+
+        Parameters
+        ----------
+        rollout : RolloutBatch
+            Flattened batch of rollout experience `(batch_size, ...)`
+        advantages : torch.Tensor
+            The GAE advantage estimates `(batch_size,)`
+        returns : torch.Tensor
+            The discounted returns `(batch_size,)`
+        """
+        if self._initial_state is None or self._dones is None:
+            raise ValueError(
+                "Missing rollout state. Use 'set_rollout_state()' before 'load()'."
+            )
+
+        super().load(rollout, advantages, returns)
+
+    def __iter__(self) -> Iterator[LSTMMiniBatchData]:
         """
         Iterates over the loaded batch in mini-batches of shuffled
         environments, covering a single update epoch.
 
         Yields
         ------
-        batch : RecurrentMiniBatchData
+        batch : LSTMMiniBatchData
             A mini-batch of whole-trajectory experience
             `(minibatch_size, ...)`, with the recurrent state sliced
             to the mini-batch's environments
@@ -324,7 +342,7 @@ class RecurrentMiniBatchLoader(MiniBatchLoader):
             mb_flat_inds = flat_inds[:, mb_env_inds].reshape(-1)
             data = self.data.sample(mb_flat_inds)
 
-            yield RecurrentMiniBatchData(
+            yield LSTMMiniBatchData(
                 obs=data.obs,
                 actions=data.actions,
                 log_probs=data.log_probs,

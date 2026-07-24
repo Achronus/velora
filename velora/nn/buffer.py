@@ -15,7 +15,6 @@
 
 
 from dataclasses import dataclass
-from typing import Tuple
 
 import torch
 
@@ -79,9 +78,9 @@ class RolloutBuffer:
         Number of parallel environments
     capacity : int
         Maximum size of the rollout buffer
-    obs_shape : Tuple[int, ...]
+    obs_shape : tuple[int, ...]
         A single environments observation space shape
-    act_shape : Tuple[int, ...]
+    act_shape : tuple[int, ...]
         A single environments action space shape
     device : torch.device
         Device to load tensors onto
@@ -91,8 +90,8 @@ class RolloutBuffer:
         self,
         n_envs: int,
         capacity: int,
-        obs_shape: Tuple[int, ...],
-        act_shape: Tuple[int, ...],
+        obs_shape: tuple[int, ...],
+        act_shape: tuple[int, ...],
         *,
         device: torch.device,
     ) -> None:

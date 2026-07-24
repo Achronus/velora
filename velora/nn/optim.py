@@ -18,7 +18,8 @@
 
 
 import math
-from typing import Any, Callable, Dict, Iterable, List, Tuple
+from collections.abc import Callable, Iterable
+from typing import Any
 
 import torch
 from torch.optim import Optimizer
@@ -42,7 +43,7 @@ class Adan(Optimizer):
         dicts defining parameter groups.
     lr : float (optional)
         Learning rate. Default is `1e-3`
-    betas : Tuple[float, float, float] (optional)
+    betas : tuple[float, float, float] (optional)
         coefficients used for first- and second-order moments.
         Default is `(0.98, 0.92, 0.99)`
     eps : float (optional)
@@ -60,7 +61,7 @@ class Adan(Optimizer):
         self,
         params: ParamsT,
         lr: float = 1e-3,
-        betas: Tuple[float, float, float] = (0.98, 0.92, 0.99),
+        betas: tuple[float, float, float] = (0.98, 0.92, 0.99),
         eps: float = 1e-8,
         weight_decay: float = 0.0,
         max_grad_norm: float = 0.0,
@@ -84,7 +85,7 @@ class Adan(Optimizer):
         )
         super().__init__(params, defaults)
 
-    def __setstate__(self, state: Dict[str, Any]) -> None:
+    def __setstate__(self, state: dict[str, Any]) -> None:
         """
         Restore the optimizer from a pickled `state`.
 
@@ -93,7 +94,7 @@ class Adan(Optimizer):
 
         Parameters
         ----------
-        state : Dict[str, Any]
+        state : dict[str, Any]
             Unpickled optimizer state.
         """
 
@@ -237,12 +238,12 @@ class Adan(Optimizer):
 
 
 def _multi_tensor_adan(
-    params: List[torch.Tensor],
-    grads: List[torch.Tensor],
-    exp_avgs: List[torch.Tensor],
-    exp_avg_sqs: List[torch.Tensor],
-    exp_avg_diffs: List[torch.Tensor],
-    neg_pre_grads: List[torch.Tensor],
+    params: list[torch.Tensor],
+    grads: list[torch.Tensor],
+    exp_avgs: list[torch.Tensor],
+    exp_avg_sqs: list[torch.Tensor],
+    exp_avg_diffs: list[torch.Tensor],
+    neg_pre_grads: list[torch.Tensor],
     *,
     beta1: float,
     beta2: float,
@@ -265,17 +266,17 @@ def _multi_tensor_adan(
 
     Parameters
     ----------
-    params : List[torch.Tensor]
+    params : list[torch.Tensor]
         Parameters to update.
-    grads : List[torch.Tensor]
+    grads : list[torch.Tensor]
         Gradients for each parameter.
-    exp_avgs : List[torch.Tensor]
+    exp_avgs : list[torch.Tensor]
         First moment buffers (`m_t`).
-    exp_avg_sqs : List[torch.Tensor]
+    exp_avg_sqs : list[torch.Tensor]
         Second moment buffers (`n_t`).
-    exp_avg_diffs : List[torch.Tensor]
+    exp_avg_diffs : list[torch.Tensor]
         Gradient difference moment buffers (`v_t`).
-    neg_pre_grads : List[torch.Tensor]
+    neg_pre_grads : list[torch.Tensor]
         Negated gradients from the previous step.
     beta1 : float
         Decay rate for the first moment.

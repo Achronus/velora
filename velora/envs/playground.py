@@ -19,7 +19,7 @@ import sys
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Tuple
+from typing import Any, Literal
 
 import gymnasium as gym
 import jax
@@ -203,7 +203,7 @@ class PlaygroundVectorEnv(gym.vector.VectorEnv):
         self._episode_length = int(episode_length)  # type: ignore
         self._episode_id = 0
         self._recording = False
-        self._states: List[Any] = []
+        self._states: list[Any] = []
         self._step_count = 0
         self._final_start: int | None = None
         self._video_executor = ThreadPoolExecutor(
@@ -241,8 +241,8 @@ class PlaygroundVectorEnv(gym.vector.VectorEnv):
         self,
         *,
         seed: int | list[int] | None = None,
-        options: Dict[str, Any] | None = None,
-    ) -> Tuple[torch.Tensor, Dict]:
+        options: dict[str, Any] | None = None,
+    ) -> tuple[torch.Tensor, dict]:
         """
         Resets all environments.
 
@@ -251,7 +251,7 @@ class PlaygroundVectorEnv(gym.vector.VectorEnv):
         seed : int (optional)
             Random number generator seed. When given, reseeds the
             environments JAX reset keys. Default is `None`
-        options : Dict[str, Any] (optional)
+        options : dict[str, Any] (optional)
             Ignored. Present for Gymnasium API compatibility.
             Default is `None`
 
@@ -259,7 +259,7 @@ class PlaygroundVectorEnv(gym.vector.VectorEnv):
         -------
         obs : torch.Tensor
             The initial observations `(num_envs, obs_dim)`
-        info : Dict
+        info : dict
             An empty dict
         """
         if seed is not None:
@@ -287,7 +287,7 @@ class PlaygroundVectorEnv(gym.vector.VectorEnv):
     def step(
         self,
         actions: torch.Tensor,
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, Dict]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, dict]:
         """
         Steps all environments with a batch of actions.
 
@@ -307,7 +307,7 @@ class PlaygroundVectorEnv(gym.vector.VectorEnv):
             Episode termination flags `(num_envs,)`
         truncations : torch.Tensor
             Episode truncation flags `(num_envs,)`
-        info : Dict
+        info : dict
             Contains `final_info` episode stats when any episode
             finished, using the Gymnasium vector convention:
             `{"episode": {"r", "l"}, "_episode": mask}`
@@ -341,7 +341,7 @@ class PlaygroundVectorEnv(gym.vector.VectorEnv):
         self._ep_lengths += 1
         self._step_count += 1
 
-        info: Dict = {}
+        info: dict = {}
 
         if dones.any():
             info["final_info"] = {
@@ -441,7 +441,7 @@ class PlaygroundVectorEnv(gym.vector.VectorEnv):
             self._episode_id,
         )
 
-    def _render_and_write(self, states: List[Any], episode_id: int) -> None:
+    def _render_and_write(self, states: list[Any], episode_id: int) -> None:
         import mediapy
 
         try:

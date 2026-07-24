@@ -13,7 +13,6 @@
 # limitations under the License.
 # ==============================================================================
 
-from typing import Tuple
 
 import torch
 from torch import nn
@@ -181,7 +180,7 @@ class NCPLiquidCell(nn.Module):
         x: torch.Tensor,
         hidden: torch.Tensor,
         ts: torch.Tensor,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Performs a forward pass through the cell.
 
@@ -368,7 +367,7 @@ class DeltaErasureLiquidCell(NCPLiquidCell):
         x: torch.Tensor,
         hidden: torch.Tensor,
         ts: torch.Tensor,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Performs a forward pass through the cell.
 

@@ -17,7 +17,7 @@ import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Generic, List, Tuple, Type, TypeVar
+from typing import Generic, TypeVar
 
 from rich.console import Group, RenderableType
 from rich.padding import Padding
@@ -330,13 +330,13 @@ class MetricCard(Component):
     ----------
     title : str
         Card title
-    metrics : List[Metric | Separator]
+    metrics : list[Metric | Separator]
         List of metrics and separators to display
     colour : str (optional)
         Hex colour for border and metric values. Default is `Colour.LAVENDER`
     height : int | None (optional)
         Fixed height for the card. Default is `None` (auto)
-    padding : Tuple[int, int, int, int] (optional)
+    padding : tuple[int, int, int, int] (optional)
         Padding `(top, right, bottom, left)`.
         Default is `(1, 1, 1, 0)`
     """
@@ -344,7 +344,7 @@ class MetricCard(Component):
     def __init__(
         self,
         title: str,
-        metrics: List[Metric | Divider | Spacer],
+        metrics: list[Metric | Divider | Spacer],
         colour: str = Colour.LAVENDER,
         height: int | None = None,
         padding: tuple[int, int, int, int] = (1, 1, 1, 0),
@@ -371,7 +371,7 @@ class MetricCard(Component):
     def render(self) -> Panel:
         from rich.console import Group
 
-        renderables: List[RenderableType] = []
+        renderables: list[RenderableType] = []
         current_table: Table | None = None
 
         def _new_table() -> Table:
@@ -418,7 +418,7 @@ class TrainingProgressCard(ProgressComponent):
 
     Parameters
     ----------
-    tasks : List[Tuple[str, int]]
+    tasks : list[tuple[str, int]]
         A list of tuples containing `(description, total)`.
         First task acts as a progress bar and additional tasks are sub-components
         underneath it
@@ -434,7 +434,7 @@ class TrainingProgressCard(ProgressComponent):
 
     def __init__(
         self,
-        tasks: List[Tuple[str, int]],
+        tasks: list[tuple[str, int]],
         total: int,
         colour: str = Colour.TEAL,
         complete_colour: str = Colour.TEAL,
@@ -449,7 +449,7 @@ class TrainingProgressCard(ProgressComponent):
         self._task_ids: dict[str, TaskID] = {}
         self._current_chunk_size: int | None = None
         self._current_chunk_index: int = 0
-        self._current_env_names: List[str] = []
+        self._current_env_names: list[str] = []
 
         self._inner_total: int = tasks[1][1]
         self._inner_count: int = 0
@@ -470,7 +470,7 @@ class TrainingProgressCard(ProgressComponent):
         *,
         advance: int = 1,
         chunk_size: int | None = None,
-        env_names: List[str] | None = None,
+        env_names: list[str] | None = None,
     ) -> None:
         """
         Advance the progress card.
@@ -483,7 +483,7 @@ class TrainingProgressCard(ProgressComponent):
             Number to increment bar by. Default is `1`
         chunk_size : int (optional)
             Number of agents in the current chunk. Default is `None`
-        env_names : List[str] (optional)
+        env_names : list[str] (optional)
             Environment names in the current chunk. Default is `None`
         """
         task_id = self._task_ids.get(description)
@@ -518,13 +518,13 @@ class TrainingProgressCard(ProgressComponent):
             self._current_env_names = []
 
     @staticmethod
-    def _format_env_names(names: List[str], max_shown: int = 3) -> str:
+    def _format_env_names(names: list[str], max_shown: int = 3) -> str:
         """
         Format environment names for display, capping at `max_shown`.
 
         Parameters
         ----------
-        names : List[str]
+        names : list[str]
             Environment names to format
         max_shown : int (optional)
             Maximum number of names to show before summarizing.
@@ -600,7 +600,7 @@ class CardRow(Component):
 
     Parameters
     ----------
-    cards : List[Component]
+    cards : list[Component]
         List of cards (1-3) to display in a row
     match_height : bool (optional)
         Whether to match heights of all cards to the tallest. Default is `True`
@@ -608,7 +608,7 @@ class CardRow(Component):
 
     def __init__(
         self,
-        cards: List[Component],
+        cards: list[Component],
         match_height: bool = True,
     ) -> None:
         if not 1 <= len(cards) <= 3:
@@ -648,16 +648,16 @@ class LiveMetricsCard(Generic[T, T2], Component):
 
     Parameters
     ----------
-    losses : Type[T]
+    losses : type[T]
         Losses dataclass type
-    stats : Type[T2]
+    stats : type[T2]
         Statistics dataclass type
     colour : str (optional)
         Hex colour for border and values. Default is `Colour.ROSE`
     """
 
     def __init__(
-        self, losses: Type[T], stats: Type[T2], colour: str = Colour.ROSE
+        self, losses: type[T], stats: type[T2], colour: str = Colour.ROSE
     ) -> None:
         self.title = "Live Metrics"
         self.colour = colour
@@ -670,7 +670,7 @@ class LiveMetricsCard(Generic[T, T2], Component):
 
         Parameters
         ----------
-        **kwargs : Dict[str, Any]
+        **kwargs : dict[str, Any]
             Keyword arguments for the loss dataclass
         """
         for key, value in kwargs.items():
@@ -682,7 +682,7 @@ class LiveMetricsCard(Generic[T, T2], Component):
 
         Parameters
         ----------
-        **kwargs : Dict[str, Any]
+        **kwargs : dict[str, Any]
             Keyword arguments for the stats dataclass
         """
         for key, value in kwargs.items():

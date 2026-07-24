@@ -13,7 +13,7 @@
 # limitations under the License.
 # ==============================================================================
 
-from typing import Dict, NamedTuple, Tuple
+from typing import NamedTuple
 
 import numpy as np
 import torch
@@ -33,7 +33,7 @@ class Wiring(NamedTuple):
         Inter (input) layer mask of shape `(n_inter, in_features)`
     command : torch.Tensor
         Command (hidden) layer mask of shape `(n_command, n_inter)`
-    heads : Dict[str, torch.Tensor]
+    heads : dict[str, torch.Tensor]
         Motor (output) head masks keyed by head name, each of shape
         `(head_dim, n_command)`. Order matches the `heads` argument
         given to `build_wiring`
@@ -41,7 +41,7 @@ class Wiring(NamedTuple):
 
     inter: torch.Tensor
     command: torch.Tensor
-    heads: Dict[str, torch.Tensor]
+    heads: dict[str, torch.Tensor]
 
 
 def _synapse_count(count: int, density_level: float, *, scale: int = 1) -> int:
@@ -66,7 +66,7 @@ def _synapse_count(count: int, density_level: float, *, scale: int = 1) -> int:
 
 
 def _make_mask(
-    shape: Tuple[int, int],
+    shape: tuple[int, int],
     count: int,
     rng: np.random.Generator,
 ) -> torch.Tensor:
@@ -81,7 +81,7 @@ def _make_mask(
 
     Parameters
     ----------
-    shape : Tuple[int, int]
+    shape : tuple[int, int]
         Mask shape `(n_inputs, n_outputs)`
     count : int
         Number of connections per node
@@ -186,7 +186,7 @@ def build_layer_mask(
 def build_wiring(
     in_features: int,
     n_neurons: int,
-    heads: Dict[str, int],
+    heads: dict[str, int],
     *,
     seed: int = 28,
     sparsity: float = 0.5,
@@ -213,7 +213,7 @@ def build_wiring(
         Number of inputs (sensory nodes)
     n_neurons : int
         Number of decision nodes (inter + command nodes)
-    heads : Dict[str, int]
+    heads : dict[str, int]
         Motor head output sizes keyed by head name,
         e.g. `{"pi": 64, "y": 8}`
     seed : int (optional)

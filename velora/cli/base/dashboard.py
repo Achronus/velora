@@ -14,7 +14,6 @@
 # ==============================================================================
 
 import os
-from typing import List
 
 from rich.console import Console, Group
 from rich.live import Live
@@ -36,7 +35,7 @@ class ConsoleDashboard:
     ----------
     title : TitleCard
         The title card component
-    body : List[Component]
+    body : list[Component]
         List of body components (cards, rows, etc.)
     training : ProgressCard (optional)
         Optional training progress card. Displayed after `body`/`setup`. Default is `None`
@@ -51,7 +50,7 @@ class ConsoleDashboard:
     def __init__(
         self,
         title: TitleCard,
-        body: List[Component],
+        body: list[Component],
         training: TrainingProgressCard | None = None,
         live_metrics: LiveMetricsCard | None = None,
         setup: SetupCard | None = None,
@@ -247,7 +246,7 @@ class ConsoleDashboard:
 
         Parameters
         ----------
-        **kwargs : Dict[str, Any]
+        **kwargs : dict[str, Any]
             Keyword arguments for the loss dataclass
         """
         if self.live_metrics:
@@ -260,7 +259,7 @@ class ConsoleDashboard:
 
         Parameters
         ----------
-        **kwargs : Dict[str, Any]
+        **kwargs : dict[str, Any]
             Keyword arguments for the stats dataclass
         """
         if self.live_metrics:

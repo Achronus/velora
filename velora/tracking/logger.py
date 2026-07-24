@@ -18,7 +18,7 @@ import os
 import sys
 from io import TextIOWrapper
 from pathlib import Path
-from typing import Dict, List, Literal
+from typing import Literal
 
 import wandb
 
@@ -158,7 +158,7 @@ class MetricsLogger:
         Group name shared by related runs (e.g., seeds of the same
         experiment). Grouped runs overlay as a mean line with a spread
         band on the dashboard. Default is `None`
-    config : Dict (optional)
+    config : dict (optional)
         Hyperparameter configuration stored with the run.
         Default is `None`
     mode : Literal["online", "offline", "disabled"] (optional)
@@ -183,7 +183,7 @@ class MetricsLogger:
         project: str = "velora",
         run_name: str | None = None,
         group: str | None = None,
-        config: Dict | None = None,
+        config: dict | None = None,
         mode: Literal["online", "offline", "disabled"] | None = None,
     ) -> None:
         self.root_dir = Path(log_dir)
@@ -198,7 +198,7 @@ class MetricsLogger:
             mode=mode,
         )
 
-    def log(self, name: str, step: int, metrics: Dict[str, float | int]) -> None:
+    def log(self, name: str, step: int, metrics: dict[str, float | int]) -> None:
         """
         Log a set of metrics under a shared name.
 
@@ -211,7 +211,7 @@ class MetricsLogger:
             Shared name for the metrics (e.g., `losses`, `episode`)
         step : int
             Training step number
-        metrics : Dict[str, float | int]
+        metrics : dict[str, float | int]
             Mapping of metric names to scalar values
         """
         self._run.log(
@@ -223,7 +223,7 @@ class MetricsLogger:
         self,
         name: str,
         step: int,
-        paths: Path | str | List[Path | str],
+        paths: Path | str | list[Path | str],
     ) -> None:
         """
         Log one or more video files to the run's media panel.
@@ -236,7 +236,7 @@ class MetricsLogger:
             Media panel name for the videos (e.g., `videos/episodes`)
         step : int
             Training step number
-        paths : Path | str | List[Path | str]
+        paths : Path | str | list[Path | str]
             Path(s) to the video file(s) (e.g., an `mp4`)
         """
         video_paths = paths if isinstance(paths, list) else [paths]

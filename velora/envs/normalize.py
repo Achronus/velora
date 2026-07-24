@@ -14,7 +14,6 @@
 # ==============================================================================
 
 
-from typing import Tuple
 
 import torch
 
@@ -26,7 +25,7 @@ class RunningMeanStd:
 
     Parameters
     ----------
-    shape : Tuple[int, ...]
+    shape : tuple[int, ...]
         The per-sample tensor shape
     device : torch.device
         Device to store the statistics on
@@ -36,7 +35,7 @@ class RunningMeanStd:
 
     def __init__(
         self,
-        shape: Tuple[int, ...],
+        shape: tuple[int, ...],
         device: torch.device,
         eps: float = 1e-4,
     ) -> None:

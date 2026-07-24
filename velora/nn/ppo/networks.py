@@ -14,7 +14,6 @@
 # ==============================================================================
 
 from abc import ABC, abstractmethod
-from typing import Tuple
 
 import torch
 from torch import nn
@@ -36,7 +35,7 @@ class ActorCritic(nn.Module, ABC):
     def forward(
         self,
         x: torch.Tensor,
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Computes the policy's distribution parameters and the critic's
         state-value estimate for a batch of observations.
@@ -62,7 +61,7 @@ class ActorCritic(nn.Module, ABC):
 class RecurrentActorCritic(nn.Module, ABC):
     """
     A base class for recurrent actor-critic networks usable by the
-    `RecurrentPPO` trainer.
+    `LSTMPPO` trainer.
 
     Extends the `ActorCritic` idea with a recurrent state that is
     threaded through calls and reset via `done` flags.
@@ -73,7 +72,7 @@ class RecurrentActorCritic(nn.Module, ABC):
         self,
         num_envs: int,
         device: torch.device,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Creates a zeroed recurrent state.
 
@@ -86,7 +85,7 @@ class RecurrentActorCritic(nn.Module, ABC):
 
         Returns
         -------
-        state : Tuple[torch.Tensor, torch.Tensor]
+        state : tuple[torch.Tensor, torch.Tensor]
             The initial recurrent state
         """
         ...  # pragma: no cover
@@ -95,13 +94,13 @@ class RecurrentActorCritic(nn.Module, ABC):
     def forward(
         self,
         x: torch.Tensor,
-        state: Tuple[torch.Tensor, torch.Tensor],
+        state: tuple[torch.Tensor, torch.Tensor],
         done: torch.Tensor,
-    ) -> Tuple[
+    ) -> tuple[
         torch.Tensor,
         torch.Tensor,
         torch.Tensor,
-        Tuple[torch.Tensor, torch.Tensor],
+        tuple[torch.Tensor, torch.Tensor],
     ]:
         """
         Computes the policy's distribution parameters and the critic's
@@ -114,7 +113,7 @@ class RecurrentActorCritic(nn.Module, ABC):
             A batch of observations `(batch_size, in_features)`. May
             span multiple timesteps, flattened as
             `(num_steps * num_envs, in_features)`
-        state : Tuple[torch.Tensor, torch.Tensor]
+        state : tuple[torch.Tensor, torch.Tensor]
             The recurrent state entering the first timestep
         done : torch.Tensor
             The completion flags entering each timestep `(batch_size,)`.
@@ -129,7 +128,7 @@ class RecurrentActorCritic(nn.Module, ABC):
             `(batch_size, out_features)`
         value : torch.Tensor
             The critic's state-value estimates `(batch_size, 1)`
-        new_state : Tuple[torch.Tensor, torch.Tensor]
+        new_state : tuple[torch.Tensor, torch.Tensor]
             The recurrent state after the final timestep
         """
         ...  # pragma: no cover
@@ -179,7 +178,7 @@ class MLPActorCritic(ActorCritic):
     def forward(
         self,
         x: torch.Tensor,
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Computes the policy's distribution parameters and the critic's
         state-value estimate for a batch of observations.
@@ -263,7 +262,7 @@ class LSTMActorCritic(RecurrentActorCritic):
         self,
         num_envs: int,
         device: torch.device,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Creates a zeroed LSTM state.
 
@@ -276,7 +275,7 @@ class LSTMActorCritic(RecurrentActorCritic):
 
         Returns
         -------
-        state : Tuple[torch.Tensor, torch.Tensor]
+        state : tuple[torch.Tensor, torch.Tensor]
             The initial hidden and cell states, each
             `(lstm_num_layers, num_envs, lstm_hidden_size)`
         """
@@ -289,9 +288,9 @@ class LSTMActorCritic(RecurrentActorCritic):
     def _lstm_forward(
         self,
         hidden: torch.Tensor,
-        state: Tuple[torch.Tensor, torch.Tensor],
+        state: tuple[torch.Tensor, torch.Tensor],
         done: torch.Tensor,
-    ) -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
+    ) -> tuple[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
         """
         Steps the LSTM through time, resetting the state where `done`
         is set.
@@ -300,7 +299,7 @@ class LSTMActorCritic(RecurrentActorCritic):
         ----------
         hidden : torch.Tensor
             The encoded observations `(num_steps * num_envs, input_size)`
-        state : Tuple[torch.Tensor, torch.Tensor]
+        state : tuple[torch.Tensor, torch.Tensor]
             The LSTM state entering the first timestep
         done : torch.Tensor
             The completion flags entering each timestep
@@ -310,7 +309,7 @@ class LSTMActorCritic(RecurrentActorCritic):
         -------
         new_hidden : torch.Tensor
             The LSTM outputs `(num_steps * num_envs, lstm_hidden_size)`
-        state : Tuple[torch.Tensor, torch.Tensor]
+        state : tuple[torch.Tensor, torch.Tensor]
             The LSTM state after the final timestep
         """
         batch_size = state[0].shape[1]
@@ -331,13 +330,13 @@ class LSTMActorCritic(RecurrentActorCritic):
     def forward(
         self,
         x: torch.Tensor,
-        state: Tuple[torch.Tensor, torch.Tensor],
+        state: tuple[torch.Tensor, torch.Tensor],
         done: torch.Tensor,
-    ) -> Tuple[
+    ) -> tuple[
         torch.Tensor,
         torch.Tensor,
         torch.Tensor,
-        Tuple[torch.Tensor, torch.Tensor],
+        tuple[torch.Tensor, torch.Tensor],
     ]:
         """
         Computes the policy's distribution parameters and the critic's
@@ -348,7 +347,7 @@ class LSTMActorCritic(RecurrentActorCritic):
         ----------
         x : torch.Tensor
             A batch of observations `(num_steps * num_envs, in_features)`
-        state : Tuple[torch.Tensor, torch.Tensor]
+        state : tuple[torch.Tensor, torch.Tensor]
             The LSTM state entering the first timestep
         done : torch.Tensor
             The completion flags entering each timestep
@@ -363,7 +362,7 @@ class LSTMActorCritic(RecurrentActorCritic):
             `(num_steps * num_envs, out_features)`
         value : torch.Tensor
             The critic's state-value estimates `(num_steps * num_envs, 1)`
-        new_state : Tuple[torch.Tensor, torch.Tensor]
+        new_state : tuple[torch.Tensor, torch.Tensor]
             The LSTM state after the final timestep
         """
         hidden, new_state = self._lstm_forward(self.encoder(x), state, done)

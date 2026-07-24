@@ -14,7 +14,7 @@
 # ==============================================================================
 
 
-from typing import Any, Dict, Tuple
+from typing import Any
 
 import torch
 from gymnasium.wrappers.array_conversion import array_conversion
@@ -35,7 +35,7 @@ class NumpyToTorchRawInfo(NumpyToTorch):
     def step(
         self,
         actions: torch.Tensor,
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, Dict]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, dict]:
         """
         Performs a vectorized environment step, converting everything
         except `info` to PyTorch tensors.
@@ -55,7 +55,7 @@ class NumpyToTorchRawInfo(NumpyToTorch):
             The episode termination flags `(n_envs,)`
         truncations : torch.Tensor
             The episode truncation flags `(n_envs,)`
-        info : Dict
+        info : dict
             The raw, unconverted info dict
         """
         actions = array_conversion(actions, xp=self._env_xp, device=self._env_device)
@@ -75,8 +75,8 @@ class NumpyToTorchRawInfo(NumpyToTorch):
         self,
         *,
         seed: int | list[int] | None = None,
-        options: Dict[str, Any] | None = None,
-    ) -> Tuple[torch.Tensor, Dict]:
+        options: dict[str, Any] | None = None,
+    ) -> tuple[torch.Tensor, dict]:
         """
         Resets the vectorized environments, converting only the
         observations to PyTorch tensors.
@@ -85,14 +85,14 @@ class NumpyToTorchRawInfo(NumpyToTorch):
         ----------
         seed : int | list[int] (optional)
             The seed(s) for resetting the environments. Default is `None`
-        options : Dict[str, Any] (optional)
+        options : dict[str, Any] (optional)
             Additional reset options. Default is `None`
 
         Returns
         -------
         obs : torch.Tensor
             The initial observations `(n_envs, *obs_shape)`
-        info : Dict
+        info : dict
             The raw, unconverted info dict
         """
         obs, info = self.env.reset(seed=seed, options=options)

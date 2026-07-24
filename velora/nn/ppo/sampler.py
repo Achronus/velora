@@ -14,7 +14,6 @@
 # ==============================================================================
 
 
-from typing import Tuple
 
 import torch
 from torch.distributions import Normal
@@ -56,7 +55,7 @@ class PPOActionSampler:
         self,
         mean: torch.Tensor,
         log_std: torch.Tensor,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Samples actions from the policy during rollouts.
 
@@ -86,7 +85,7 @@ class PPOActionSampler:
         log_std: torch.Tensor,
         *,
         actions: torch.Tensor,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Re-evaluates stored actions under the current policy during
         policy updates.
@@ -141,7 +140,7 @@ class RPOActionSampler(PPOActionSampler):
         log_std: torch.Tensor,
         *,
         actions: torch.Tensor,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Re-evaluates stored actions under the current policy during
         policy updates, perturbing the action mean with

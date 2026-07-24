@@ -15,7 +15,7 @@
 
 
 from dataclasses import dataclass, fields
-from typing import Dict, Generic, List, Type, TypeVar
+from typing import Generic, TypeVar
 
 import torch
 
@@ -80,14 +80,14 @@ class Diagnostics(Generic[StatsT]):
 
     Parameters
     ----------
-    stats_cls : Type[StatsT]
+    stats_cls : type[StatsT]
         The stats dataclass the diagnostics reduce into. Its fields
         define the valid metric names
     """
 
-    _metrics: Dict[str, List[torch.Tensor]]
+    _metrics: dict[str, list[torch.Tensor]]
 
-    def __init__(self, stats_cls: Type[StatsT]) -> None:
+    def __init__(self, stats_cls: type[StatsT]) -> None:
         self.stats_cls = stats_cls
 
         self.reset()
@@ -111,13 +111,13 @@ class Diagnostics(Generic[StatsT]):
 
         self._metrics[name].append(value.detach())
 
-    def _means(self) -> Dict[str, float]:
+    def _means(self) -> dict[str, float]:
         """
         Reduces the recorded metrics to their means.
 
         Returns
         -------
-        means : Dict[str, float]
+        means : dict[str, float]
             The mean of each recorded metric. Metrics without recorded
             values are excluded
         """

@@ -14,8 +14,8 @@
 # ==============================================================================
 
 import random
+from collections.abc import Callable
 from dataclasses import asdict
-from typing import Callable, Tuple
 
 import gymnasium as gym
 import numpy as np
@@ -44,7 +44,7 @@ class PPO:
 
     Acts as the base trainer for all PPO variants. Core logic is split
     into small utility methods that subclasses override to change
-    behaviour (e.g., `RPO` and `RecurrentPPO`).
+    behaviour (e.g., `RPO` and `LSTMPPO`).
 
     Parameters
     ----------
@@ -115,9 +115,7 @@ class PPO:
         )
 
         if not isinstance(envs.single_action_space, gym.spaces.Box):
-            raise ValueError(
-                "Invalid environment. Only `gym.spaces.Box` are supported."
-            )
+            raise TypeError("Invalid environment. Only `gym.spaces.Box` are supported.")
 
         self.config = config
         self.seed = seed
@@ -176,19 +174,19 @@ class PPO:
     def _on_rollout_start(self) -> None:
         """
         Hook called before each rollout begins. Override point for
-        variants that track per-rollout state (e.g., `RecurrentPPO`).
+        variants that track per-rollout state (e.g., `LSTMPPO`).
         """
 
     def _on_rollout_end(self) -> None:
         """
         Hook called after each rollout completes. Override point for
-        variants that track per-rollout state (e.g., `RecurrentPPO`).
+        variants that track per-rollout state (e.g., `LSTMPPO`).
         """
 
     def _rollout_step(
         self,
         obs: torch.Tensor,
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Selects actions for a single environment step during rollouts.
 
@@ -230,7 +228,7 @@ class PPO:
         with torch.no_grad():
             return self.agent(obs)[2]
 
-    def _collect(self, obs: torch.Tensor) -> Tuple[torch.Tensor, RolloutBatch]:
+    def _collect(self, obs: torch.Tensor) -> tuple[torch.Tensor, RolloutBatch]:
         """
         Collects samples of experience from the environments and returns
         the filled buffer.
@@ -251,7 +249,7 @@ class PPO:
         self._on_rollout_start()
 
         # Collect experience and store in buffer
-        for _ in range(0, self.config.num_steps):
+        for _ in range(self.config.num_steps):
             self.tracker.advance(self.envs.num_envs)
 
             actions, log_probs, values = self._rollout_step(obs)
@@ -275,11 +273,11 @@ class PPO:
     def _evaluate(
         self,
         minibatch: MiniBatchData,
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Re-evaluates a mini-batch of rollout actions under the current
         policy. Override point for variants that change how actions
-        are re-evaluated (e.g., `RecurrentPPO`).
+        are re-evaluated (e.g., `LSTMPPO`).
 
         Parameters
         ----------

@@ -13,7 +13,7 @@
 # limitations under the License.
 # ==============================================================================
 
-from typing import Tuple
+import os
 
 import gymnasium as gym
 import numpy as np
@@ -136,7 +136,7 @@ def compute_gae(
     *,
     gamma: float,
     gae_lambda: float,
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Computes the advantages and returns for a rollout using
     Generalized Advantage Estimation (GAE), bootstrapping the final
