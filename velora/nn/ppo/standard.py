@@ -138,12 +138,14 @@ class PPO:
         self.seed = seed
         self.device = device if device is not None else set_torch_device()
         self.envs = to_torch_env(envs, self.device)
+        self._env_native = getattr(self.envs, "_torch_native", False)
 
         # Configure randomness
         random.seed(seed)
         np.random.seed(seed)
         torch.manual_seed(seed)
         torch.backends.cudnn.deterministic = True
+        torch.set_float32_matmul_precision("high")
 
         # Setup agent
         self.agent: nn.Module = agent_cls(
@@ -259,7 +261,7 @@ class PPO:
             actions, log_probs, values = self._rollout_step(obs)
 
             next_obs, rewards, terminations, truncations, info = self.envs.step(
-                actions.cpu()
+                actions if self._env_native else actions.cpu()
             )
             dones = torch.logical_or(terminations, truncations)
             self._next_done = dones.float()
