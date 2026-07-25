@@ -174,9 +174,13 @@ class RunTracker:
         environment step.
 
         Parses the `final_info` entry populated by
-        `RecordEpisodeStatistics` (under `SAME_STEP` autoreset mode),
-        logging each finished episode's return and length under the
-        `episode` section.
+        `RecordEpisodeStatistics` (under `SAME_STEP` autoreset mode)
+        and logs the mean return and length over the step's finished
+        episodes under the `episode` section, along with the episode
+        count. Averaging keeps one record per step - with many
+        parallel environments, episodes complete in large same-step
+        waves that per-episode records would collapse to a single
+        arbitrary value in wandb.
 
         Uses the current `global_step` without advancing it - steps
         are advanced separately via `advance`.
@@ -188,19 +192,28 @@ class RunTracker:
             detected via the `_episode` mask when `final_info` is
             present; steps without completed episodes are a no-op
         """
-        if "final_info" in info:
-            episode = info["final_info"]["episode"]
-            mask = torch.as_tensor(info["final_info"]["_episode"])
+        if "final_info" not in info:
+            return
 
-            for idx in mask.nonzero().flatten().tolist():
-                self.logger.log(
-                    "episode",
-                    self.global_step,
-                    {
-                        "episodic_return": float(episode["r"][idx]),
-                        "episodic_length": float(episode["l"][idx]),
-                    },
-                )
+        episode = info["final_info"]["episode"]
+        mask = torch.as_tensor(info["final_info"]["_episode"])
+        idxs = mask.nonzero().flatten()
+
+        if idxs.numel() == 0:
+            return
+
+        returns = torch.as_tensor(episode["r"])[idxs].float()
+        lengths = torch.as_tensor(episode["l"])[idxs].float()
+
+        self.logger.log(
+            "episode",
+            self.global_step,
+            {
+                "episodic_return": returns.mean().item(),
+                "episodic_length": lengths.mean().item(),
+                "episodes": int(idxs.numel()),
+            },
+        )
 
     def __exit__(
         self,
