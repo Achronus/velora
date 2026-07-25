@@ -23,6 +23,7 @@ from typing import Any, Literal
 
 import gymnasium as gym
 import jax
+import mujoco
 import numpy as np
 import torch
 from gymnasium.vector.utils import batch_space
@@ -122,6 +123,12 @@ class PlaygroundVectorEnv(gym.vector.VectorEnv):
         wandb directory `runs/{exp_name}/wandb/run-{id}/videos`).
         When `None`, uses `runs/videos/{env_name}_{timestamp}`.
         Default is `None`
+    camera : str (optional)
+        The MuJoCo camera name used for video rendering. When `None`,
+        auto-selects the model's first tracking camera (`track` or
+        `trackcom` mode) so the agent stays in frame, falling back to
+        the model's default free camera when none exists.
+        Default is `None`
     """
 
     _torch_native = True
@@ -141,6 +148,7 @@ class PlaygroundVectorEnv(gym.vector.VectorEnv):
         clip: float = 10.0,
         capture_video: bool = True,
         video_dir: Path | str | None = None,
+        camera: str | None = None,
     ) -> None:
         config = registry.get_default_config(env_name)
 
@@ -201,6 +209,7 @@ class PlaygroundVectorEnv(gym.vector.VectorEnv):
             video_dir = Path("runs", "videos", f"{env_name}_{int(time.time())}")
 
         self._video_dir = Path(video_dir)
+        self._camera = camera if camera is not None else self._pick_tracking_camera()
         self._fps = int(round(1.0 / (float(config.ctrl_dt) * action_repeat)))  # type: ignore
         self._episode_length = int(episode_length)  # type: ignore
         self._episode_id = 0
@@ -405,6 +414,28 @@ class PlaygroundVectorEnv(gym.vector.VectorEnv):
         state = self._wrapped.env_state
         self._wrapped.env_state = state.replace(done=jnp.maximum(state.done, bad_jax))  # type: ignore
 
+    def _pick_tracking_camera(self) -> str | None:
+        """
+        Finds the model's first tracking camera, keeping the agent in
+        frame during video rendering.
+
+        Returns
+        -------
+        name : str | None
+            The camera name, or `None` when the model defines no
+            `track`/`trackcom` mode cameras
+        """
+        model = self._raw_env.mj_model
+
+        for cam_id in range(model.ncam):
+            if model.cam_mode[cam_id] in (
+                mujoco.mjtCamLight.mjCAMLIGHT_TRACK,
+                mujoco.mjtCamLight.mjCAMLIGHT_TRACKCOM,
+            ):
+                return mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_CAMERA, cam_id)
+
+        return None
+
     def _env0_state(self) -> Any:
         return jax.tree_util.tree_map(lambda x: x[0], self._wrapped.env_state)
 
@@ -447,7 +478,7 @@ class PlaygroundVectorEnv(gym.vector.VectorEnv):
         import mediapy
 
         try:
-            frames = self._raw_env.render(states)
+            frames = self._raw_env.render(states, camera=self._camera)
             self._video_dir.mkdir(parents=True, exist_ok=True)
             path = self._video_dir / f"rl-video-episode-{episode_id}.mp4"
             mediapy.write_video(str(path), frames, fps=self._fps)
