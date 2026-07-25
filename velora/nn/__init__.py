@@ -1,6 +1,11 @@
 from velora.nn.buffer import RolloutBatch, RolloutBuffer
 from velora.nn.optim import Adan
-from velora.nn.ppo import LSTMPPO, PPO, RPO, PPOConfig, RPOConfig
+from velora.nn.ppo import (
+    PPO,
+    RPO,
+    PPOConfig,
+    RPOConfig,
+)
 from velora.nn.sparse import SparseLinear
 
 __all__ = [
@@ -10,7 +15,6 @@ __all__ = [
     "RolloutBuffer",
     "PPO",
     "RPO",
-    "LSTMPPO",
     "PPOConfig",
     "RPOConfig",
 ]

@@ -13,6 +13,7 @@
 # limitations under the License.
 # ==============================================================================
 
+import functools
 import random
 from collections.abc import Callable
 from dataclasses import asdict
@@ -36,15 +37,31 @@ from velora.utils.nn import set_torch_device
 from velora.utils.transforms import to_torch_env
 
 
+def _agent_name(agent: Callable[..., nn.Module]) -> str:
+    """
+    Resolves the display name of an agent class or factory.
+
+    Parameters
+    ----------
+    agent : Callable[..., nn.Module]
+        The agent class, or a `functools.partial` wrapping one
+
+    Returns
+    -------
+    name : str
+        The underlying class or function name
+    """
+    if isinstance(agent, functools.partial):
+        return _agent_name(agent.func)
+
+    return getattr(agent, "__name__", type(agent).__name__)
+
+
 class PPO:
     """
     A Proximal Policy Optimization (PPO) trainer for continuous action
     spaces, based on
     [CleanRL - PPO](https://docs.cleanrl.dev/rl-algorithms/ppo/#ppo_continuous_actionpy).
-
-    Acts as the base trainer for all PPO variants. Core logic is split
-    into small utility methods that subclasses override to change
-    behaviour (e.g., `RPO` and `LSTMPPO`).
 
     Parameters
     ----------
@@ -101,7 +118,7 @@ class PPO:
             ),
             metadata={
                 "num_envs": num_envs,
-                "agent": agent_cls.__name__,
+                "agent": _agent_name(agent_cls),
                 **asdict(config),
             },
         )
@@ -171,18 +188,6 @@ class PPO:
         """Compiles the agent network with `torch.compile`."""
         self.agent.compile()
 
-    def _on_rollout_start(self) -> None:
-        """
-        Hook called before each rollout begins. Override point for
-        variants that track per-rollout state (e.g., `LSTMPPO`).
-        """
-
-    def _on_rollout_end(self) -> None:
-        """
-        Hook called after each rollout completes. Override point for
-        variants that track per-rollout state (e.g., `LSTMPPO`).
-        """
-
     def _rollout_step(
         self,
         obs: torch.Tensor,
@@ -246,7 +251,6 @@ class PPO:
             Full batch of rollout experience
         """
         self.buffer.reset()
-        self._on_rollout_start()
 
         # Collect experience and store in buffer
         for _ in range(self.config.num_steps):
@@ -267,7 +271,6 @@ class PPO:
             self.buffer.add(obs, actions, log_probs, rewards.view(-1), dones, values)
             obs = next_obs.float()
 
-        self._on_rollout_end()
         return obs, self.buffer.get()
 
     def _evaluate(
@@ -276,8 +279,7 @@ class PPO:
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Re-evaluates a mini-batch of rollout actions under the current
-        policy. Override point for variants that change how actions
-        are re-evaluated (e.g., `LSTMPPO`).
+        policy.
 
         Parameters
         ----------

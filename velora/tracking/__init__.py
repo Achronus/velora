@@ -3,7 +3,7 @@ from velora.tracking.run import RunTracker, RunTrackerConfig
 
 __all__ = [
     "MetricsLogger",
-    "RuntimeLogger",
     "RunTracker",
     "RunTrackerConfig",
+    "RuntimeLogger",
 ]
