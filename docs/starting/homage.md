@@ -10,9 +10,10 @@ This page acts as a homage to show our :heart: and appreciation for the librarie
 
 - :simple-pytorch: [**PyTorch**](https://pytorch.org/) for model creation
 - :simple-pydantic: [**Pydantic**](https://docs.pydantic.dev/latest/) for data validation
-- :custom-gymnasium: [**Gymnasium**](https://gymnasium.farama.org/) for environment management
-- :simple-poetry: [**Poetry**](https://python-poetry.org/) for package management
-- :simple-pytest: [**Pytest**](https://docs.pytest.org/) for unit testing
+- :custom-gymnasium: [**Gymnasium**](https://gymnasium.farama.org/) for a clean RL env API
+- :simple-uv: [**uv**](https://docs.astral.sh/uv/) for package management
+- :custom-mujoco: [**Mujoco**](https://mujoco.readthedocs.io/en/stable/overview.html) for its engine
+- :simple-nvidia: [**Isaac Lab**](https://isaac-sim.github.io/IsaacLab/main/index.html) for robotics simulation
 
 </div>
 
@@ -22,7 +23,7 @@ We are thankful for a **LOT** of researchers in the RL space, more than we can c
 
 While their names are not mentioned here, their papers are outlined throughout the documentation accompanied with the algorithm implementations associated to their work.
 
-Instead, we want to dedicate this section to some special mentions that the framework centres around: *Liquid Neural Networks* and *Neural Circuit Policies*.
+Instead, we want to dedicate this section to some special mentions that the framework was inspired by: *Liquid Neural Networks* and *Neural Circuit Policies*.
 
 ### Liquid Neural Networks
 

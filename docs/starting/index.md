@@ -1,95 +1,100 @@
 # Getting Started
 
-To get started, simply install it through [pip [:material-arrow-right-bottom:]](https://pypi.org/) using one of the options below.
+!!! note
 
-For [PyTorch [:material-arrow-right-bottom:]](https://pytorch.org/get-started/locally/) with CUDA (recommended):
+    Velora requires a Python 3.12 (or later) environment.
 
-```bash
-pip install torch torchvision velora --extra-index-url https://download.pytorch.org/whl/cu126
-```
+## Installation
 
-Or, for [PyTorch [:material-arrow-right-bottom:]](https://pytorch.org/get-started/locally/) with CPU only:
+To get started, install it through [uv [:material-arrow-right-bottom:]](https://docs.astral.sh/uv/) or [pip [:material-arrow-right-bottom:]](https://pip.pypa.io/).
 
-```bash
-pip install torch torchvision velora
-```
+=== "uv"
 
-## Example Usage
+    Configure the PyTorch index in your project's `pyproject.toml` first, so `torch` resolves to the CUDA 13 wheels:
 
-Here's a simple example:
+    ```toml
+    [[tool.uv.index]]
+    name = "pytorch-cuda"
+    url = "https://download.pytorch.org/whl/cu130"
+    explicit = true
 
-```python
-from velora.models import NeuroFlow, NeuroFlowCT
-from velora.utils import set_device
+    [tool.uv.sources]
+    torch = { index = "pytorch-cuda" }
+    torchvision = { index = "pytorch-cuda" }
+    ```
 
-# Setup PyTorch device
-device = set_device()
+    Then add the package:
 
-# For continuous tasks
-model = NeuroFlowCT(
-    "InvertedPendulum-v5",
-    20,  # actor neurons 
-    128,  # critic neurons
-    device=device,
-    seed=64,  # remove for automatic generation
-)
+    ```bash
+    uv add velora
+    ```
 
-# For discrete tasks
-model = NeuroFlow(
-    "CartPole-v1",
-    20,  # actor neurons 
-    128,  # critic neurons
-    device=device,
-)
+    !!! tip
 
-# Train the model using a batch size of 64
-model.train(64, n_episodes=50, display_count=10)
-```
+        Already ran `uv add velora`? Add the configuration above, then run `uv sync` to re-resolve against the new index.
 
-This code should work 'as is'.
+=== "pip"
 
-Currently, the framework only supports [Gymnasium [:material-arrow-right-bottom:]](https://gymnasium.farama.org/) environments and is planned to expand to [PettingZoo [:material-arrow-right-bottom:]](https://pettingzoo.farama.org/index.html) for Multi-agent (MARL) tasks, with updated adaptations of [CybORG [:material-arrow-right-bottom:]](https://github.com/cage-challenge/CybORG/tree/main) environments.
+    ```bash
+    pip install velora
+    ```
 
-## API Structure
+    This installs PyTorch from PyPI's standard wheels. For the CUDA 13 builds, add the PyTorch `cu130` index:
 
-The frameworks API is designed to be simple and intuitive. We've broken into two main categories: [`core`](#core) and [`extras`](#extras).
+    ```bash
+    pip install velora --extra-index-url https://download.pytorch.org/whl/cu130
+    ```
 
-### Core
+### Simulation (Optional)
 
-The primary building blocks you'll use regularly.
+Isaac Lab and Isaac Sim are optional and require a NVIDIA GPU. Install them with the `isaac` extra.
 
-```python
-from velora.models import [algorithm]
-from velora.callbacks import [callback]
-```
+=== "uv"
 
-### Extras
+    Add the NVIDIA index to your project's `pyproject.toml` alongside the PyTorch one:
 
-Utility methods that you may use occasionally.
+    ```toml
+    [[tool.uv.index]]
+    name = "nvidia"
+    url = "https://pypi.nvidia.com"
+    explicit = true
 
-```python
-from velora.gym import [method]
-from velora.utils import [method]
-```
+    [tool.uv.sources]
+    isaacsim = { index = "nvidia" }
+    isaaclab = { index = "nvidia" }
+    ```
+
+    Then add the extra:
+
+    ```bash
+    uv add "velora[isaac]"
+    ```
+
+=== "pip"
+
+    ```bash
+    pip install "velora[isaac]" --extra-index-url https://download.pytorch.org/whl/cu130 --extra-index-url https://pypi.nvidia.com
+    ```
+
 
 ## Next Steps
 
 <div class="grid cards" markdown>
 
--   :fontawesome-solid-droplet:{ .lg .middle } __NeuroFlow Agents__
+-   :simple-readme:{ .lg .middle } __Tutorials__
 
     ---
 
-    Learn how to use NeuroFlow models.
+    Learn how to use Velora.
 
-    [:octicons-arrow-right-24: Start learning](../learn/tutorial/index.md)
+    [:octicons-arrow-right-24: Read more](../tutorials/index.md)
 
--   :material-puzzle-edit:{ .lg .middle } __Customize__
+-   :fontawesome-solid-boxes:{ .lg .middle } __API__
 
     ---
 
-    Learn how to build your own models.
+    Explore the API.
 
-    [:octicons-arrow-right-24: Go custom](../learn/customize/index.md)
+    [:octicons-arrow-right-24: Read more](../api/index.md)
 
 </div>

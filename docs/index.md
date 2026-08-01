@@ -11,7 +11,7 @@ hide:
 
 <p id="slogan" align="center" markdown>
 
-*Velora, a <span style="color: #38e2e2;">Liquid RL</span> framework for <span style="color: #38e2e2;">NeuroFlow</span> agents, empowering <span style="color: #38e2e2;">Autonomous Cyber Defence</span>.*
+*Velora, a <span style="color: #38e2e2;">Reinforcement Learning</span> research framework for building <span style="color: #38e2e2;">lightweight</span>, <span style="color: #38e2e2;">adaptable</span>, <span style="color: #38e2e2;">transparent</span> and <span style="color: #38e2e2;">stateful</span> agents.*
 
 </p>
 
@@ -30,15 +30,13 @@ hide:
 
 ---
 
-**Velora** is a lightweight and modular framework built on top of powerful libraries like [Gymnasium [:material-arrow-right-bottom:]](https://gymnasium.farama.org/) and [PyTorch [:material-arrow-right-bottom:]](https://pytorch.org/). It is home to a new type of RL agent called ***NeuroFlow*** (NF) that specializes in Autonomous Cyber Defence through a novel Deep Reinforcement Learning (RL) approach we call ***Liquid RL***.
+**Velora** is a Reinforcement Learning (RL) research framework for exploring ways to build lightweight, adaptable, transparent and stateful agents that move away from the world of Large Language Models (LLMs).
 
-## Benefits
+By design, it focuses on tasks centred around robotics and continuous control problems to bring us closer to unlocking physical agents that are useful for real-world use cases.
 
-- **Explainability**: NF agents use [Liquid Neural Networks [:material-arrow-right-bottom:]](https://arxiv.org/abs/2006.04439) (LNNs) and [Neural Circuit Policies [:material-arrow-right-bottom:]](https://arxiv.org/abs/1803.08554) (NCPs) to model Cyber system dynamics, not just data patterns. Also, they use sparse NCP connections to mimic biological efficiency, enabling clear, interpretable strategies via a labeled Strategy Library.
-- **Adaptability**: NF agents dynamically grow their networks using a fitness score, adding more neurons to a backbone only when new Cyber strategies emerge, keeping agents compact and robust.
-- **Planning**: NF agents use a Strategy Library and learned environment model to plan strategic sequences for proactive Cyber defense.
-- **Always Learning**: using [EWC [:material-arrow-right-bottom:]](https://arxiv.org/abs/1612.00796), NF agents refine existing strategies and learn new ones post-training, adapting to evolving Cyber threats like new attack patterns.
-- **Customizable**: NF agents are [PyTorch-based [:material-arrow-right-bottom:]](https://pytorch.org/), designed to be intuitive, easy to use, and modular so you can easily build your own!
+Built with PyTorch, it provides modular building blocks that plug into common RL agent algorithms (such as [PPO [:material-arrow-right-bottom:]](https://arxiv.org/abs/1707.06347) and [TD3 [:material-arrow-right-bottom:]](https://arxiv.org/abs/1802.09477)) and environment backends like [MJWarp [:material-arrow-right-bottom:]](https://mujoco.readthedocs.io/en/stable/mjwarp/index.html) and [Isaac Lab [:material-arrow-right-bottom:]](https://isaac-sim.github.io/IsaacLab/main/index.html) for rapid iteration and experimentation.
+
+Velora is **not** a replacement for other popular RL libraries (such as [Stable Baselines3 [:material-arrow-right-bottom:]](https://sb3-contrib.readthedocs.io/en/master/index.html) or [RLlib [:material-arrow-right-bottom:]](https://docs.ray.io/en/latest/rllib/index.html)) and is purely a framework for experimenting with unconventional models and techniques that have real potential.
 
 <div class="grid cards" markdown>
 
@@ -50,30 +48,12 @@ hide:
 
     [:octicons-arrow-right-24: Get Started](starting/index.md)
 
--   :material-scale-balance:{ .lg .middle } **Open Source, MIT**
+-   :material-scale-balance:{ .lg .middle } **Open Source, Apache 2.0**
 
     ---
 
-    Velora is licensed under the MIT License.
+    Velora is licensed under the Apache License 2.0.
 
-    [:octicons-arrow-right-24: License](starting/license.md)
-
-</div>
-
-## Active Development
-
-**Velora** is a tool that is continuously being developed. There's still a lot to do to make it a great framework, such as detailed API documentation, and expanding our NeuroFlow agents.
-
-Our goal is to provide a quality open-source product that works 'out-of-the-box' that everyone can experiment with, and then gradually fix unexpected bugs and introduce more features on the road to a [`v1`](#active-development) release.
-
-<div class="grid cards" markdown>
-
--   :material-map:{ .lg .middle } **Roadmap**
-
-    ---
-
-    Check out what we have planned for Velora.
-
-    [:octicons-arrow-right-24: Explore](starting/roadmap.md)
+    [:octicons-arrow-right-24: License](license.md)
 
 </div>
