@@ -8,139 +8,88 @@ Found on:
 - [PyPi](https://pypi.org/project/velora)
 - [GitHub](https://github.com/Achronus/velora)
 
+> 🚧 Velora is under active development and its API, documentation and examples may change overtime. 🚧
+
 # Velora
 
-**Velora** is a Liquid Reinforcement Learning (RL) Flax-based research framework for autonomous systems.
+**Velora** is a Reinforcement Learning (RL) research framework for exploring ways to build lightweight, adaptable, transparent and stateful agents that move away from the world of Large Language Models (LLMs).
 
-At its core, Velora combines [Closed-form Continuous-time (CfC) Liquid Neural Networks](https://arxiv.org/abs/2106.13898) with **DiscoRL** (Discovery RL) — a meta-reinforcement learning algorithm that learns a *generalizable update rule* across a large suite of environments, rather than training a separate agent per task.
+By design, it focuses on tasks centred around robotics and continuous control problems to bring us closer to unlocking physical agents that are useful for real-world use cases.
 
-Traditional RL algorithms — such as PPO, DQN, or A3C — are hand-crafted by researchers and trained independently per environment. Each design decision (update rule, loss function, hyperparameters) requires careful manual tuning, making cross-task generalization difficult. DiscoRL sidesteps this by using meta-learning to *automatically discover* the update rule itself, producing one that is general-purpose by construction and outperforms manually designed rules across challenging benchmarks.
+Built with PyTorch, it provides modular building blocks that plug into common RL agent algorithms (such as [PPO](https://arxiv.org/abs/1707.06347) and [TD3](https://arxiv.org/abs/1802.09477)) and environment backends like [MJWarp](https://mujoco.readthedocs.io/en/stable/mjwarp/index.html) and [Isaac Lab](https://isaac-sim.github.io/IsaacLab/main/index.html) for rapid iteration and experimentation.
 
-> **Note:** Our DiscoRL implementation currently only supports **discrete action spaces**. Continuous action space support is planned for a future release.
+Velora is **not** a replacement for other popular RL libraries (such as [Stable Baselines3](https://sb3-contrib.readthedocs.io/en/master/index.html) or [RLlib](https://docs.ray.io/en/latest/rllib/index.html)) and is purely a framework for experimenting with unconventional models and techniques that have real potential.
 
-## Features
+For more details on how it works and what's inside the framework, refer to our [documentation](https://velora.achronus.dev/).
 
-- **Meta-learning across many environments** — train over 57+ environments simultaneously with a shared update rule
-- **JAX-native** — JIT compilation, `vmap` for parallel gradient computation, persistent XLA cache
-- **Async CPU/GPU pipeline** — rollout collection for the next group runs on CPU while the GPU computes gradients for the current group
-- **VRAM-efficient** — bfloat16 rollout buffers halve GPU memory usage; built-in VRAM advisor recommends the optimal batch size for your hardware
-- **Parallel trainer** — `ParallelRuleTrainer` chunks environments into action-space groups and vmaps gradients across each chunk
-- **Dashboard** — Rich-based live dashboard with progress, metrics, and losses; tqdm fallback for Docker/headless environments
-- **Checkpointing** — orbax-based checkpoint saving and restoration
+## Package versions
+
+| Package     | Version                                   |
+| ----------- | ----------------------------------------- |
+| Python      | `3.12`                                    |
+| PyTorch     | `2.11.0` (CUDA 13)                        |
+| TorchVision | `0.26.0`                                  |
+| Isaac Lab   | `3.0.0b2.post1` (optional, `isaac` extra) |
 
 ## Installation
 
-Velora requires Python 3.13+ and [Flax](https://flax.readthedocs.io/en/latest/).
-
-### GPU (recommended)
-
-```bash
-uv add velora jax[cuda13]
-```
-
-### CPU only
+Velora requires Python 3.12.
 
 ```bash
 uv add velora
 ```
 
-### TPU
+Or, with `pip`:
 
 ```bash
-uv add velora jax[tpu]
+pip install velora
 ```
 
-## Quick Start
+This installs PyTorch from PyPI's standard wheels. For the CUDA 13 builds, add the PyTorch `cu130` index:
 
-### Sequential training (`RuleTrainer`)
-
-Trains across environments one at a time. Good for debugging and smaller environment sets.
-
-```python
-from velora.disco import RuleTrainer, RuleTrainerSettings
-from velora.gym.envs import ATARI_BASE, ATARI_EASY, EnvSet
-
-envs = EnvSet(ATARI_BASE, ATARI_EASY)
-
-config = RuleTrainerSettings(
-    n_steps=1_000_000,
-    n_updates=15,
-    seq_len=29,
-    num_vec_envs=4,
-)
-
-trainer = RuleTrainer(envs, config=config)
-trainer.train()
+```bash
+pip install velora --extra-index-url https://download.pytorch.org/whl/cu130
 ```
 
-### Parallel training (`ParallelRuleTrainer`)
+With uv, configure the index in your project's `pyproject.toml` instead:
 
-Groups environments by action-space size and `vmaps` gradient computation across each group, overlapping CPU rollout collection with GPU gradient passes.
+```toml
+[[tool.uv.index]]
+name = "pytorch-cuda"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
 
-```python
-from velora.disco import ParallelRuleTrainer, RuleTrainerSettings
-from velora.gym.envs import ATARI_57, EnvSet
-
-envs = EnvSet(ATARI_57)
-config = RuleTrainerSettings(n_steps=1_000_000)
-
-trainer = ParallelRuleTrainer(envs, config=config, max_group_size=8)
-trainer.train()
+[tool.uv.sources]
+torch = { index = "pytorch-cuda" }
+torchvision = { index = "pytorch-cuda" }
 ```
 
-## API Overview
+> [!NOTE]
+> These index steps only apply when installing Velora from PyPI. If you clone the repository and use `uv sync`, the CUDA 13 wheels are installed automatically.
 
-```python
-# Trainers
-from velora.disco import RuleTrainer, ParallelRuleTrainer
+### Simulation (Isaac Lab)
 
-# Configuration
-from velora.disco import RuleTrainerSettings
+Isaac Lab and Isaac Sim are optional and require a NVIDIA GPU. Install them with the `isaac` extra:
 
-# Environment sets (Atari)
-from velora.gym.envs import ATARI_BASE, ATARI_EASY, ATARI_MEDIUM, ATARI_HARD, ATARI_57, EnvSet
+```bash
+uv add velora[isaac]
 ```
 
-### `RuleTrainerSettings` — key parameters
+And add the NVIDIA index to your project's `pyproject.toml` alongside the PyTorch one:
 
-| Parameter | Default | Description |
-| --- | --- | --- |
-| `n_steps` | `1_000_000` | Number of meta-training steps |
-| `n_updates` | `15` | Inner-loop gradient updates per environment |
-| `seq_len` | `29` | Rollout trajectory length |
-| `num_vec_envs` | `4` | Parallel environment instances per trainer |
-| `meta_lr` | `0.001` | Meta-optimizer learning rate |
+```toml
+[[tool.uv.index]]
+name = "nvidia"
+url = "https://pypi.nvidia.com"
+explicit = true
 
-### `ParallelRuleTrainer` — additional parameters
-
-| Parameter | Default | Description |
-| --- | --- | --- |
-| `max_group_size` | `8` | Max trainers per vmapped gradient chunk |
-| `use_bfloat16` | `True` | Store rollout floats in `bfloat16` (halves VRAM) |
-| `verbose` | `True` | Use Rich dashboard (`False` → `tqdm` alternative) |
-
-## IDE Setup
-
-For full IntelliSense support (auto-imports for all subpackage symbols), add the following to your project's `.vscode/settings.json`:
-
-```json
-{
-    "python.analysis.packageIndexDepths": [
-        {
-            "name": "velora",
-            "depth": 3,
-            "includeAllSymbols": true
-        }
-    ]
-}
+[tool.uv.sources]
+isaacsim = { index = "nvidia" }
+isaaclab = { index = "nvidia" }
 ```
 
-## References
+Alternatively, use `pip` which also needs the NVIDIA package index:
 
-- Oh, J., Farquhar, G., Kemaev, I., Calian, D. A., Hessel, M., Zintgraf, L., Singh, S., van Hasselt, H., & Silver, D. (2025). Discovering state-of-the-art reinforcement learning algorithms. *Nature*, 648, 312–319. [https://doi.org/10.1038/s41586-025-09761-x](https://doi.org/10.1038/s41586-025-09761-x)
-
-## Active Development
-
-🚧 View the [Roadmap](https://velora.achronus.dev/starting/roadmap) 🚧
-
-**Velora** is under active development. The DiscoRL algorithm, environment coverage, and documentation are all expanding.
+```bash
+pip install "velora[isaac]" --extra-index-url https://download.pytorch.org/whl/cu130 --extra-index-url https://pypi.nvidia.com
+```
