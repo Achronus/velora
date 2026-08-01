@@ -26,14 +26,14 @@ For more details on how it works and what's inside the framework, refer to our [
 
 | Package     | Version                                   |
 | ----------- | ----------------------------------------- |
-| Python      | `3.12+`                                   |
+| Python      | `3.12`                                    |
 | PyTorch     | `2.11.0` (CUDA 13)                        |
 | TorchVision | `0.26.0`                                  |
 | Isaac Lab   | `3.0.0b2.post1` (optional, `isaac` extra) |
 
 ## Installation
 
-Velora requires Python 3.12 or later.
+Velora only supports Python 3.12.
 
 > [!NOTE]
 > The index configuration below only applies when installing Velora from PyPI. If you clone the repository and use `uv sync`, the CUDA 13 wheels are installed automatically.

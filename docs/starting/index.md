@@ -2,7 +2,7 @@
 
 !!! note
 
-    Velora requires a Python 3.12 (or later) environment.
+    Velora only supports Python 3.12.
 
 ## Installation
 
