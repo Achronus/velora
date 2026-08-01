@@ -26,32 +26,21 @@ For more details on how it works and what's inside the framework, refer to our [
 
 | Package     | Version                                   |
 | ----------- | ----------------------------------------- |
-| Python      | `3.12`                                    |
+| Python      | `3.12+`                                   |
 | PyTorch     | `2.11.0` (CUDA 13)                        |
 | TorchVision | `0.26.0`                                  |
 | Isaac Lab   | `3.0.0b2.post1` (optional, `isaac` extra) |
 
 ## Installation
 
-Velora requires Python 3.12.
+Velora requires Python 3.12 or later.
 
-```bash
-uv add velora
-```
+> [!NOTE]
+> The index configuration below only applies when installing Velora from PyPI. If you clone the repository and use `uv sync`, the CUDA 13 wheels are installed automatically.
 
-Or, with `pip`:
+### uv
 
-```bash
-pip install velora
-```
-
-This installs PyTorch from PyPI's standard wheels. For the CUDA 13 builds, add the PyTorch `cu130` index:
-
-```bash
-pip install velora --extra-index-url https://download.pytorch.org/whl/cu130
-```
-
-With uv, configure the index in your project's `pyproject.toml` instead:
+Configure the PyTorch index in your project's `pyproject.toml` first, so `torch` resolves to the CUDA 13 wheels:
 
 ```toml
 [[tool.uv.index]]
@@ -64,18 +53,34 @@ torch = { index = "pytorch-cuda" }
 torchvision = { index = "pytorch-cuda" }
 ```
 
-> [!NOTE]
-> These index steps only apply when installing Velora from PyPI. If you clone the repository and use `uv sync`, the CUDA 13 wheels are installed automatically.
-
-### Simulation (Isaac Lab)
-
-Isaac Lab and Isaac Sim are optional and require a NVIDIA GPU. Install them with the `isaac` extra:
+Then add the package:
 
 ```bash
-uv add velora[isaac]
+uv add velora
 ```
 
-And add the NVIDIA index to your project's `pyproject.toml` alongside the PyTorch one:
+> [!TIP]
+> Already ran `uv add velora`? Add the configuration above, then run `uv sync` to re-resolve against the new index.
+
+### pip
+
+```bash
+pip install velora
+```
+
+This installs PyTorch from PyPI's standard wheels. For the CUDA 13 builds, add the PyTorch `cu130` index:
+
+```bash
+pip install velora --extra-index-url https://download.pytorch.org/whl/cu130
+```
+
+## Simulation (Isaac Lab)
+
+Isaac Lab and Isaac Sim are optional and require a NVIDIA GPU. Install them with the `isaac` extra.
+
+### uv
+
+Add the NVIDIA index to your project's `pyproject.toml` alongside the PyTorch one:
 
 ```toml
 [[tool.uv.index]]
@@ -88,7 +93,13 @@ isaacsim = { index = "nvidia" }
 isaaclab = { index = "nvidia" }
 ```
 
-Alternatively, use `pip` which also needs the NVIDIA package index:
+Then add the extra:
+
+```bash
+uv add "velora[isaac]"
+```
+
+### pip
 
 ```bash
 pip install "velora[isaac]" --extra-index-url https://download.pytorch.org/whl/cu130 --extra-index-url https://pypi.nvidia.com
