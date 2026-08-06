@@ -17,9 +17,70 @@
 import torch
 from torch import nn
 
-from velora.nn.lnn.cell import AdaptiveLiquidCell
+from velora.nn.lnn.cell import AdaptiveLiquidCell, DecayLiquidCell, NCPLiquidCell
 from velora.nn.lnn.wiring import build_wiring
 from velora.utils.nn import active_parameters, total_parameters
+
+
+def _build_cell(
+    cell_type: type[NCPLiquidCell],
+    in_features: int,
+    n_hidden: int,
+    mask: torch.Tensor,
+    *,
+    recurrent_mask: torch.Tensor | None = None,
+    alpha_rank: int | None = None,
+    init_std: float | None = None,
+) -> NCPLiquidCell:
+    """
+    Utility method that constructs a single cell of the given type.
+
+    Cell types do not share an identical signature, so arguments are
+    routed to the types that accept them. `alpha_rank` applies to
+    `DecayLiquidCell` and its subclasses only, and is ignored otherwise.
+
+    Parameters
+    ----------
+    cell_type : type[NCPLiquidCell]
+        The cell class to instantiate
+    in_features : int
+        Number of input nodes
+    n_hidden : int
+        Number of hidden nodes
+    mask : torch.Tensor
+        A matrix of sparse connections containing binary `[0, 1]` values
+    recurrent_mask : torch.Tensor (optional)
+        Hidden-to-hidden connection mask of shape `(n_hidden, n_hidden)`.
+        When `None`, recurrent connections are dense. Default is `None`
+    alpha_rank : int (optional)
+        Rank of the low-rank α projection. Default is `min(n_hidden, 4)`
+    init_std : float (optional)
+        Gain for orthogonal weight initialization (e.g., `np.sqrt(2)`).
+        When `None`, uses Kaiming uniform initialization instead (PyTorch default).
+        Default is `None`
+
+    Returns
+    -------
+    cell : NCPLiquidCell
+        The constructed cell
+    """
+    if issubclass(cell_type, DecayLiquidCell):
+        return cell_type(
+            in_features,
+            n_hidden,
+            mask,
+            recurrent_mask=recurrent_mask,
+            alpha_rank=alpha_rank,
+            init_std=init_std,
+        )
+
+    return cell_type(
+        in_features,
+        n_hidden,
+        mask,
+        recurrent_mask=recurrent_mask,
+        init_std=init_std,
+    )
 
 
 class LNN(nn.Module):
@@ -27,9 +88,9 @@ class LNN(nn.Module):
     A CfC Liquid Neural Circuit Policy (NCP) Network with three layers.
 
     Layers -
-        1. Inter (input) - a `AdaptiveLiquidCell` layer
-        2. Command (hidden) - a `AdaptiveLiquidCell` layer
-        3. Motor (output) - a `AdaptiveLiquidCell` layer
+        1. Inter (input) - a `cell_type` layer
+        2. Command (hidden) - a `cell_type` layer
+        3. Motor (output) - a `cell_type` layer
 
     ??? note "Decision nodes"
 
@@ -63,12 +124,27 @@ class LNN(nn.Module):
 
         - Where `0.1` neurons are very dense
         - Where `0.9` neurons are very sparse
+    recurrent_sparsity : float | None (optional)
+        Controls the sparsity of the command layer's hidden-to-hidden
+        connections. When `None`, they are dense.
+        Otherwise, must be a value between `[0.1, 0.9]`.
+        Default is `None`
+    cell_type : type[NCPLiquidCell] (optional)
+        The cell class used for every layer. Must be `NCPLiquidCell` or
+        one of its subclasses. Default is `AdaptiveLiquidCell`
     alpha_rank : int (optional)
-        Rank of the low-rank α projection. Default is `min(n_hidden, 4)`
+        Rank of the low-rank α projection. Only applies when `cell_type`
+        is `DecayLiquidCell` or a subclass of it, and is ignored
+        otherwise. Default is `min(n_hidden, 4)`
     init_std : float (optional)
         Gain for orthogonal weight initialization (e.g., `np.sqrt(2)`).
         When `None`, uses Kaiming uniform initialization instead (PyTorch default).
         Default is `None`
+
+    Raises
+    ------
+    invalid_cell_type : TypeError
+        When `cell_type` is not a subclass of `NCPLiquidCell`
     """
 
     def __init__(
@@ -79,15 +155,22 @@ class LNN(nn.Module):
         *,
         seed: int = 28,
         sparsity: float = 0.5,
+        recurrent_sparsity: float | None = None,
+        cell_type: type[NCPLiquidCell] = AdaptiveLiquidCell,
         alpha_rank: int | None = None,
         init_std: float | None = None,
     ) -> None:
         super().__init__()
 
+        if not (isinstance(cell_type, type) and issubclass(cell_type, NCPLiquidCell)):
+            raise TypeError(f"'{cell_type=}' must be a subclass of 'NCPLiquidCell'.")
+
         self.in_features = in_features
         self.n_neurons = n_neurons
         self.out_features = out_features
         self.sparsity = sparsity
+        self.recurrent_sparsity = recurrent_sparsity
+        self.cell_type = cell_type
 
         wiring = build_wiring(
             in_features,
@@ -95,10 +178,12 @@ class LNN(nn.Module):
             heads={"out": out_features},
             seed=seed,
             sparsity=sparsity,
+            recurrent_sparsity=recurrent_sparsity,
         )  # masks = (out, in)
 
         # Inter layer: sensory -> inter
-        self.inter = AdaptiveLiquidCell(
+        self.inter = _build_cell(
+            cell_type,
             self.in_features,
             wiring.inter.shape[0],
             wiring.inter,
@@ -106,17 +191,20 @@ class LNN(nn.Module):
             init_std=init_std,
         )
 
-        # Command layer: inter -> command
-        self.command = AdaptiveLiquidCell(
+        # Command layer: inter -> command (+ command -> command)
+        self.command = _build_cell(
+            cell_type,
             wiring.inter.shape[0],
             wiring.command.shape[0],
             wiring.command,
+            recurrent_mask=wiring.recurrent,
             alpha_rank=alpha_rank,
             init_std=init_std,
         )
 
         # Motor heads: command -> motors (outputs)
-        self.motor = AdaptiveLiquidCell(
+        self.motor = _build_cell(
+            cell_type,
             wiring.command.shape[0],
             wiring.heads["out"].shape[0],
             wiring.heads["out"],

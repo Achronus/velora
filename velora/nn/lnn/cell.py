@@ -42,8 +42,10 @@ class NCPLiquidCell(nn.Module):
     n_hidden : int
         Number of hidden nodes
     mask : torch.Tensor
-        A matrix of sparse connections usually containing a combination
-        of `[-1, 1, 0]` values
+        A matrix of sparse connections containing binary `[0, 1]` values
+    recurrent_mask : torch.Tensor (optional)
+        Hidden-to-hidden connection mask of shape `(n_hidden, n_hidden)`.
+        When `None`, recurrent connections are dense. Default is `None`
     init_std : float (optional)
         Gain for orthogonal weight initialization (e.g., `np.sqrt(2)`).
         When `None`, uses Kaiming uniform initialization instead (PyTorch default).
@@ -56,6 +58,7 @@ class NCPLiquidCell(nn.Module):
         n_hidden: int,
         mask: torch.Tensor,
         *,
+        recurrent_mask: torch.Tensor | None = None,
         init_std: float | None = None,
     ) -> None:
         super().__init__()
@@ -68,7 +71,7 @@ class NCPLiquidCell(nn.Module):
         self.tanh = nn.Tanh()  # Bounded: [-1, 1]
         self.sigmoid = nn.Sigmoid()  # Bounded: [0, 1]
 
-        mask = self._prep_mask(mask)
+        mask = self._prep_mask(mask, recurrent_mask)
 
         self.g_head = SparseLinear(
             self.head_size,
@@ -97,34 +100,47 @@ class NCPLiquidCell(nn.Module):
             init_std=init_std,
         )
 
-    def _prep_mask(self, mask: torch.Tensor) -> torch.Tensor:
+    def _prep_mask(
+        self,
+        mask: torch.Tensor,
+        recurrent_mask: torch.Tensor | None,
+    ) -> torch.Tensor:
         """
         Utility method that preprocesses mask to match layer size.
 
-        Adds hidden-to-hidden recurrent connections for continuous-time
-        dynamics.
-
-        Note -
-            Performs two operations:
-
-            1. Adds a padded matrix of 1s as extra columns to the mask in shape
-               `(n_hidden, n_hidden)` for dense recurrent connections
-            2. Gets the absolute values of the mask to maintain weight stability,
-               converting `-1` to `1`
+        Appends the hidden-to-hidden recurrent connections as extra
+        columns, giving the cell its continuous-time dynamics.
 
         Parameters
         ----------
         mask : torch.Tensor
             Weight sparsity mask of shape `(n_hidden, in_features)`
+        recurrent_mask : torch.Tensor | None
+            Hidden-to-hidden connection mask of shape
+            `(n_hidden, n_hidden)`. When `None`, recurrent connections
+            are dense
 
         Returns
         -------
         mask : torch.Tensor
             An updated mask of shape `(n_hidden, head_size)`
+
+        Raises
+        ------
+        invalid_shape : ValueError
+            When `recurrent_mask` is not of shape `(n_hidden, n_hidden)`
         """
-        extra_nodes = torch.ones((self.n_hidden, self.n_hidden))
-        mask = torch.cat([mask, extra_nodes], dim=1)
-        return torch.abs(mask)
+        expected = (self.n_hidden, self.n_hidden)
+
+        if recurrent_mask is None:
+            recurrent_mask = torch.ones(expected)
+        elif tuple(recurrent_mask.shape) != expected:
+            raise ValueError(
+                f"'recurrent_mask.shape={tuple(recurrent_mask.shape)}' "
+                f"must be '{expected}'."
+            )
+
+        return torch.cat([mask, recurrent_mask.to(mask.dtype)], dim=1)
 
     def _timescale(self, x: torch.Tensor, ts: torch.Tensor) -> torch.Tensor:
         """
@@ -245,8 +261,10 @@ class DecayLiquidCell(NCPLiquidCell):
     n_hidden : int
         Number of hidden nodes
     mask : torch.Tensor
-        A matrix of sparse connections usually containing a combination
-        of `[-1, 1, 0]` values
+        A matrix of sparse connections containing binary `[0, 1]` values
+    recurrent_mask : torch.Tensor (optional)
+        Hidden-to-hidden connection mask of shape `(n_hidden, n_hidden)`.
+        When `None`, recurrent connections are dense. Default is `None`
     alpha_rank : int (optional)
         Rank of the low-rank α projection. Default is `min(n_hidden, 4)`
     init_std : float (optional)
@@ -261,10 +279,17 @@ class DecayLiquidCell(NCPLiquidCell):
         n_hidden: int,
         mask: torch.Tensor,
         *,
+        recurrent_mask: torch.Tensor | None = None,
         alpha_rank: int | None = None,
         init_std: float | None = None,
     ) -> None:
-        super().__init__(in_features, n_hidden, mask, init_std=init_std)
+        super().__init__(
+            in_features,
+            n_hidden,
+            mask,
+            recurrent_mask=recurrent_mask,
+            init_std=init_std,
+        )
 
         self.alpha_rank = min(n_hidden, 4) if alpha_rank is None else alpha_rank
 
@@ -328,8 +353,10 @@ class DeltaErasureLiquidCell(NCPLiquidCell):
     n_hidden : int
         Number of hidden nodes
     mask : torch.Tensor
-        A matrix of sparse connections usually containing a combination
-        of `[-1, 1, 0]` values
+        A matrix of sparse connections containing binary `[0, 1]` values
+    recurrent_mask : torch.Tensor (optional)
+        Hidden-to-hidden connection mask of shape `(n_hidden, n_hidden)`.
+        When `None`, recurrent connections are dense. Default is `None`
     init_std : float (optional)
         Gain for orthogonal weight initialization (e.g., `np.sqrt(2)`).
         When `None`, uses Kaiming uniform initialization instead (PyTorch default).
@@ -342,11 +369,18 @@ class DeltaErasureLiquidCell(NCPLiquidCell):
         n_hidden: int,
         mask: torch.Tensor,
         *,
+        recurrent_mask: torch.Tensor | None = None,
         init_std: float | None = None,
     ) -> None:
-        super().__init__(in_features, n_hidden, mask, init_std=init_std)
+        super().__init__(
+            in_features,
+            n_hidden,
+            mask,
+            recurrent_mask=recurrent_mask,
+            init_std=init_std,
+        )
 
-        mask = self._prep_mask(mask)
+        mask = self._prep_mask(mask, recurrent_mask)
 
         # Delta-rule erasure heads
         self.reconstruct_head = SparseLinear(
@@ -441,8 +475,10 @@ class AdaptiveLiquidCell(DecayLiquidCell, DeltaErasureLiquidCell):
     n_hidden : int
         Number of hidden nodes
     mask : torch.Tensor
-        A matrix of sparse connections usually containing a combination
-        of `[-1, 1, 0]` values
+        A matrix of sparse connections containing binary `[0, 1]` values
+    recurrent_mask : torch.Tensor (optional)
+        Hidden-to-hidden connection mask of shape `(n_hidden, n_hidden)`.
+        When `None`, recurrent connections are dense. Default is `None`
     alpha_rank : int (optional)
         Rank of the low-rank α projection. Default is `min(n_hidden, 4)`
     init_std : float (optional)
@@ -457,6 +493,7 @@ class AdaptiveLiquidCell(DecayLiquidCell, DeltaErasureLiquidCell):
         n_hidden: int,
         mask: torch.Tensor,
         *,
+        recurrent_mask: torch.Tensor | None = None,
         alpha_rank: int | None = None,
         init_std: float | None = None,
     ) -> None:
@@ -464,6 +501,7 @@ class AdaptiveLiquidCell(DecayLiquidCell, DeltaErasureLiquidCell):
             in_features,
             n_hidden,
             mask,
+            recurrent_mask=recurrent_mask,
             alpha_rank=alpha_rank,
             init_std=init_std,
         )

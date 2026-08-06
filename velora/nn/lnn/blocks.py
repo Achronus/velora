@@ -70,13 +70,11 @@ class SparseGatedBlock(nn.Module):
         self.in_features = in_features
         self.out_features = out_features
 
-        mask = torch.abs(
-            build_layer_mask(
-                in_features,
-                out_features,
-                seed=seed,
-                sparsity=sparsity,
-            )
+        mask = build_layer_mask(
+            in_features,
+            out_features,
+            seed=seed,
+            sparsity=sparsity,
         )
 
         self.g_head = SparseLinear(
