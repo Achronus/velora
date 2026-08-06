@@ -1,7 +1,7 @@
 [project]
 name = "velora"
 version = "0.3.0"
-description = "A Liquid Reinforcement Learning (RL) framework for robotics."
+description = "A Reinforcement Learning (RL) research framework for lightweight, scalable, transparent, and stateful agents."
 authors = [{ name = "Ryan Partridge", email = "codemonkey37@proton.me" }]
 license = "Apache-2.0"
 readme = "README.md"
@@ -25,19 +25,11 @@ classifiers = [
     "Topic :: Software Development :: Libraries",
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
-dependencies = [
-    "array-api-compat>=1.15.0",
-    "jax[cuda12]>=0.11.0 ; sys_platform == 'linux'",
-    "playground>=0.2.0",
-    "rsl-rl-lib>=5.0.1",
-    "tensordict>=0.13.0",
-    "torch==2.11.0",
-    "torchvision==0.26.0",
-    "wandb>=0.26.1",
-]
+dependencies = ["torch==2.11.0", "torchvision==0.26.0", "wandb>=0.26.1"]
 
 [project.optional-dependencies]
-isaac = ["isaaclab[all,isaacsim]==3.0.0b2.post1"]
+mjlab = ["mjlab>=1.5.3"]
+isaac = ["isaaclab[all,isaacsim]==3.0.0b2.post1", "tinyobjloader==2.0.0rc13"]
 
 [project.urls]
 repository = "https://github.com/Achronus/velora"
@@ -45,13 +37,21 @@ documentation = "https://velora.achronus.dev"
 issues = "https://github.com/Achronus/velora/issues"
 
 [dependency-groups]
-docs = ["mkdocs>=1.6.1", "mkdocs-material==9.7.6", "mkdocstrings-python==2.0.5"]
+dev = ["pytest>=8.3.0"]
+docs = ["mkdocs>=1.6.1", "mkdocs-material==9.7.7", "mkdocstrings-python==2.0.5"]
+skrl = ["skrl>=2.1.0"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.pyright]
+stubPath = "typings"
 
 [tool.setuptools.packages.find]
 include = ["velora*"]
 
 [tool.uv]
-override-dependencies = ["coverage>=7.5"]
+conflicts = [[{ extra = "mjlab" }, { extra = "isaac" }]]
 
 [[tool.uv.index]]
 name = "pytorch-cuda"
@@ -69,8 +69,5 @@ torch = [
 ]
 torchvision = [
     { index = "pytorch-cuda", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
-]
-isaacsim = [
-    { index = "nvidia", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
 ]
 isaaclab = [{ index = "nvidia" }]
