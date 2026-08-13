@@ -43,7 +43,7 @@ from velora.envs.utils import get_spec, resolved_ids
 _ACROBOT_XML: Path = XMLS_DIR / "acrobot.xml"
 
 
-@dataclass
+@dataclass(frozen=True)
 class AcrobotCfg:
     """
     Tunable quantities for Acrobot tasks.
@@ -65,7 +65,7 @@ class AcrobotCfg:
     gaussian_scale: float = math.sqrt(-2 * math.log(0.1))
 
 
-@dataclass
+@dataclass(frozen=True)
 class AcrobotParts:
     """
     Describes the parts of the Acrobot model that terms select against.
@@ -261,11 +261,9 @@ class AcrobotSwingUp(MjlabEnvSpec):
     Parameters
     ----------
     cfg : AcrobotCfg (optional)
-        The task's tunable quantities. When `None`, uses the
-        `dm_control` values. Default is `None`
+        The task's tunable quantities. Default is `AcrobotCfg()`
     parts : AcrobotParts (optional)
-        The model description. When `None`, uses the
-        names declared in the vendored MJCF. Default is `None`
+        The model description. Default is `AcrobotParts()`
 
     Attributes
     ----------
@@ -288,11 +286,11 @@ class AcrobotSwingUp(MjlabEnvSpec):
 
     def __init__(
         self,
-        cfg: AcrobotCfg | None = None,
-        parts: AcrobotParts | None = None,
+        cfg: AcrobotCfg = AcrobotCfg(),
+        parts: AcrobotParts = AcrobotParts(),
     ) -> None:
-        self.cfg = cfg if cfg is not None else AcrobotCfg()
-        self.parts = parts if parts is not None else AcrobotParts()
+        self.cfg = cfg
+        self.parts = parts
 
         self.arm = SceneEntityCfg(
             self.parts.name,
@@ -516,11 +514,9 @@ class AcrobotSwingUpSparse(AcrobotSwingUp):
     Parameters
     ----------
     cfg : AcrobotCfg (optional)
-        The task's tunable quantities. When `None`, uses the
-        `dm_control` values. Default is `None`
+        The task's tunable quantities. Default is `AcrobotCfg()`
     parts : AcrobotParts (optional)
-        The model description. When `None`, uses the
-        names declared in the vendored MJCF. Default is `None`
+        The model description. Default is `AcrobotParts()`
 
     Attributes
     ----------
