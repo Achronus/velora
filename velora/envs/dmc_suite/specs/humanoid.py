@@ -37,9 +37,8 @@ from mjlab.scene import SceneCfg
 from mjlab.sim import MujocoCfg, SimulationCfg
 from mjlab.viewer import ViewerConfig
 
-from velora.envs.base import MjlabEnvSpec
 from velora.envs.dmc_suite.paths import XMLS_DIR
-from velora.envs.utils import get_spec, resolved_ids
+from velora.envs.mjlab import MjlabEnvSpec, get_spec, resolved_ids
 
 _HUMANOID_XML: Path = XMLS_DIR / "humanoid.xml"
 

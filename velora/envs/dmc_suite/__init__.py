@@ -1,6 +1,6 @@
 from typing import Literal
 
-from velora.envs.base import MjlabEnvSpec
+from velora.envs.mjlab import MjlabEnvSpec
 from velora.envs.dmc_suite.paths import XMLS_DIR
 from velora.envs.dmc_suite.specs.acrobot import AcrobotSwingUp, AcrobotSwingUpSparse
 from velora.envs.dmc_suite.specs.humanoid import (
