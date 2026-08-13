@@ -38,7 +38,7 @@ from mjlab.viewer import ViewerConfig
 
 from velora.envs.base import MjlabEnvSpec
 from velora.envs.dmc_suite.paths import XMLS_DIR
-from velora.envs.utils import get_spec
+from velora.envs.utils import get_spec, resolved_ids
 
 _ACROBOT_XML: Path = XMLS_DIR / "acrobot.xml"
 
@@ -98,51 +98,6 @@ class AcrobotParts:
     target_site: str = "target"
 
 
-def _resolved_ids(ids: list[int] | slice, count: int, kind: str) -> list[int]:
-    """
-    Checks that a `SceneEntityCfg` field resolved to the expected
-    elements.
-
-    A cfg that never reached a manager keeps its ids as `slice(None)`,
-    which silently selects everything. Indexing with that produces a
-    wrongly shaped tensor rather than an error, so terms validate their
-    selection before using it.
-
-    Parameters
-    ----------
-    ids : list[int] | slice
-        The resolved ids taken from a `SceneEntityCfg`
-    count : int
-        The number of elements the term expects
-    kind : str
-        The element being selected, used in the error message
-
-    Returns
-    -------
-    ids : list[int]
-        The validated ids
-
-    Raises
-    ------
-    unresolved_cfg : TypeError
-        Error when the cfg was never resolved against a scene
-    wrong_count : ValueError
-        Error when the cfg selects the wrong number of elements
-    """
-    if isinstance(ids, slice):
-        raise TypeError(
-            f"The {kind} selection was never resolved against a scene. "
-            "Pass a 'SceneEntityCfg' that a manager has resolved."
-        )
-
-    if len(ids) != count:
-        raise ValueError(
-            f"Expected the selection to match {count} {kind}(s), got {len(ids)}."
-        )
-
-    return ids
-
-
 def link_orientations(env: ManagerBasedRlEnv, arm_cfg: SceneEntityCfg) -> torch.Tensor:
     """
     The orientation of both arm links, as `dm_control` reports them.
@@ -165,7 +120,7 @@ def link_orientations(env: ManagerBasedRlEnv, arm_cfg: SceneEntityCfg) -> torch.
         The horizontal then vertical components `(num_envs, 4)`
     """
     asset: Entity = env.scene[arm_cfg.name]
-    body_ids = _resolved_ids(arm_cfg.body_ids, 2, "body")
+    body_ids = resolved_ids(arm_cfg.body_ids, 2, "body")
     quat = asset.data.body_link_quat_w[:, body_ids]
     w, x, y, z = quat.unbind(-1)
 
@@ -198,8 +153,8 @@ def tip_to_target(
         The Euclidean distance `(num_envs,)`
     """
     asset: Entity = env.scene[tip_cfg.name]
-    tip = asset.data.site_pos_w[:, _resolved_ids(tip_cfg.site_ids, 1, "site")[0]]
-    target = asset.data.site_pos_w[:, _resolved_ids(target_cfg.site_ids, 1, "site")[0]]
+    tip = asset.data.site_pos_w[:, resolved_ids(tip_cfg.site_ids, 1, "site")[0]]
+    target = asset.data.site_pos_w[:, resolved_ids(target_cfg.site_ids, 1, "site")[0]]
 
     return torch.linalg.norm(target - tip, dim=-1)
 
