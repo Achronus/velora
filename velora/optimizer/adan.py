@@ -75,14 +75,14 @@ class Adan(Optimizer):
             if not 0.0 <= beta < 1.0:
                 raise ValueError(f"'betas[{i}]' must be in '[0.0, 1.0)', got '{beta}'")
 
-        defaults = dict(
-            lr=lr,
-            betas=betas,
-            eps=eps,
-            weight_decay=weight_decay,
-            max_grad_norm=max_grad_norm,
-            no_prox=no_prox,
-        )
+        defaults = {
+            "lr": lr,
+            "betas": betas,
+            "eps": eps,
+            "weight_decay": weight_decay,
+            "max_grad_norm": max_grad_norm,
+            "no_prox": no_prox,
+        }
         super().__init__(params, defaults)
 
     def __setstate__(self, state: dict[str, Any]) -> None:
@@ -98,7 +98,7 @@ class Adan(Optimizer):
             Unpickled optimizer state.
         """
 
-        super(Adan, self).__setstate__(state)
+        super().__setstate__(state)
 
         for group in self.param_groups:
             group.setdefault("no_prox", False)
@@ -212,25 +212,25 @@ class Adan(Optimizer):
             if not params_with_grad:
                 continue
 
-            kwargs = dict(
-                params=params_with_grad,
-                grads=grads,
-                exp_avgs=exp_avgs,
-                exp_avg_sqs=exp_avg_sqs,
-                exp_avg_diffs=exp_avg_diffs,
-                neg_pre_grads=neg_pre_grads,
-                beta1=beta1,
-                beta2=beta2,
-                beta3=beta3,
-                bias_correction1=bias_correction1,
-                bias_correction2=bias_correction2,
-                bias_correction3_sqrt=math.sqrt(bias_correction3),
-                lr=group["lr"],
-                weight_decay=group["weight_decay"],
-                eps=group["eps"],
-                no_prox=group["no_prox"],
-                clip_global_grad_norm=clip_global_grad_norm,
-            )
+            kwargs = {
+                "params": params_with_grad,
+                "grads": grads,
+                "exp_avgs": exp_avgs,
+                "exp_avg_sqs": exp_avg_sqs,
+                "exp_avg_diffs": exp_avg_diffs,
+                "neg_pre_grads": neg_pre_grads,
+                "beta1": beta1,
+                "beta2": beta2,
+                "beta3": beta3,
+                "bias_correction1": bias_correction1,
+                "bias_correction2": bias_correction2,
+                "bias_correction3_sqrt": math.sqrt(bias_correction3),
+                "lr": group["lr"],
+                "weight_decay": group["weight_decay"],
+                "eps": group["eps"],
+                "no_prox": group["no_prox"],
+                "clip_global_grad_norm": clip_global_grad_norm,
+            }
 
             _multi_tensor_adan(**kwargs)
 
