@@ -13,62 +13,39 @@
 # limitations under the License.
 # ==============================================================================
 
-
 from dataclasses import dataclass
 
 import torch
 
+from velora.buffer.base import BufferBase, ExperienceBatch
 
-@dataclass
-class RolloutBatch:
+
+@dataclass(frozen=True)
+class RolloutBatch(ExperienceBatch):
     """
-    A batch of experience covering a full rollout.
+    A batch of experience for a full rollout.
 
     Parameters
     ----------
     obs : torch.Tensor
-        The observations `(capacity, n_envs, *obs_shape)`
+        The environment observations `(capacity, n_envs, *obs_shape)`
     actions : torch.Tensor
         The agent actions `(capacity, n_envs, *act_shape)`
-    log_probs : torch.Tensor
-        The log probabilities of the actions `(capacity, n_envs)`
     rewards : torch.Tensor
         The rewards received from the environments `(capacity, n_envs)`
     dones : torch.Tensor
         The environment completion flags `(capacity, n_envs)`
+    log_probs : torch.Tensor
+        The log probabilities of the actions `(capacity, n_envs)`
     values : torch.Tensor
         The critic's state-value estimates `(capacity, n_envs)`
     """
 
-    obs: torch.Tensor
-    actions: torch.Tensor
     log_probs: torch.Tensor
-    rewards: torch.Tensor
-    dones: torch.Tensor
     values: torch.Tensor
 
-    def flatten(self) -> "RolloutBatch":
-        """
-        Merges the batch's time and environment dimensions, converting
-        each tensor from `(capacity, n_envs, *shape)` to
-        `(capacity * n_envs, *shape)` ready for mini-batch sampling.
 
-        Returns
-        -------
-        rollout : RolloutBatch
-            A new flattened batch of the same data
-        """
-        return RolloutBatch(
-            obs=self.obs.flatten(0, 1),
-            actions=self.actions.flatten(0, 1),
-            log_probs=self.log_probs.flatten(0, 1),
-            rewards=self.rewards.flatten(0, 1),
-            dones=self.dones.flatten(0, 1),
-            values=self.values.flatten(0, 1),
-        )
-
-
-class RolloutBuffer:
+class RolloutBuffer(BufferBase):
     """
     A buffer to store rollouts of experience.
 
@@ -95,8 +72,7 @@ class RolloutBuffer:
         *,
         device: torch.device,
     ) -> None:
-        self.device = device
-        self.capacity = capacity
+        super().__init__(capacity, device=device)
 
         self.obs = torch.zeros((capacity, n_envs) + obs_shape).to(device)
         self.actions = torch.zeros((capacity, n_envs) + act_shape).to(device)
@@ -104,8 +80,6 @@ class RolloutBuffer:
         self.rewards = torch.zeros((capacity, n_envs)).to(device)
         self.dones = torch.zeros((capacity, n_envs)).to(device)
         self.values = torch.zeros((capacity, n_envs)).to(device)
-
-        self._position = 0
 
     def add(
         self,
@@ -122,7 +96,7 @@ class RolloutBuffer:
         Parameters
         ----------
         obs : torch.Tensor
-            A batch of observations `(n_envs, *obs_shape)`
+            A batch of environment observations `(n_envs, *obs_shape)`
         actions : torch.Tensor
             A batch of agent actions `(n_envs, *act_shape)`
         log_probs : torch.Tensor
@@ -139,7 +113,7 @@ class RolloutBuffer:
         buffer_full : ValueError
             Error when buffer has reached capacity
         """
-        if self._position >= self.capacity:
+        if self.full:
             raise ValueError("Buffer is already full.")
 
         self.obs[self._position] = obs
@@ -150,8 +124,9 @@ class RolloutBuffer:
         self.values[self._position] = values
 
         self._position += 1
+        self._size += 1
 
-    def get(self) -> RolloutBatch:
+    def sample(self) -> RolloutBatch:
         """
         Retrieve all samples from the buffer as a batch of experience.
 
@@ -187,6 +162,3 @@ class RolloutBuffer:
         self.values.zero_()
 
         self._position = 0
-
-    def __len__(self) -> int:
-        return self._position
