@@ -28,7 +28,7 @@ classifiers = [
 dependencies = ["torch==2.11.0", "torchvision==0.26.0", "wandb>=0.26.1"]
 
 [project.optional-dependencies]
-mjlab = ["mjlab>=1.5.3"]
+mjlab = ["mjlab==1.6.0"]
 isaac = ["isaaclab[all,isaacsim]==3.0.0b2.post1", "tinyobjloader==2.0.0rc13"]
 
 [project.urls]
@@ -39,7 +39,6 @@ issues = "https://github.com/Achronus/velora/issues"
 [dependency-groups]
 dev = ["pytest>=8.3.0"]
 docs = ["mkdocs>=1.6.1", "mkdocs-material==9.7.7", "mkdocstrings-python==2.0.5"]
-skrl = ["skrl>=2.1.0"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
