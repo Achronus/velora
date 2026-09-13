@@ -17,14 +17,13 @@
 import torch
 from torch import nn
 
-from velora.nn.ppo.networks.base import ActorCritic
-from velora.nn.ppo.utils import layer_init
+from velora.nn.utils import layer_init
 
 
-class MLPActorCritic(ActorCritic):
+class MLPActorCritic(nn.Module):
     """
-    A Multi-Layer Perceptron (MLP) Actor-Critic from
-    [CleanRL - PPO](https://docs.cleanrl.dev/rl-algorithms/ppo/#ppo_continuous_actionpy).
+    A Multi-Layer Perceptron (MLP) Actor-Critic from handling
+    continuous action spaces.
 
     Parameters
     ----------
