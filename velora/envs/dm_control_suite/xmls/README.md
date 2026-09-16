@@ -1,0 +1,81 @@
+# DM Control Suite XMLs
+
+## Provenance and License
+
+The MJCF files in this directory (including `common/`) are copied from
+[google-deepmind/mujoco_playground](https://github.com/google-deepmind/mujoco_playground),
+path `mujoco_playground/_src/dm_control_suite/xmls/`, at commit
+[`4057c14`](https://github.com/google-deepmind/mujoco_playground/tree/4057c147714b6ac09b395377f1a1724bbeacc4d3/mujoco_playground/_src/dm_control_suite/xmls).
+Those files are in turn derived from
+[google-deepmind/dm_control](https://github.com/google-deepmind/dm_control)
+(`dm_control/suite/`).
+
+Both upstream projects are licensed under the Apache License, Version 2.0.
+A copy of the license is provided in the [`LICENSE`](../../../../LICENSE) file.
+
+### Modifications in this port
+
+The XMLs are otherwise unmodified from the MuJoCo Playground commit above.
+Any changes made for this port are listed here:
+
+* None.
+
+### Runtime note
+
+In MuJoCo Playground, each environment's Python config sets
+`model.opt.timestep = sim_dt`, overriding the `timestep` in the XML. The
+effective simulation timestep is therefore the config's `sim_dt`, which does
+not always match the XML or the table below (e.g. `walker` runs at
+`sim_dt=0.0025`). This port applies `sim_dt` and `ctrl_dt` from the
+corresponding Playground configs.
+
+---
+
+The section below is reproduced from the upstream MuJoCo Playground README.
+
+## XML Changes Compared to DM Control
+
+Several changes are made to DM Control envs for them to be performant on XPU, although changes are kept to a minimum. For all envs, we disable `eulerdamp` and reduce solver `iterations` and `ls_iterations`. For a few envs, we increase the simulator timestep, and set `max_contact_points` and `max_geom_pairs` for contact culling. The full set of changes are listed below:
+
+* acrobot
+  * `iterations`="2", `ls_iterations`="4`
+* ball_in_cup
+  * `iterations`="1", `ls_iterations`="4"
+* cartpole
+  * `iterations`="1", `ls_iterations`="4"
+* cheetah
+  * `iterations`="4", `ls_iterations`="8"
+  * `max_contact_points`=6, `max_geom_pairs`=4
+* finger
+  * `iterations`="2", `ls_iterations`="8"
+  * `max_contact_points`=4, `max_geom_pairs`=2
+  * change cylinder contype/conaffinity to 0
+* fish
+  * `iterations`="2", `ls_iterations`="6"
+  * contacts disabled
+* hopper
+  * `iterations`="4", `ls_iterations`="8"
+  * `max_contact_points`=6, `max_geom_pairs`=2
+* humanoid
+  * Removed touch sensors
+  * `timestep`="0.005" compared to 0.0025 in DM Control
+  * `max_contact_points`=8, `max_geom_pairs`=8
+* manipulator
+  * `timestep`="0.005" from "0.002" in DM Control
+  * `max_contact_points`=8, `max_geom_pairs`=8
+* pendulum
+  * `timestep`="0.01" compared to "0.02" in DM Control
+  * `iterations`="4", `ls_iterations`="8"
+* point_mass
+  * `iterations`="1", `ls_iterations`="4"
+* reacher
+  * `timestep`="0.005" from "0.02" in DM Control
+  * `iterations`="1", `ls_iterations`="6"
+* swimmer
+  * `timestep`="0.003" from "0.002" in DM Control
+  * `iterations`="4", `ls_iterations`="8"
+  * geom `contype`/`conaffinity` set to zero, since contacts are disabled
+* walker
+  * `timestep`="0.005", from "0.0025" in DM Control
+  * `iterations`="2", `ls_iterations`="5"
+  * `max_contact_points`=4, `max_geom_pairs`=4
