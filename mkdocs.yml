@@ -42,63 +42,13 @@ nav:
   - Velora: index.md
   - Getting Started:
       - Getting Started: starting/index.md
-      - Roadmap: starting/roadmap.md
       - Appreciation: starting/homage.md
       - Brief History & Motivation: starting/history.md
-      - License: starting/license.md
-  - Learn:
-      - User Guide - Tutorials:
-          - User Guide - Tutorials: learn/tutorial/index.md
-          - Agent Basics: learn/tutorial/agent.md
-          - Callbacks: learn/tutorial/callback.md
-          - Saving & Loading Models: learn/tutorial/save.md
-          - Agents:
-              - Agents: learn/tutorial/agents/index.md
-              - NeuroFlow - Discrete: learn/tutorial/agents/nf.md
-              - NeuroFlow - Continuous: learn/tutorial/agents/nf-ct.md
-          - Training Metrics: learn/tutorial/metrics.md
-          - Gymnasium: learn/tutorial/gym.md
-          - Utilities: learn/tutorial/utils.md
-      - Customization:
-          - Customization: learn/customize/index.md
-          - Wiring: learn/customize/wiring.md
-          - Liquid Networks: learn/customize/liquid.md
-          - Buffers: learn/customize/buffers.md
-          - Modules:
-            - Modules: learn/customize/modules/index.md
-            - Actor: learn/customize/modules/actor.md
-            - Critic: learn/customize/modules/critic.md
-            - Entropy: learn/customize/modules/entropy.md
-          - Backbones: learn/customize/backbone.md
-      - Theory:
-          - Theory: learn/theory/index.md
-          - Liquid Neural Networks: learn/theory/lnn.md
-      - API Reference:
-          - API Reference: learn/reference/index.md
-          - models: 
-            - activation: learn/reference/models/activation.md
-            - backbone: learn/reference/models/backbone.md
-            - base: learn/reference/models/base.md
-            - config: learn/reference/models/config.md
-            - lnn: learn/reference/models/lnn.md
-            - nf: learn/reference/models/nf.md
-            - modules: learn/reference/models/modules.md
-            - sac: learn/reference/models/sac.md
-          - buffer: learn/reference/buffer.md
-          - callbacks: learn/reference/callbacks.md
-          - gymnasium: learn/reference/gym.md
-          - metrics: learn/reference/metrics.md
-          - state: learn/reference/state.md
-          - training: learn/reference/training.md
-          - utils: learn/reference/utils.md
-          - wiring: learn/reference/wiring.md
-  - Help: help.md
-  - Changelog:
-      - v0.2.0: changelog/v0.2.0.md
-      - v0.1.1: changelog/v0.1.1.md
-      - v0.0.3 (Beta): changelog/v0.0.3.md
-      - v0.0.2 (Beta): changelog/v0.0.2.md
-      - v0.0.1 (Alpha): changelog/v0.0.1.md
+  - Tutorials:
+      - Tutorials: tutorials/index.md
+  - API Reference:
+      - API Reference: api/index.md
+  - License: license.md
 
 extra:
   social:
