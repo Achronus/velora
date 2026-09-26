@@ -25,11 +25,7 @@ classifiers = [
     "Topic :: Software Development :: Libraries",
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
-dependencies = ["torch==2.11.0", "torchvision==0.26.0", "wandb>=0.26.1"]
-
-[project.optional-dependencies]
-mjlab = ["mjlab==1.6.0"]
-isaac = ["isaaclab[all,isaacsim]==3.0.0b2.post1", "tinyobjloader==2.0.0rc13"]
+dependencies = ["torch==2.14.0", "torchvision==0.29.0", "mujoco-warp==3.14.0"]
 
 [project.urls]
 repository = "https://github.com/Achronus/velora"
@@ -38,7 +34,7 @@ issues = "https://github.com/Achronus/velora/issues"
 
 [dependency-groups]
 dev = ["pytest>=8.3.0"]
-docs = ["mkdocs>=1.6.1", "mkdocs-material==9.7.7", "mkdocstrings-python==2.0.5"]
+docs = ["mkdocs>=1.6.1", "mkdocs-material==9.7.7", "mkdocstrings-python==2.0.9"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -49,17 +45,9 @@ stubPath = "typings"
 [tool.setuptools.packages.find]
 include = ["velora*"]
 
-[tool.uv]
-conflicts = [[{ extra = "mjlab" }, { extra = "isaac" }]]
-
 [[tool.uv.index]]
 name = "pytorch-cuda"
 url = "https://download.pytorch.org/whl/cu130"
-explicit = true
-
-[[tool.uv.index]]
-name = "nvidia"
-url = "https://pypi.nvidia.com"
 explicit = true
 
 [tool.uv.sources]
@@ -69,4 +57,3 @@ torch = [
 torchvision = [
     { index = "pytorch-cuda", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
 ]
-isaaclab = [{ index = "nvidia" }]
