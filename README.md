@@ -1,107 +1,106 @@
 ![Logo](https://raw.githubusercontent.com/Achronus/velora/main/docs/assets/imgs/main.jpg)
 
-[![codecov](https://codecov.io/gh/Achronus/velora/graph/badge.svg?token=OF7WP5Q9PT)](https://codecov.io/gh/Achronus/velora)
 ![Python Version](https://img.shields.io/pypi/pyversions/velora)
 ![License](https://img.shields.io/github/license/Achronus/velora)
-![Issues](https://img.shields.io/github/issues/Achronus/velora)
 
 Found on:
 
 - [PyPi](https://pypi.org/project/velora)
 - [GitHub](https://github.com/Achronus/velora)
 
+> 🚧 Velora is under active development and its API, documentation and examples may change overtime. 🚧
+
 # Velora
 
-**Velora** is a lightweight and modular framework built on top of powerful libraries like [Gymnasium](https://gymnasium.farama.org/) and [PyTorch](https://pytorch.org/). It is home to a new type of RL agent called ***NeuroFlow*** (NF) that specializes in Autonomous Cyber Defence through a novel Deep Reinforcement Learning (RL) approach we call ***Liquid RL***.
+**Velora** is a Reinforcement Learning (RL) research framework for exploring ways to build lightweight, adaptable, transparent and stateful agents that move away from the world of Large Language Models (LLMs).
 
-## Benefits
+By design, it focuses on tasks centred around robotics and continuous control problems to bring us closer to unlocking physical agents that are useful for real-world use cases.
 
-- **Explainability**: NF agents use [Liquid Neural Networks](https://arxiv.org/abs/2006.04439) (LNNs) and [Neural Circuit Policies](https://arxiv.org/abs/1803.08554) (NCPs) to model Cyber system dynamics, not just data patterns. Also, they use sparse NCP connections to mimic biological efficiency, enabling clear, interpretable strategies via a labeled Strategy Library.
-- **Adaptability**: NF agents dynamically grow their networks using a fitness score, adding more neurons to a backbone only when new Cyber strategies emerge, keeping agents compact and robust.
-- **Planning**: NF agents use a Strategy Library and learned environment model to plan strategic sequences for proactive Cyber defense.
-- **Always Learning**: using [EWC](https://arxiv.org/abs/1612.00796), NF agents refine existing strategies and learn new ones post-training, adapting to evolving Cyber threats like new attack patterns.
-- **Customizable**: NF agents are PyTorch-based, designed to be intuitive, easy to use, and modular so you can easily build your own!
+Built with PyTorch, it provides modular building blocks that plug into common RL agent algorithms (such as [PPO](https://arxiv.org/abs/1707.06347) and [TD3](https://arxiv.org/abs/1802.09477)) and environment backends like [MJWarp](https://mujoco.readthedocs.io/en/stable/mjwarp/index.html) and [Isaac Lab](https://isaac-sim.github.io/IsaacLab/main/index.html) for rapid iteration and experimentation.
+
+Velora is **not** a replacement for other popular RL libraries (such as [Stable Baselines3](https://sb3-contrib.readthedocs.io/en/master/index.html) or [RLlib](https://docs.ray.io/en/latest/rllib/index.html)) and is purely a framework for experimenting with unconventional models and techniques that have real potential.
+
+For more details on how it works and what's inside the framework, refer to our [documentation](https://velora.achronus.dev/).
+
+## Package versions
+
+| Package     | Version                                   |
+| ----------- | ----------------------------------------- |
+| Python      | `3.12`                                    |
+| PyTorch     | `2.11.0` (CUDA 13)                        |
+| TorchVision | `0.26.0`                                  |
+| Isaac Lab   | `3.0.0b2.post1` (optional, `isaac` extra) |
 
 ## Installation
 
-To get started, simply install it through [pip](https://pypi.org/project/velora) using one of the options below.
+Velora only supports Python 3.12.
 
-### GPU Enabled
+> [!NOTE]
+> The index configuration below only applies when installing Velora from PyPI. If you clone the repository and use `uv sync`, the CUDA 13 wheels are installed automatically.
 
-For [PyTorch](https://pytorch.org/get-started/locally/) with CUDA (recommended):
+### uv
+
+Configure the PyTorch index in your project's `pyproject.toml` first, so `torch` resolves to the CUDA 13 wheels:
+
+```toml
+[[tool.uv.index]]
+name = "pytorch-cuda"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cuda" }
+torchvision = { index = "pytorch-cuda" }
+```
+
+Then add the package:
 
 ```bash
-pip install torch torchvision velora --extra-index-url https://download.pytorch.org/whl/cu126
+uv add velora
 ```
 
-### CPU Only
+> [!TIP]
+> Already ran `uv add velora`? Add the configuration above, then run `uv sync` to re-resolve against the new index.
 
-Or, for [PyTorch](https://pytorch.org/get-started/locally/) with CPU only:
+### pip
 
 ```bash
-pip install torch torchvision velora
+pip install velora
 ```
 
-## Example Usage
+This installs PyTorch from PyPI's standard wheels. For the CUDA 13 builds, add the PyTorch `cu130` index:
 
-Here's a simple example that should work 'as is':
-
-```python
-from velora.models import NeuroFlow, NeuroFlowCT
-from velora.utils import set_device
-
-# Setup PyTorch device
-device = set_device()
-
-# For continuous tasks
-model = NeuroFlowCT(
-    "InvertedPendulum-v5",
-    20,  # actor neurons 
-    128,  # critic neurons
-    device=device,
-    seed=64,  # remove for automatic generation
-)
-
-# For discrete tasks
-model = NeuroFlow(
-    "CartPole-v1",
-    20,  # actor neurons 
-    128,  # critic neurons
-    device=device,
-)
-
-# Train the model using a batch size of 64
-model.train(64, n_episodes=50, display_count=10)
+```bash
+pip install velora --extra-index-url https://download.pytorch.org/whl/cu130
 ```
 
-Currently, the framework only supports [Gymnasium](https://gymnasium.farama.org/) environments and is planned to expand to [PettingZoo](https://pettingzoo.farama.org/index.html) for Multi-agent (MARL) tasks, with updated adaptations of [CybORG](https://github.com/cage-challenge/CybORG/tree/main) environments.
+## Simulation (Isaac Lab)
 
-## API Structure
+Isaac Lab and Isaac Sim are optional and require a NVIDIA GPU. Install them with the `isaac` extra.
 
-The frameworks API is designed to be simple and intuitive. We've broken into two main categories: `core` and `extras`.
+### uv
 
-### Core
+Add the NVIDIA index to your project's `pyproject.toml` alongside the PyTorch one:
 
-The primary building blocks you'll use regularly.
+```toml
+[[tool.uv.index]]
+name = "nvidia"
+url = "https://pypi.nvidia.com"
+explicit = true
 
-```python
-from velora.models import [algorithm]
-from velora.callbacks import [callback]
+[tool.uv.sources]
+isaacsim = { index = "nvidia" }
+isaaclab = { index = "nvidia" }
 ```
 
-### Extras
+Then add the extra:
 
-Utility methods that you may use occasionally.
-
-```python
-from velora.gym import [method]
-from velora.utils import [method]
+```bash
+uv add "velora[isaac]"
 ```
 
-## Active Development
+### pip
 
-🚧 View the [Roadmap](https://velora.achronus.dev/starting/roadmap) 🚧
-
-**Velora** is a tool that is continuously being developed. There's still a lot to do to make it a great framework, such as detailed API documentation, and expanding our NeuroFlow agents.
-
-Our goal is to provide a quality open-source product that works 'out-of-the-box' that everyone can experiment with, and then gradually fix unexpected bugs and introduce more features on the road to a `v1` release.
+```bash
+pip install "velora[isaac]" --extra-index-url https://download.pytorch.org/whl/cu130 --extra-index-url https://pypi.nvidia.com
+```
