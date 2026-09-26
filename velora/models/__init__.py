@@ -1,9 +1,15 @@
-from velora.models.lnn import LiquidNCPNetwork, NCPNetwork
-from velora.models.nf import NeuroFlowCT, NeuroFlow
+from velora.models.mlp import MLPActorCritic
+from velora.models.sparse import (
+    SparseActor,
+    SparseCritic,
+    SparseGatedActor,
+    SparseGatedCritic,
+)
 
 __all__ = [
-    "LiquidNCPNetwork",
-    "NCPNetwork",
-    "NeuroFlowCT",
-    "NeuroFlow",
+    "MLPActorCritic",
+    "SparseActor",
+    "SparseCritic",
+    "SparseGatedActor",
+    "SparseGatedCritic",
 ]
