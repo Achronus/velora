@@ -1,5 +1,5 @@
-from velora.models.mlp import MLPActorCritic
-from velora.models.sparse import (
+from velora.model.mlp import MLPActorCritic
+from velora.model.sparse import (
     SparseActor,
     SparseCritic,
     SparseGatedActor,
