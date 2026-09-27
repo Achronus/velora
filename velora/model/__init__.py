@@ -1,4 +1,5 @@
-from velora.model.mlp import MLPActorCritic
+from velora.model.mlp import MLP_PPOActor, MLP_PPOCritic
+from velora.model.ppo import PPOActor, PPOCritic
 from velora.model.sparse import (
     SparseActor,
     SparseCritic,
@@ -7,7 +8,10 @@ from velora.model.sparse import (
 )
 
 __all__ = [
-    "MLPActorCritic",
+    "MLP_PPOActor",
+    "MLP_PPOCritic",
+    "PPOActor",
+    "PPOCritic",
     "SparseActor",
     "SparseCritic",
     "SparseGatedActor",

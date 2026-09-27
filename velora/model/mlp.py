@@ -16,14 +16,16 @@
 
 import torch
 from torch import nn
+from torch.distributions import Distribution, Independent, Normal
 
+from velora.model.ppo import PPOActor, PPOCritic
 from velora.nn.utils import layer_init
 
 
-class MLPActorCritic(nn.Module):
+class MLP_PPOActor(PPOActor):
     """
-    A Multi-Layer Perceptron (MLP) Actor-Critic from handling
-    continuous action spaces.
+    A basic Gaussian MLP actor for PPO with continuous action spaces.
+    Has 3 linear layers that use the same `hidden_size`.
 
     Parameters
     ----------
@@ -32,8 +34,7 @@ class MLPActorCritic(nn.Module):
     out_features : int
         Number of output features
     hidden_size : int (optional)
-        The number of hidden nodes in the actor and critic MLPs.
-        Default is `64`
+        The number of hidden nodes per layer. Default is `64`
     """
 
     def __init__(
@@ -45,45 +46,43 @@ class MLPActorCritic(nn.Module):
     ) -> None:
         super().__init__()
 
-        self.critic = nn.Sequential(
-            layer_init(nn.Linear(in_features, hidden_size)),
-            nn.Tanh(),
-            layer_init(nn.Linear(hidden_size, hidden_size)),
-            nn.Tanh(),
-            layer_init(nn.Linear(hidden_size, 1), std=1.0),
-        )
-        self.actor_mean = nn.Sequential(
+        self.mean = nn.Sequential(
             layer_init(nn.Linear(in_features, hidden_size)),
             nn.Tanh(),
             layer_init(nn.Linear(hidden_size, hidden_size)),
             nn.Tanh(),
             layer_init(nn.Linear(hidden_size, out_features), std=0.01),
         )
-        self.actor_logstd = nn.Parameter(torch.zeros(1, out_features))
+        self.log_std = nn.Parameter(torch.zeros(out_features))
 
-    def forward(
-        self,
-        x: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """
-        Computes the policy's distribution parameters and the critic's
-        state-value estimate for a batch of observations.
+    def forward(self, obs: torch.Tensor) -> Distribution:
+        mean = self.mean(obs)
+        return Independent(Normal(mean, self.log_std.exp()), 1)
 
-        Parameters
-        ----------
-        x : torch.Tensor
-            A batch of observations `(batch_size, in_features)`
 
-        Returns
-        -------
-        action_mean : torch.Tensor
-            The action means `(batch_size, out_features)`
-        log_std : torch.Tensor
-            The action log standard deviations
-            `(batch_size, out_features)`
-        value : torch.Tensor
-            The critic's state-value estimates `(batch_size, 1)`
-        """
-        action_mean: torch.Tensor = self.actor_mean(x)
-        log_std = self.actor_logstd.expand_as(action_mean)
-        return action_mean, log_std, self.critic(x)
+class MLP_PPOCritic(PPOCritic):
+    """
+    A basic MLP state-value critic for PPO. Has 3 linear layers
+    that use the same `hidden_size`.
+
+    Parameters
+    ----------
+    in_features : int
+        Number of input features
+    hidden_size : int (optional)
+        The number of hidden nodes per layer. Default is `64`
+    """
+
+    def __init__(self, in_features: int, *, hidden_size: int = 64) -> None:
+        super().__init__()
+
+        self.net = nn.Sequential(
+            layer_init(nn.Linear(in_features, hidden_size)),
+            nn.Tanh(),
+            layer_init(nn.Linear(hidden_size, hidden_size)),
+            nn.Tanh(),
+            layer_init(nn.Linear(hidden_size, 1), std=1.0),
+        )
+
+    def forward(self, obs: torch.Tensor) -> torch.Tensor:
+        return self.net(obs)
