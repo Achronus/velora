@@ -36,6 +36,7 @@ class RLSpace(ABC):
         self,
         shape: tuple[int, ...],
         dtype: torch.dtype,
+        *,
         device: torch.device | str = "cuda",
     ) -> None:
         self.shape = shape

@@ -217,7 +217,7 @@ class BoxSpace(RLSpace):
         high_t = torch.as_tensor(high, dtype=dtype, device=device)
         shape = shape or tuple(torch.broadcast_shapes(low_t.shape, high_t.shape))
 
-        super().__init__(shape, dtype, device)
+        super().__init__(shape, dtype, device=device)
 
         self._low = low_t.expand(shape).clone()
         self._high = high_t.expand(shape).clone()
