@@ -25,7 +25,7 @@ class RLSpace(ABC):
     Parameters
     ----------
     shape : tuple[int, ...]
-        Shape of a single (unbatched) element
+        Shape of the space
     dtype : torch.dtype
         Element dtype
     device : torch.device | str (optional)
@@ -88,3 +88,71 @@ class RLSpace(ABC):
 
         """
         ...
+
+
+class BatchedSpace[SpaceT: RLSpace]:
+    """
+    A space describing `num_envs` parallel copies of a single
+    environment space.
+
+    Parameters
+    ----------
+    single : SpaceT
+        Space describing one environment
+    num_envs : int
+        Number of parallel environments
+    """
+
+    def __init__(self, single: SpaceT, num_envs: int) -> None:
+        self._single = single
+
+        self.num_envs = num_envs
+        self.shape = (num_envs, *single.shape)
+
+    @property
+    def single_space(self) -> SpaceT:
+        """The unbatched space describing one environment."""
+        return self._single
+
+    @property
+    def dtype(self) -> torch.dtype:
+        return self._single.dtype
+
+    @property
+    def device(self) -> torch.device:
+        return self._single.device
+
+    def sample(self, generator: torch.Generator | None = None) -> torch.Tensor:
+        """
+        Sample one element per environment.
+
+        Returns
+        -------
+        samples : torch.Tensor
+            Samples `(num_envs, *single.shape)`
+        """
+        return self._single.sample(self.num_envs, generator)
+
+    def contains(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Check each environment's element against the single space.
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            Batched elements `(num_envs, *single.shape)`
+
+        Returns
+        -------
+        mask : torch.Tensor
+            Per-environment membership `(num_envs,)`, `bool`
+
+        Raises
+        ------
+        invalid_shape : ValueError
+            If `x` doesn't have shape `(num_envs, *single.shape)`.
+        """
+        if tuple(x.shape) != self.shape:
+            raise ValueError(f"Expected shape '{self.shape}'. Got: '{tuple(x.shape)}'")
+
+        return self._single.contains(x)

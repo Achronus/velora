@@ -186,7 +186,7 @@ class BoxSpace(RLSpace):
     high : float | torch.Tensor
         Upper bound(s). Use `-inf` for unbounded higher
     shape : tuple[int, ...] (optional)
-        Shape of a single element. When `None`, inferred by
+        Shape of the space. When `None`, inferred by
         broadcasting `low` and `high`. Default is `None`
     dtype : torch.dtype (optional)
         FLoating point dtype. Default is `torch.float32`
