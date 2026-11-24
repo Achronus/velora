@@ -1,9 +1,10 @@
 site_name: Velora
 site_description: A Liquid Reinforcement Learning (RL) framework
 site_url: https://velora.achronus.dev/
+site_author: Achronus
+copyright: "&copy; 2026 Achronus"
 
 theme:
-  name: "material"
   language: en
   palette:
     scheme: slate
@@ -16,11 +17,10 @@ theme:
     - navigation.path
     - navigation.footer
     - toc.follow
-    - search.suggest
     - search.highlight
     - content.code.copy
     - content.code.annotate
-  logo: assets/imgs/logo.png
+  logo: favicon.png
   favicon: favicon.png
   icon:
     repo: fontawesome/brands/github
